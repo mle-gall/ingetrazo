@@ -39,23 +39,40 @@ def model(copies=True, geometry=False):
 
 @pytest.mark.parametrize('copies', [False, True])
 def test_explode_component_structure_preserves_placement_and_undo(copies):
+    """Left the way the app leaves, through the viewport: with copies, the
+    assembly's matrix comes back up out of its parts on leaving, and the
+    explode undoes inside the step that does it."""
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from views.main_window import MainWindow
     scene, parent, peer, target, child = model(copies)
-    before = [points(g) for g in scene.groups]
-    hist = History(scene)
-    hist.execute(ExplodeInContextCommand(parent, [target]))
-    assert hist.last_error is None and hist.last_rejected is None
-    assert parent.children == [child]
-    assert scene.selection == {child}
-    assert [points(g) for g in scene.groups] == before
-    if peer:
-        assert len(peer.children) == 1 and not peer.children[0].children
     scene.end_group_edit()
-    assert hist.undo()
-    assert parent.children == [target]
-    assert [points(g) for g in scene.groups] == before
-    assert hist.redo()
-    assert parent.children == [child]
-    assert [points(g) for g in scene.groups] == before
+    before = [points(g) for g in scene.groups]
+    win = MainWindow()
+    vp = win.viewport
+    vp.scene.groups[:] = scene.groups
+    vp.scene.version += 1
+    scene, hist = vp.scene, vp.history
+    try:
+        vp.begin_group_edit(parent)
+        scene.selection = {target}
+        hist.execute(ExplodeInContextCommand(parent, [target]))
+        assert hist.last_error is None and hist.last_rejected is None
+        assert parent.children == [child]
+        assert scene.selection == {child}
+        assert [points(g) for g in scene.groups] == before
+        if peer:
+            assert len(peer.children) == 1 and not peer.children[0].children
+        vp.end_group_edit()
+        assert hist.undo()
+        assert parent.children == [target]
+        assert [points(g) for g in scene.groups] == before
+        assert hist.redo()
+        assert parent.children == [child]
+        assert [points(g) for g in scene.groups] == before
+    finally:
+        win._saved_version = scene.version
+        win.close()
 
 
 def test_geometry_can_explode_inside_a_single_component():
