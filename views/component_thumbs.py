@@ -64,20 +64,38 @@ def _placements(definition, m=None, depth=0):
 def _signature(definition) -> tuple:
     """What the picture depends on: counts, a sampled coordinate sum and
     the paint of each piece. Cheap, and it changes when the geometry does."""
+    from core.mesh import DeferredMesh, face_count
+    from core.lazy_mesh import plan_of
+    from formats.igz import _face_attrs_from_json
     sig = []
+    measured = {}
     for mesh, m, paint in _placements(definition):
-        verts = mesh.vertices
-        step = max(1, len(verts) // _PROBE)
-        s = 0.0
-        for v in verts[::step]:
-            p = v.position
-            s += p.x() + p.y() * 1.000003 + p.z() * 1.000007
-        faces = mesh.faces
-        fstep = max(1, len(faces) // _PROBE)
-        colors = tuple(_paint_key(f.attrs) for f in faces[::fstep])
-        sig.append((id(mesh), len(verts), len(faces), round(s, 6),
-                    hash(colors), _paint_key(paint),
-                    tuple(m.data()) if m is not None else None))
+        own = measured.get(id(mesh))
+        if own is None:
+            nf = face_count(mesh)
+            fstep = max(1, nf // _PROBE)
+            if type(mesh) is DeferredMesh:
+                plan = plan_of(mesh)
+                nv = len(plan.pos)
+                step = max(1, nv // _PROBE)
+                coords = plan.pos[::step]
+                source = mesh.__dict__["_deferred_source"]
+                table = source["meta"].get("face_attrs") or []
+                paints = [_paint_key(_face_attrs_from_json(a)) for a in table]
+                colors = tuple(paints[int(k)] if k >= 0 else None
+                               for k in source["face_attr"][::fstep])
+                value = sum(float(x) + float(y)*1.000003 + float(z)*1.000007
+                            for x,y,z in coords)
+            else:
+                verts = mesh.vertices
+                nv = len(verts)
+                step = max(1, nv // _PROBE)
+                value = sum(v.position.x() + v.position.y()*1.000003
+                            + v.position.z()*1.000007 for v in verts[::step])
+                colors = tuple(_paint_key(f.attrs) for f in mesh.faces[::fstep])
+            own = measured[id(mesh)] = (id(mesh), nv, nf, round(value, 6), hash(colors))
+        sig.append(own + (_paint_key(paint),
+                          tuple(m.data()) if m is not None else None))
     return tuple(sig)
 
 
@@ -122,16 +140,46 @@ def thumbnail(definition, size: int = SIZE) -> QPixmap:
 
 
 def _draw(definition, size: int) -> QPixmap:
-    total = sum(len(mesh.faces) for mesh, _m, _p in _placements(definition))
+    from core.mesh import face_count, DeferredMesh
+    from core.lazy_mesh import plan_of
+    from formats.igz import _face_attrs_from_json
+    from PySide6.QtGui import QVector3D
+    import numpy as np
+    placements = list(_placements(definition))
+    total = sum(face_count(mesh) for mesh, _m, _p in placements)
     stride = max(1, math.ceil(total / MAX_FACES))
     polys = []                              # (depth, points2d, rgb, shade)
     k = 0
-    for mesh, m, paint in _placements(definition):
-        for f in mesh.faces:
-            k += 1
-            if k % stride:
-                continue
-            pts = [v.position for v in f.loop]
+    plans = {}
+    for mesh, m, paint in placements:
+        nf = face_count(mesh)
+        indices = range((-k - 1) % stride, nf, stride)
+        k += nf
+        if not indices:
+            continue
+        lazy = type(mesh) is DeferredMesh
+        if lazy:
+            data = plans.get(id(mesh))
+            if data is None:
+                plan = plan_of(mesh)
+                first = np.concatenate([[0], np.cumsum(plan.ring_counts[:-1])])
+                starts = np.concatenate([[0], np.cumsum(plan.ring_sizes[:-1])])
+                source = mesh.__dict__["_deferred_source"]
+                table = [_face_attrs_from_json(a) for a in
+                         source["meta"].get("face_attrs") or []]
+                data = plans[id(mesh)] = (plan, first, starts, source, table)
+            plan, first, starts, source, table = data
+        for i in indices:
+            if lazy:
+                r = first[i]
+                corners = plan.corners[starts[r]:starts[r] + plan.ring_sizes[r]]
+                pts = [QVector3D(*map(float, p)) for p in plan.pos[corners]]
+                key = int(source["face_attr"][i])
+                attrs = table[key] if key >= 0 else {}
+            else:
+                f = mesh.faces[i]
+                pts = [v.position for v in f.loop]
+                attrs = f.attrs
             if len(pts) < 3:
                 continue
             if m is not None:
@@ -145,7 +193,7 @@ def _draw(definition, size: int) -> QPixmap:
                   for p in pts]
             depth = sum(p.x() * _E[0] + p.y() * _E[1] + p.z() * _E[2]
                         for p in pts) / len(pts)
-            polys.append((depth, xy, _rgb(f.attrs, paint), lam))
+            polys.append((depth, xy, _rgb(attrs, paint), lam))
     pm = QPixmap(size, size)
     pm.fill(Qt.transparent)
     if not polys:

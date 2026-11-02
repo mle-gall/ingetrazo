@@ -51,7 +51,7 @@ def test_the_tape_records_the_foliage_mark_for_the_native_replay():
                                 viewport.AO_FOLIAGE_BIT, 0xFF)
     # GlReplay takes the entry points in opcode order.
     assert viewport._TAPE_FUNCS[tape.STENCIL] == b"glStencilFunc"
-    assert len(viewport._TAPE_FUNCS) == tape.STENCIL + 1
+    assert len(viewport._TAPE_FUNCS) == tape.DRAW_INDEXED + 1
 
 
 def _lum(img: QImage) -> np.ndarray:

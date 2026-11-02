@@ -1354,8 +1354,6 @@ def _adapt_inner(model, name: str, skp_path=None, *, consume=False):
     adaptation must be reparsed. The default leaves caller models reusable.
     ``skp_path`` anchors where extracted texture images land; the material
     joins are guarded so PyPI 0.2.0 still imports (uncoloured)."""
-    from formats.dae import _INST_MIN_POLYS, _INST_MIN_SAVED
-
     defs = getattr(model, "definitions", {}) or {}
     attr_map, materials = _material_attrs(model, skp_path or name)
     global _hidden_tags
@@ -1391,135 +1389,34 @@ def _adapt_inner(model, name: str, skp_path=None, *, consume=False):
 
     # Shared-prototype census over the reachable tree.
     uses: dict = {}
-    memo: dict = {}
     for r in roots:
         _census(r, by_id, uses, 0, set())
-    def _subtree_has_faceme(d, stack=frozenset()):
-        if getattr(d, "is_image", False) or \
-                getattr(d, "always_faces_camera", False):
-            return True
-        if id(d) in stack:
-            return False
-        for ins in getattr(d, "instances", []):
-            c = by_id.get(getattr(ins, "ref_idx", None))
-            if c is not None and _subtree_has_faceme(c, stack | {id(d)}):
-                return True
-        return False
-
-    def _subtree_has_tagged(d, stack=frozenset()):
-        if id(d) in stack:
-            return False
-        for ins in getattr(d, "instances", []):
-            if getattr(ins, "layer", ""):
-                return True
-            c = by_id.get(getattr(ins, "ref_idx", None))
-            if c is not None and _subtree_has_tagged(c, stack | {id(d)}):
-                return True
-        return False
-
-    def _shareable(d) -> bool:
-        # Face-me-carrying subtrees (images, face-camera components) are
-        # excluded from sharing: each copy's billboard needs its own world
-        # spot. Tagged-instance-carrying subtrees too: each copy's tagged
-        # subtree must extract as its own layer group (the tagged child
-        # itself usually re-shares one level down, with per-placement
-        # layers).
-        return not (_subtree_has_faceme(d) or _subtree_has_tagged(d))
-
-    proto_ids = set()
-    for did, cnt in uses.items():
-        d = by_id.get(did)
-        if d is None or cnt < 2 or not _shareable(d):
-            continue
-        polys = _subtree_polys(d, by_id, memo, set())
-        if polys >= _INST_MIN_POLYS and polys * (cnt - 1) >= _INST_MIN_SAVED:
-            proto_ids.add(did)
-    # A definition placed ONCE is still a definition. The thresholds above ask
-    # "does sharing this save memory", which is the wrong question for a
-    # component placed a single time: the answer is no, and the model's
-    # structure is lost for it — the library pieces in Marco's pool (the
-    # barbecue, the pool itself) are component definitions in the .skp and
-    # arrived as flat groups, with their placement matrix baked into the
-    # vertices. Keeping the placement means the group knows its own axes (the
-    # selection box has real ones to draw instead of derived), and Move,
-    # Rotate and copy take the O(1) instance paths.
+    # Every definition the file places is a definition here too: ONE
+    # prototype, each placement a child of the prototype that places it, with
+    # its own matrix, tag and name. That is the file's own tree, which is what
+    # a model made of assemblies is read by: parts inside the sub-assembly
+    # inside the assembly they belong to, however deep.
     #
-    # Starting where the definition is placed at the TOP level, and going
-    # down from there through every definition placed ONCE: a prototype
-    # keeps the prototypes it places as ``children`` (see ``_build_proto``),
-    # so the file's own nesting — «geometries» holding «closed» holding a
-    # circle and a rectangle — arrives as nested groups instead of flattened
-    # into the outermost one. A ``cnt == 1`` definition is placed exactly
-    # once, so promoting it can only keep it inside its parent, never pull it
-    # out next to it. Shared definitions below the sharing thresholds still
-    # flatten into what holds them, as before.
+    # Sharing thresholds asked "does this save memory" and flattened whatever
+    # answered no into what held it. Once a container was flattened, every
+    # prototype below it was hoisted to the top level with its world matrix: a
+    # file of a few dozen root instances, nested nine deep, arrived as
+    # thousands of loose objects. Nesting costs no geometry, a placement is
+    # one matrix over a mesh built once; flattening duplicated the faces once
+    # per placement.
     #
-    # Tagged placements inside are no reason to flatten any more: a
-    # prototype's children carry their own tag, so hiding it hides them
-    # whole. They only must not be flattened into the parent's mesh, where
-    # a tag survives as a per-face one the renderer does not filter — so a
-    # tagged placement, and a shared definition with tagged placements
-    # inside, becomes a prototype too. «01_EG» (walls, doors and furniture
-    # in subgroups on their own tags) arrived as one flat mesh.
-    def _promote_nested(d, stack=frozenset()):
-        if id(d) in stack:
-            return
-        for ins in getattr(d, "instances", []):
-            c = by_id.get(getattr(ins, "ref_idx", None))
-            if c is None or getattr(c, "is_image", False) or \
-                    getattr(c, "always_faces_camera", False):
-                continue
-            if uses.get(getattr(c, "id", None)) == 1:
-                proto_ids.add(c.id)
-            elif ((getattr(ins, "layer", "") or _subtree_has_tagged(c))
-                    and not _subtree_has_faceme(c)):
-                proto_ids.add(c.id)
-            _promote_nested(c, stack | {id(d)})
-
-    for r in roots:
-        for ins in getattr(r, "instances", []):
-            child = by_id.get(getattr(ins, "ref_idx", None))
-            if child is None or uses.get(getattr(child, "id", None)) != 1:
-                continue
-            if getattr(child, "is_image", False) or \
-                    getattr(child, "always_faces_camera", False):
-                continue
-            proto_ids.add(child.id)
-            _promote_nested(child)
+    # Images and "always face camera" components stay out: each leaves its
+    # holder for a billboard or panel of its own (see ``_expand_images``).
+    proto_ids = {did for did in uses
+                 if (d := by_id.get(did)) is not None
+                 and not getattr(d, "is_image", False)
+                 and not getattr(d, "always_faces_camera", False)}
     # Which definitions the file places as GROUPS, not components (see
     # openskp_compat): they import as groups.
     from formats import openskp_compat
     openskp_compat.note_model_kinds(model)
     single_groups = {did for did in openskp_compat.group_definitions()
                      if uses.get(did) == 1}
-    # A COMPONENT copied side by side at the top level is a component however
-    # small (#1029: six 6-face shelves of one definition arrived as six
-    # loose groups, so the file's components read as groups). The sharing
-    # thresholds above guard against a tiny part repeated inside a parent
-    # turning into hundreds of child objects; at the top level every copy is
-    # its own object either way, so sharing its mesh adds none. Only when
-    # the parse told groups from components, and only definitions placed
-    # nowhere else — a nested copy would be pulled out of its parent.
-    if openskp_compat.kinds_known(legacy_era):
-        group_ids = openskp_compat.group_definitions()
-        top_uses: dict = {}
-        for r in roots:
-            for ins in getattr(r, "instances", []):
-                cid = getattr(by_id.get(getattr(ins, "ref_idx", None)),
-                              "id", None)
-                if cid is not None:
-                    top_uses[cid] = top_uses.get(cid, 0) + 1
-        for cid, n in top_uses.items():
-            if n < 2 or uses.get(cid) != n or cid in group_ids \
-                    or cid in proto_ids:
-                continue
-            child = by_id[cid]
-            if getattr(child, "is_image", False) or \
-                    getattr(child, "always_faces_camera", False) \
-                    or not _shareable(child):
-                continue
-            proto_ids.add(cid)
-
     # An owned model may drop raw geometry as it is copied, but images are
     # placed last, after every prototype exists. So settle each image's
     # attachment test first and keep what that last step still reads. A graph

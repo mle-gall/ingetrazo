@@ -390,3 +390,108 @@ def test_the_browser_reads_only_the_rows_a_group_opened_or_closed_changes():
     finally:
         win._saved_version = vp.scene.version
         win.close()
+
+
+def test_nested_render_rows_reuse_siblings_and_invalidate_ancestors(vp, monkeypatch):
+    from core.group import Group
+    sc = vp.scene
+    parent = Group(name="assembly")
+    parent.adopt(sc.groups[:24])
+    sc.groups = [parent]
+    sc.version += 1
+    _tables(vp)
+    original = vp._placement_bbox
+    measured = []
+    def box(g):
+        measured.append(id(g))
+        return original(g)
+    monkeypatch.setattr(vp, '_placement_bbox', box)
+    sc.begin_group_edit(parent)
+    kept = _tables(vp)
+    assert len(measured) <= 1  # sibling rows stay usable inside the assembly
+    _same(kept, _fresh(vp))
+    for change in ('child_hide', 'child_move', 'parent_move', 'parent_paint', 'mesh_edit'):
+        measured.clear()
+        child = parent.children[0]
+        if change == 'child_hide':
+            child.hidden = True
+        elif change == 'child_move':
+            if child.xform is None:
+                child.xform = QMatrix4x4()
+            child.xform.translate(3, 2, 1)
+        elif change == 'parent_move':
+            parent.xform.translate(1, 2, 3)
+        elif change == 'parent_paint':
+            parent.material = {'color': [0.2, 0.4, 0.6]}
+        else:
+            mesh = parent.children[1].mesh
+            mesh.vertices[0].position = V(-3, -2, -1)
+            mesh._mut_serial += 1
+        sc.version += 1
+        kept = _tables(vp)
+        _same(kept, _fresh(vp))
+    vp.reset_document_caches()
+    assert not vp._render_placement_history
+
+
+def test_identity_context_keeps_whole_render_arrays_and_bounds(vp):
+    from core.group import Group
+    from core.mesh import Mesh
+    from core.history import HideCommand
+    sc = vp.scene
+    root = Group(Mesh(), name='root')
+    root.adopt(sc.groups[:24])
+    sc.groups = [root] + sc.groups[24:]
+    sc.version += 1
+    pool, sil, _ = _tables(vp)
+    obb = vp._group_obb(root)
+    cv = sc.content_version
+    sc.begin_group_edit(root)
+    inside, _, _ = _tables(vp)
+    assert sc.content_version == cv
+    assert inside[2] is pool[2] and inside[6] is pool[6]
+    assert vp._group_obb(root) is obb
+    sc.end_group_edit()
+    assert vp._group_obb(root) is obb
+    vp.history.execute(HideCommand([root], hidden=True))
+    assert vp._group_obb(root) is obb
+    vp.history.undo()
+    assert vp._group_obb(root) is obb
+
+
+def test_large_parent_move_batches_bounds_and_matches_clean_rebuild(vp, monkeypatch):
+    from core.group import Group
+    from core.mesh import Mesh
+    from core.history import MoveGroupCommand
+    sc = vp.scene
+    mesh = _box(curved=True)
+    root = Group(Mesh(), name='root')
+    root.adopt([_placed(mesh, str(i), i*2, i%4) for i in range(80)])
+    sc.groups = [root]
+    sc.version += 1
+    _tables(vp)
+    vp.history.execute(MoveGroupCommand(root, V(1.25, 2.5, -.75)))
+    kept = _tables(vp)
+    vp._placement_frames.clear()
+    _same(kept, _fresh(vp))
+
+
+def test_deferred_materialization_does_not_turn_a_move_into_a_geometry_edit(vp):
+    from core.mesh import Mesh, DeferredMesh
+    from core.group import Group
+    from core.history import MoveGroupCommand
+    mesh = Mesh()
+    DeferredMesh.defer(mesh, lambda m: m.add_face([V(0,0,0), V(1,0,0), V(0,1,0)]), 1)
+    group = Group(mesh, name='lazy')
+    group.xform = QMatrix4x4()
+    vp.scene.groups = [group]
+    vp.scene.version += 1
+    before = vp._placements_epoch()
+    assert len(mesh.faces) == 1
+    assert mesh._mut_serial > 0
+    vp.history.execute(MoveGroupCommand(group, V(1,0,0)))
+    after = vp._placements_epoch()
+    assert vp._epoch_only_matrices(before, after)
+    mesh.add_face([V(0,0,1), V(1,0,1), V(0,1,1)])
+    vp.scene.version += 1
+    assert not vp._epoch_only_matrices(after, vp._placements_epoch())

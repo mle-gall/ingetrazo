@@ -19,6 +19,7 @@ from typing import Iterable
 from PySide6.QtGui import QVector3D
 
 from core.mesh import Edge, Face, Mesh
+from core.layers import DEFAULT_LAYER, layer_of
 
 
 def _make_style():
@@ -41,6 +42,7 @@ class Scene:
     #: and need every bump; "unsaved changes" must not: a click on empty
     #: space after Ctrl+S asked to save again (issue #159).
     view_version: int = 0
+    bounds_unchanged_version: int = 0
     # Encapsulated chunks (own meshes), isolated from the main mesh's welding.
     groups: list = field(default_factory=list)
     # Annotation entities (static dimensions) — not geometry, drawn as overlays.
@@ -217,7 +219,6 @@ class Scene:
     def _layer_state(self, entity) -> tuple[bool, bool]:
         """(visible, locked) of the layer ``entity`` carries; unknown layer
         names read as the default (visible, unlocked)."""
-        from core.layers import DEFAULT_LAYER, layer_of
         name = layer_of(entity)
         if name == DEFAULT_LAYER and self._edit_stack:
             name = self._open_group_layer(entity) or name
@@ -406,11 +407,15 @@ class Scene:
         is_comp = getattr(group, "is_component", None)
         definition = (group.mesh if callable(is_comp) and is_comp()
                       else None)
+        representation_changed = False
         if getattr(group, "children", None):
             # A container: its children stay children. What CANNOT stay is a
             # transform on it, because the tools work in world coordinates —
             # so the matrix is pushed down into the children and into its own
             # mesh, which leaves every world position exactly where it was.
+            from PySide6.QtGui import QMatrix4x4
+            representation_changed = (group.xform is not None
+                                      and group.xform != QMatrix4x4())
             self._bake_container_xform(group)
             if frame is not None:
                 # Its matrix went down into the children and its mesh is in
@@ -422,6 +427,7 @@ class Scene:
             # leaving, the copy goes back into the shared prototype (local
             # coordinates) and every sibling shows the edit — classic
             # component editing. Make Unique first to edit one copy only.
+            representation_changed = True
             from core.group import transformed_mesh
             proto, xform = group.mesh, group.xform
             group.mesh = transformed_mesh(proto, xform)
@@ -432,12 +438,16 @@ class Scene:
             self._loose_mesh = anterior
         self._edit_stack.append(
             {"group": group, "mesh": anterior, "share": self._edit_share,
-             "frame": frame, "definition": definition})
+             "frame": frame, "definition": definition,
+             "representation_changed": representation_changed})
         self.mesh = group.mesh
         self.edit_group = group
         self._refresh_dimension_holds()
         self.selection.clear()
-        self.version += 1
+        if representation_changed:
+            self.version += 1
+        else:
+            self.bump_view()
 
     def _refresh_dimension_holds(self) -> None:
         """Read every dimension's endpoints once, either side of an edit
@@ -514,7 +524,10 @@ class Scene:
             self._loose_mesh = None
         self._refresh_dimension_holds()
         self.selection.clear()
-        self.version += 1
+        if nivel.get("representation_changed", True):
+            self.version += 1
+        else:
+            self.bump_view()
 
     def take_edit_share(self):
         """The pending instance share-back ``(group, proto, xform, state0)``
@@ -655,6 +668,11 @@ class Scene:
         """``version`` minus the view-only bumps: what "unsaved changes"
         compares against the version that was saved."""
         return self.version - self.view_version
+
+    @property
+    def bounds_version(self) -> int:
+        """Geometry/transform revision; visibility and paint keep bounds."""
+        return self.content_version - self.bounds_unchanged_version
 
     def invert_selection(self) -> int:
         """Edit ▸ Invert Selection (Ctrl+Shift+I): select every

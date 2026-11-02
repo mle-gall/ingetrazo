@@ -125,8 +125,6 @@ def resolve_vertex_anchor(scene, point: QVector3D, tol: float = 1e-4):
     point that came through a placement's float32 matrix and back lands
     within a micron of the vertex, which a tighter tolerance rejected on
     far-out coordinates."""
-    from core.group import iter_placements
-
     def hit(mesh, local, chain):
         v = mesh.vertex_at(local)
         if v is None or (v.position - local).length() > tol:
@@ -150,9 +148,8 @@ def resolve_vertex_anchor(scene, point: QVector3D, tol: float = 1e-4):
     for g in getattr(scene, "groups", None) or ():
         if getattr(g, "billboard", False):
             continue
-        for placed, m in iter_placements(g):
+        for placed, m, chain in _placements_with_chain(g):
             local = QVector3D(point)
-            chain = _chain_to(g, placed)
             if m is not None:
                 inv, ok = m.inverted()
                 if not ok:
@@ -164,16 +161,23 @@ def resolve_vertex_anchor(scene, point: QVector3D, tol: float = 1e-4):
     return None
 
 
-def _chain_to(root, target) -> tuple:
-    """The groups from *root* down to *target* (inclusive) — the transforms
-    an anchor composes. Depth-first, like ``iter_placements``."""
-    if root is target:
-        return (root,)
-    for child in getattr(root, "children", None) or ():
-        below = _chain_to(child, target)
-        if below:
-            return (root,) + below
-    return ()
+def _placements_with_chain(group, base=None, chain=()):
+    """``(placement, world_matrix, chain)`` for ``group`` and every nested
+    placement below it, depth first like ``core.group.iter_placements`` —
+    ``chain`` being the groups from the top one down to the placement
+    (inclusive), the transforms an anchor composes.
+
+    The chain is carried down the walk. Searching the tree again for each
+    placement cost O(n²) per top-level object: on a .skp imported with its
+    nesting (63 000 placements, nine levels) binding the file's two
+    dimensions took nineteen minutes."""
+    m = getattr(group, "xform", None)
+    if base is not None:
+        m = base if m is None else base * m
+    chain = chain + (group,)
+    yield group, m, chain
+    for child in getattr(group, "children", None) or ():
+        yield from _placements_with_chain(child, m, chain)
 
 
 _AXIS_VECTORS = {

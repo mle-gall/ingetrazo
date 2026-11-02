@@ -204,6 +204,8 @@ class History:
     def _keep_paint_cv(self, cmd, before) -> None:
         if before is None:
             return
+        if getattr(cmd, "keeps_bounds", False):
+            self.scene.bounds_unchanged_version += self.scene.content_version - before
         keeps = getattr(cmd, "keeps_paint", False)
         if not (keeps or getattr(cmd, "keeps_groups", False)):
             return
@@ -229,6 +231,8 @@ class History:
         cv = getattr(self.scene, "content_version", None)
         if before is None:
             return
+        if self.paint_cv == before:
+            self.paint_cv = cv
         # The Browser's rows too: only the open path's and the copies of a
         # component whose count moved read differently (see
         # OutlinerPanel.refresh).
@@ -902,11 +906,22 @@ def _dirty_group_chunks(scene) -> None:
     Nested placements are flagged too: their meshes render as part of the
     parent, and walking scene.groups as a flat list never reached them.
     """
-    from core.group import iter_placements
-    for g in getattr(scene, "groups", []):
-        for pg, _m in iter_placements(g):
-            pg.mesh._chunk_dirty = True
-            pg.mesh._attrs_dirty = True
+    from core.mesh import DeferredMesh
+    seen = set()
+    pending = list(getattr(scene, "groups", []))
+    while pending:
+        g = pending.pop()
+        pending.extend(g.children or ())
+        mesh = g.mesh
+        if id(mesh) in seen or type(mesh) is DeferredMesh:
+            # A face/edge attribute cannot have been edited without first
+            # materializing its mesh. Immutable deferred prototypes are
+            # unaffected, even when thousands of placements share them.
+            continue
+        seen.add(id(mesh))
+        mesh._chunk_dirty = True
+        mesh._attrs_dirty = True
+        mesh._render_attrs_serial = getattr(mesh, "_render_attrs_serial", 0) + 1
 
 
 class FlipFacesCommand(Command):
@@ -1089,6 +1104,8 @@ class HideCommand(Command):
     silhouette. Previous per-entity flags are captured at ``do`` time, so
     a mixed selection (some already hidden) undoes exactly."""
 
+    keeps_bounds = True
+
     def __init__(self, entities, hidden: bool = True) -> None:
         self._entities = [e for e in entities
                           if hasattr(e, "hidden") or hasattr(e, "attrs")]
@@ -1112,13 +1129,15 @@ class HideCommand(Command):
                 # selection consumer (move, delete, paint) assumes it can see
                 # what it operates on.
                 scene.selection.discard(e)
-        _dirty_group_chunks(scene)
+        if any(not hasattr(e, "children") for e in self._entities):
+            _dirty_group_chunks(scene)
         scene.version += 1
 
     def undo(self, scene) -> None:
         for e, prev in zip(self._entities, self._prev):
             _set_hidden(e, prev)
-        _dirty_group_chunks(scene)
+        if any(not hasattr(e, "children") for e in self._entities):
+            _dirty_group_chunks(scene)
         scene.version += 1
 
 
@@ -1136,6 +1155,8 @@ class SetFaceColorCommand(Command):
     the plane rebuild. Painting changes no topology, so a direct attrs swap
     inverts it exactly — no snapshot needed. Faces are held by reference (the
     paint click resolves them live); undo restores each face's prior colour."""
+
+    keeps_bounds = True
 
     def __init__(self, faces, color) -> None:
         self._faces = list(faces)
@@ -1206,6 +1227,8 @@ class SetFaceMaterialTagCommand(Command):
     registry (a library swatch registers itself on first use); ``undo``
     removes it again only if this very command added it."""
 
+    keeps_bounds = True
+
     def __init__(self, faces, name, material=None) -> None:
         self._faces = list(faces)
         self._name = name
@@ -1243,6 +1266,8 @@ class SetMaterialFinishCommand(Command):
     """Choose how a named material answers light in a render (core.finish;
     ``None`` = guess it from the name again). Only the registry entry
     changes — the viewport draws the same — so undo is exact and cheap."""
+
+    keeps_bounds = True
 
     def __init__(self, name, finish) -> None:
         self._name = name
@@ -1283,6 +1308,8 @@ class RestampMaterialCommand(Command):
     entry leaves the registry, the new one takes its place and every face
     and container now says the new name. Only the model changes — a
     library colour renamed here stays in the library as it was."""
+
+    keeps_bounds = True
 
     def __init__(self, name, new_material) -> None:
         self._name = name
@@ -4358,6 +4385,8 @@ class SetGroupMaterialCommand(Command):
     inside wearing the default material shows it; faces painted themselves
     keep their own. Nothing in the mesh changes, so undo is a plain swap."""
 
+    keeps_bounds = True
+
     def __init__(self, group, material) -> None:
         self.group = group
         self.material = dict(material) if material else None
@@ -4680,6 +4709,8 @@ class MoveGroupCommand(Command):
             from core.group import carry_axes
             carry_axes(self.group, t)         # and its axes (#44)
         scene.version += 1
+        if self.group.xform is not None:
+            scene._placement_change = (scene.content_version, self.group)
 
     def do(self, scene) -> None:
         self._shift(scene, self.delta)

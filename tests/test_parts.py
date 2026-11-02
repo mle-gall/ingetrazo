@@ -357,3 +357,96 @@ def test_the_tray_shows_a_surface_as_an_area():
     assert "×" in panel.tree.topLevelItem(1).text(1)
     assert not panel.tree.topLevelItem(1).text(1).endswith("surface")
     win._saved_version = scene.version
+
+
+def test_parts_read_lazy_shared_prototypes_without_building(monkeypatch, tmp_path):
+    import numpy as np
+    from core import parts
+    from core.group import iter_placements
+    from core.mesh import DeferredMesh
+    from core.scene import Scene
+    from formats import igz
+    from tests.test_deferred_mesh import _open
+    monkeypatch.setattr(igz, "_LARGE_DOCUMENT", 0)
+    monkeypatch.setattr(igz, "_BULK_MIN", 1)
+    stool = _stool()
+    # Both legs share a prototype but have different placements.
+    stool.children[2].mesh = stool.children[1].mesh
+    sc = Scene()
+    sc.groups.append(stool)
+    path = tmp_path / "parts.igz"
+    igz.save_scene(sc, path)
+    eager = _open(monkeypatch, path, False)
+    expected = part_rows(eager.groups[0])
+    lazy = _open(monkeypatch, path, True)
+    assert any(type(g.mesh) is DeferredMesh for g, _ in iter_placements(lazy.groups[0]))
+    monkeypatch.setattr(DeferredMesh, "_materialize", lambda self: pytest.fail(
+        "parts inspection built editable topology"))
+    calls = []
+    real = parts._mesh_material_areas
+    def measure(mesh, inherited):
+        calls.append(id(mesh))
+        return real(mesh, inherited)
+    monkeypatch.setattr(parts, "_mesh_material_areas", measure)
+    actual = part_rows(lazy.groups[0])
+    assert len(calls) == len(set(calls)) == 2
+    for a, b in zip(actual, expected):
+        for key in ("name", "material", "faces", "hidden"):
+            assert a[key] == b[key]
+        np.testing.assert_allclose(a["size"], b["size"], rtol=1e-12, atol=1e-12)
+
+
+def test_hidden_parts_panel_defers_refresh_until_shown(monkeypatch):
+    win, scene = _window_with(_stool())
+    panel = win.tray.parts
+    assert not panel.isVisible()
+    calls = []
+    original = panel.refresh
+    def refreshed():
+        calls.append(True)
+        original()
+    monkeypatch.setattr(panel, "refresh", refreshed)
+    panel.on_scene_changed()
+    panel.on_scene_changed()
+    assert not calls
+    panel.setParent(None)
+    try:
+        panel.show()
+        assert calls == [True]
+        assert panel.tree.topLevelItemCount() == 3
+    finally:
+        panel.close()
+        win._saved_version = scene.version
+
+
+def test_parts_below_scroll_view_wait_until_exposed(monkeypatch):
+    from PySide6.QtWidgets import QScrollArea, QWidget, QVBoxLayout
+    win, scene = _window_with(_stool())
+    panel = win.tray.parts
+    area = QScrollArea()
+    content = QWidget()
+    layout = QVBoxLayout(content)
+    layout.addSpacing(1500)
+    layout.addWidget(panel)
+    area.setWidget(content)
+    area.setWidgetResizable(True)
+    area.resize(500, 300)
+    calls = []
+    real = panel.refresh
+    monkeypatch.setattr(panel, 'refresh', lambda: (calls.append(True), real()))
+    try:
+        area.show()
+        _app.processEvents()
+        calls.clear()
+        assert panel.isVisible() and panel.visibleRegion().isEmpty()
+        panel.on_scene_changed()
+        assert not calls
+        area.ensureWidgetVisible(panel)
+        for _ in range(4):
+            _app.processEvents()
+        assert calls
+        assert panel.tree.topLevelItemCount() == 3
+    finally:
+        area.close()
+        win._saved_version = scene.version
+        win.close()

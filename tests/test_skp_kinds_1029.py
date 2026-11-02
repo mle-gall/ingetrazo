@@ -84,15 +84,15 @@ def test_a_small_component_copied_at_the_top_level_is_shared(kinds):
     assert protos["panela_lateral"]["component"] is True
     # A group placed once is a group.
     assert protos["Agrupar#1"]["component"] is False
-    # Copied once at the top and once inside another definition: left as
-    # it was, or the nested copy would leave its parent.
-    assert "dobradica" not in protos
+    # Copied at the top and inside another definition: one definition,
+    # and the nested copy stays in its parent.
+    assert protos["dobradica"]["instances"]
 
 
-def test_without_the_kinds_nothing_changes(kinds):
+def test_without_the_kinds_every_definition_reads_as_a_component(kinds):
     openskp_compat.reset_group_definitions()        # kinds unknown
     protos = _protos_by_name(skp_openskp._adapt(_model(), "m"))
-    assert "panela_prateleira" not in protos
+    assert protos["panela_prateleira"]["component"] is True
     assert protos["Agrupar#1"]["component"] is True
 
 

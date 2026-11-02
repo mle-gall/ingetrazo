@@ -254,12 +254,16 @@ def _draw(key: str):
 #: The size every mark of a row is drawn at (eye, padlock, target): the
 #: same in the Browser and in the Layers tab.
 MARK_SIZE = 18
+_FADED_ICONS: dict = {}
 
 
 def _faded(icon: QIcon, size: int = MARK_SIZE) -> QIcon:
     """``icon`` at 40 %: the eye or padlock a row inherits from a group
     around it — closed, but not its own — at the row's own size, only
     fainter (16 px made an inherited mark smaller than its neighbours)."""
+    key = (icon.cacheKey(), size)
+    if key in _FADED_ICONS:
+        return _FADED_ICONS[key]
     src = icon.pixmap(size, size)
     pm = QPixmap(src.size())
     pm.setDevicePixelRatio(src.devicePixelRatio())
@@ -268,7 +272,11 @@ def _faded(icon: QIcon, size: int = MARK_SIZE) -> QIcon:
     p.setOpacity(0.4)
     p.drawPixmap(0, 0, src)
     p.end()
-    return QIcon(pm)
+    result = QIcon(pm)
+    if len(_FADED_ICONS) >= 32:
+        _FADED_ICONS.clear()
+    _FADED_ICONS[key] = result
+    return result
 
 
 def mark_icon(key: str, inherited: bool = False) -> QIcon:
@@ -1193,8 +1201,7 @@ class OutlinerPanel(QWidget):
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)
-        self.tree.itemExpanded.connect(
-            lambda _i: self._update_expand_button())
+        self.tree.itemExpanded.connect(self._expanded_row)
         self.tree.itemCollapsed.connect(
             lambda _i: self._update_expand_button())
         self._root = None
@@ -1347,7 +1354,8 @@ class OutlinerPanel(QWidget):
             self._apply_filter()
         self._sync_selection(scene)
         self._empty.setVisible(not self._items)
-        self._update_summary()
+        if not moved_only:
+            self._update_summary()
         self._update_expand_button()
         self._update_rename_button()
 
@@ -1376,22 +1384,91 @@ class OutlinerPanel(QWidget):
         self._shape = None
         self._heads = {}
         self._heads_closed = set()
+        self._lazy_parents = {}
+        self._lazy_order = {}
 
     def _update_summary(self) -> None:
         """The footer: what the model holds, or what the filter found."""
-        total = len(self._state)
+        total = (len(self._groups) if getattr(self, "_lazy_rows", False)
+                 else len(self._state))
         if self._filters_active():
             text = tr("{shown} of {total} match", shown=self._matches,
                       total=total)
         else:
-            comps = sum(1 for st in self._state.values()
-                        if st[3] == "component")
-            hidden = sum(1 for st in self._state.values() if st[4])
+            if getattr(self, "_lazy_rows", False):
+                comps = sum(g.is_component() for g in self._groups.values())
+                hidden = sum(bool(g.hidden) for g in self._groups.values())
+            else:
+                comps = sum(1 for st in self._state.values() if st[3] == "component")
+                hidden = sum(1 for st in self._state.values() if st[4])
             text = tr("{groups} groups · {components} components · "
                       "{hidden} hidden", groups=total - comps,
                       components=comps, hidden=hidden)
         if self.summary.text() != text:
             self.summary.setText(text)
+
+    def _inherited_for(self, group):
+        hidden = locked = None
+        parent = self._lazy_parents.get(id(group))
+        while parent is not None:
+            if hidden is None and parent.hidden:
+                hidden = parent
+            if locked is None and getattr(parent, "locked", False):
+                locked = parent
+            parent = self._lazy_parents.get(id(parent))
+        return hidden, locked
+
+    def _ensure_group_item(self, group):
+        key = id(group)
+        if key in self._items:
+            return self._items[key]
+        parent = self._lazy_parents.get(key)
+        parent_item = self._ensure_group_item(parent) if parent is not None else self._root
+        opened = {id(g) for g in outliner.open_path(self._scene())}
+        state = self._row_state(group, self._counts, opened, self._inherited_for(group))
+        item = QTreeWidgetItem([state[0], "", "", state[1], state[2],
+                                state[7], state[8], state[9]])
+        item.setData(COL_NAME, Qt.UserRole, group)
+        item.setFlags(item.flags() | Qt.ItemIsEditable)
+        self._paint(item, None, state)
+        if group.children:
+            item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+        # A selected deep descendant may be created before its siblings.
+        order = self._lazy_order
+        n = parent_item.childCount()
+        last = self._group_of(parent_item.child(n-1)) if n else None
+        if n == 0 or order.get(id(last), -1) < order[key]:
+            parent_item.addChild(item)
+        else:
+            at = sum(order.get(id(self._group_of(parent_item.child(i))), -1) < order[key]
+                     for i in range(n))
+            parent_item.insertChild(at, item)
+        self._items[key] = item
+        self._state[key] = state
+        return item
+
+    def _expanded_row(self, item):
+        if getattr(self, "_lazy_rows", False):
+            group = self._group_of(item)
+            if group is not None:
+                previous = self._updating
+                self._updating = True
+                try:
+                    for child in group.children:
+                        self._ensure_group_item(child)
+                finally:
+                    self._updating = previous
+        self._update_expand_button()
+
+    def _materialize_rows(self):
+        if getattr(self, "_lazy_rows", False):
+            previous = self._updating
+            self._updating = True
+            try:
+                for group in self._groups.values():
+                    self._ensure_group_item(group)
+            finally:
+                self._updating = previous
 
     def _rebuild(self, scene) -> None:
         """Rows for every group, each born with its texts and icons: one
@@ -1424,8 +1501,24 @@ class OutlinerPanel(QWidget):
             self.tree.addTopLevelItem(root)
             self._heads = self._make_heads(scene, root)
             editable = Qt.ItemIsEditable
-            around = inherited_states(scene.groups)
-            for g, parent, _depth in self._display_walk(scene):
+            rows = list(self._display_walk(scene))
+            # Headings and filters read every row: both keep the whole list.
+            self._lazy_rows = (len(rows) > 2000 and self.order_by != "layer"
+                               and not self._filters_active())
+            self._lazy_parents = {id(g): parent for g, parent, _depth in rows}
+            self._lazy_order = {id(g): i for i, (g, _p, _d) in enumerate(rows)}
+            if self._lazy_rows:
+                self._groups = {id(g): g for g, _p, _d in rows}
+                for g in scene.groups:
+                    self._ensure_group_item(g)
+                for g, _p, _d in rows:
+                    if g.uid in expanded:
+                        item = self._ensure_group_item(g)
+                        self._expanded_row(item)
+                        item.setExpanded(True)
+                rows = []
+            around = inherited_states(scene.groups) if rows else {}
+            for g, parent, _depth in rows:
                 key = id(g)
                 state = self._row_state(g, counts, opened,
                                         around.get(key, (None, None)))
@@ -1475,6 +1568,8 @@ class OutlinerPanel(QWidget):
         Making all 21 406 rows again after a Delete or a Paste on the plant
         of #158 took ~0.8 s; this, the rows that changed."""
         old = getattr(self, "_struct_shape", None)
+        if getattr(self, "_lazy_rows", False):
+            return False
         if old is None or self._root is None:
             return False
         was = {k for k, _p in old}
@@ -1673,9 +1768,12 @@ class OutlinerPanel(QWidget):
             if self._root.text(COL_NAME) != name:
                 self._root.setText(COL_NAME, name)
             state_of = self._state
-            around = inherited_states(scene.groups)
-            for key, g in self._groups.items():
+            lazy = getattr(self, "_lazy_rows", False)
+            around = {} if lazy else inherited_states(scene.groups)
+            for key in self._items:
+                g = self._groups[key]
                 state = self._row_state(g, counts, opened,
+                                        self._inherited_for(g) if lazy else
                                         around.get(key, (None, None)))
                 old = state_of[key]
                 if state != old:
@@ -1684,11 +1782,11 @@ class OutlinerPanel(QWidget):
         finally:
             self._updating = False
 
-    def _update_some_rows(self, scene, keys) -> None:
+    def _update_some_rows(self, scene, keys, *, reuse_counts=False) -> None:
         """``_update_rows`` for the rows of ``keys`` and of every copy of
         a component whose count changed."""
-        counts = outliner.instance_counts(scene.groups)
         old_counts = getattr(self, "_counts", None) or {}
+        counts = old_counts if reuse_counts else outliner.instance_counts(scene.groups)
         moved = {m for m in set(counts) | set(old_counts)
                  if counts.get(m) != old_counts.get(m)}
         self._counts = counts
@@ -1699,13 +1797,16 @@ class OutlinerPanel(QWidget):
         self._updating = True
         try:
             state_of = self._state
-            around = inherited_states(scene.groups)
+            lazy = getattr(self, "_lazy_rows", False)
+            around = {} if lazy else inherited_states(scene.groups)
             for key in keys:
                 g = self._groups.get(key)
-                if g is None:
+                if g is None or key not in self._items:
                     continue
                 state = self._row_state(g, counts, opened,
                                         around.get(key, (None, None)))
+                if lazy:
+                    state = self._row_state(g, counts, opened, self._inherited_for(g))
                 old = state_of[key]
                 if state != old:
                     self._paint(self._items[key], old, state)
@@ -1724,6 +1825,15 @@ class OutlinerPanel(QWidget):
         unfold its branch and scroll it into sight; unfold the groups open
         for editing too, so the context is on screen."""
         path = tuple(id(g) for g in outliner.open_path(scene))
+        if getattr(self, "_lazy_rows", False):
+            previous = self._updating
+            self._updating = True
+            try:
+                for g in list(outliner.open_path(scene)) + list(scene.selection):
+                    if id(g) in self._groups:
+                        self._ensure_group_item(g)
+            finally:
+                self._updating = previous
         if path != self._shown_path:
             for key in path:
                 item = self._items.get(key)
@@ -1767,6 +1877,8 @@ class OutlinerPanel(QWidget):
 
     def _on_filter(self, text: str) -> None:
         self._query = text.strip().casefold()
+        if self._query:
+            self._materialize_rows()
         self._apply_filter()
         self._update_summary()
 
@@ -1887,6 +1999,7 @@ class OutlinerPanel(QWidget):
                     item.setHidden(False)
             self._filter_heads()
             return
+        self._materialize_rows()
         scene = self._scene()
         counts = outliner.instance_counts(scene.groups)
         keep, hit = outliner.filter_keep(
@@ -2150,7 +2263,9 @@ class OutlinerPanel(QWidget):
         headings too."""
         rows = list((getattr(self, "_items", None) or {}).values())
         rows += list((getattr(self, "_heads", None) or {}).values())
-        return all(item.isExpanded() for item in rows if item.childCount())
+        return all(item.isExpanded() for item in rows
+                   if item.childCount()
+                   or bool(getattr(self._group_of(item), "children", None)))
 
     def _update_expand_button(self) -> None:
         b = getattr(self, "_expand_btn", None)
@@ -2168,6 +2283,7 @@ class OutlinerPanel(QWidget):
         self._update_expand_button()
 
     def _expand_all(self) -> None:
+        self._materialize_rows()
         self.tree.expandAll()
 
     def _collapse_all(self) -> None:
@@ -2880,7 +2996,7 @@ class OutlinerPanel(QWidget):
         self._window.viewport.update()
         self.refresh()
 
-    def make_refusal(self, groups) -> str:
+    def make_refusal(self, groups, kind=None) -> str:
         """Why the rows cannot be grouped or made a component — ``""`` when
         they can. Locked or hidden rows cannot be selected, rows from
         different groups are not selected together, and what is inside a
@@ -2897,7 +3013,7 @@ class OutlinerPanel(QWidget):
             return tr("Choose rows inside the same group to group them")
         # Rows inside a component: its parts are what every copy shares.
         path = outliner.path_to(scene.groups, groups[0]) if groups else None
-        if path and outliner.in_component(scene.groups, path[-1]):
+        if kind != "explode" and path and outliner.in_component(scene.groups, path[-1]):
             return tr("Components keep their parts: Make Unique first to "
                       "change what is inside one")
         return ""
@@ -2912,7 +3028,7 @@ class OutlinerPanel(QWidget):
         groups = [g for g in groups if g is not None]
         if not groups:
             return
-        why = self.make_refusal(groups)
+        why = self.make_refusal(groups, kind)
         if why:
             self._window.viewport.flash_status(why, 5000)
             return
@@ -2932,13 +3048,7 @@ class OutlinerPanel(QWidget):
         if kind == "group":
             self._window._on_make_group()
         elif kind == "explode":
-            # Every row at once, one undo step; inside an open group what
-            # comes out stays in it (the window's Explode, row by row,
-            # made a step per group).
-            from core.history import CompoundCommand, ExplodeGroupCommand
-            if self._window._can_make_here():
-                self._window._execute_make(CompoundCommand(
-                    [ExplodeGroupCommand(g) for g in siblings]))
+            self._window._on_explode_group()
         else:
             self._window._on_make_component()
         self._window.viewport.update()
@@ -4047,6 +4157,7 @@ class OutlinerPanel(QWidget):
             # loose, the groups it holds out whole in its place.
             entries.append(("Explode Group", "explode"))
             for text, kind in entries:
+                why = self.make_refusal(targets, kind)
                 act = menu.addAction(tr(text), lambda k=kind:
                                      QTimer.singleShot(0, lambda:
                                                        self.make_from_rows(

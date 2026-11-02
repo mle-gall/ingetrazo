@@ -705,14 +705,11 @@ def test_openskp_adapter_default_mapping_is_local(tmp_path, monkeypatch):
     skp.write_bytes(b"")
     payload = skp_openskp._adapt(model, "m", skp_path=skp)
 
-    uv_sets = []
-    for gp in payload["groups"]:
-        outer, holes, attrs = gp["faces"][0]
-        uvw = attrs["texture"]["uvw"]
-        uv_sets.append([(round(u, 5), round(v, 5))
-                        for u, v in affine_uv(uvw, outer)])
-    assert len(uv_sets) == 2
-    assert uv_sets[0] == uv_sets[1]     # both copies sample identically
+    # One local mesh under both placements: the UVs cannot differ by copy.
+    proto = next(p for p in payload["protos"] if p["faces"])
+    assert len(proto["instances"]) == 2
+    outer, _holes, attrs = proto["faces"][0]
+    assert affine_uv(attrs["texture"]["uvw"], outer)
 
 
 def test_openskp_adapter_own_back_material_beats_instance_paint():

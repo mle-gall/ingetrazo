@@ -62,3 +62,39 @@ def test_only_rows_on_screen_are_drawn(monkeypatch):
     finally:
         win._saved_version = win.viewport.scene.version
         win.close()
+
+
+def test_nested_lazy_thumbnail_matches_eager_without_materialization(monkeypatch, tmp_path):
+    import pytest
+    from core.scene import Scene
+    from core.mesh import DeferredMesh
+    from formats import igz
+    from tests.test_deferred_mesh import _open
+    monkeypatch.setattr(igz, "_LARGE_DOCUMENT", 0)
+    monkeypatch.setattr(igz, "_BULK_MIN", 1)
+    monkeypatch.setattr(component_thumbs, "MAX_FACES", 5)
+    proto = _component(0).mesh
+    proto.faces[0].attrs["color"] = [0.8, 0.2, 0.4]
+    children = []
+    for i in range(13):
+        g = Group(proto, name=str(i))
+        g.xform = QMatrix4x4()
+        g.xform.translate(i % 4, i // 4, i * 0.1)
+        g.xform.rotate(i * 7, 0, 0, 1)
+        children.append(g)
+    root = Group(name="assembly")
+    root.adopt(children)
+    sc = Scene()
+    sc.groups.append(root)
+    path = tmp_path / "thumb.igz"
+    igz.save_scene(sc, path)
+    eager = _open(monkeypatch, path, False).groups[0]
+    lazy = _open(monkeypatch, path, True).groups[0]
+    assert type(lazy.children[0].mesh) is DeferredMesh
+    expected = component_thumbs._draw(eager, 80).toImage()
+    monkeypatch.setattr(DeferredMesh, "_materialize", lambda self: pytest.fail(
+        "a thumbnail built editable mesh topology"))
+    actual = component_thumbs.thumbnail(lazy, 80).toImage()
+    assert actual == expected
+    # Signature validation and a second picture must remain lazy too.
+    assert component_thumbs.thumbnail(lazy, 80).toImage() == expected

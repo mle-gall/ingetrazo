@@ -289,6 +289,76 @@ def plan_of(mesh) -> Plan | None:
     return hit
 
 
+#: How far (per axis) a document point may sit from a queried position
+#: and still be the vertex :meth:`Mesh.vertex_at` would find: the weld cell
+#: is one unit of ``_KEY_DECIMALS`` wide and the boundary probe accepts a
+#: neighbour within that same distance — twice it leaves room to spare.
+_NEAR = 2.0 * 10.0 ** -_mesh._KEY_DECIMALS
+
+
+def has_vertex_near(mesh, position) -> bool:
+    """Whether a still-deferred ``mesh`` MAY hold a vertex :meth:`Mesh.vertex_at`
+    would find at ``position`` (a QVector3D in the mesh's coordinates).
+
+    Every vertex the build makes sits exactly at one of the document's
+    points (as float32, what a Vertex holds), so a position no point comes
+    within :data:`_NEAR` of has no vertex either — answered from the
+    arrays, nothing built. ``True`` means «maybe»: build and look. The
+    points' box is kept on the mesh, so the thousands of placements a
+    dimension probes cost a comparison each, not a scan."""
+    d = mesh.__dict__
+    src = d.get("_deferred_source")
+    if src is None:
+        return True                     # built meanwhile: the registry knows
+    q = np.array(position.toTuple(), dtype=np.float64)
+    box = d.get("_deferred_bbox")
+    pos = None
+    if box is None:
+        pos = np.asarray(src["pos"], dtype=np.float32)
+        if not len(pos):
+            return False
+        box = d["_deferred_bbox"] = (pos.min(axis=0).astype(np.float64),
+                                     pos.max(axis=0).astype(np.float64))
+    lo, hi = box
+    if (q < lo - _NEAR).any() or (q > hi + _NEAR).any():
+        return False
+    if pos is None:
+        pos = np.asarray(src["pos"], dtype=np.float32)
+    near = np.abs(pos.astype(np.float64) - q) <= _NEAR
+    return bool(near.all(axis=1).any())
+
+
+def face_net_areas(plan) -> np.ndarray:
+    """Face.net_area over planned vertices, including holes, without topology.
+
+    Accumulate each ring in corner order in doubles, then use Qt's float
+    vector length just as Face does. All rings advance together in NumPy.
+    """
+    from PySide6.QtGui import QVector3D
+    sizes = plan.ring_sizes
+    if not len(sizes):
+        return np.zeros(plan.nfaces)
+    starts = np.concatenate([[0], np.cumsum(sizes[:-1])])
+    normal = np.zeros((len(sizes), 3), dtype=np.float64)
+    for i in range(int(sizes.max(initial=0))):
+        active = np.flatnonzero((sizes > i) & (sizes >= 3))
+        a = plan.pos[plan.corners[starts[active] + i]]
+        b = plan.pos[plan.corners[starts[active] + (i + 1) % sizes[active]]]
+        normal[active, 0] += (a[:, 1] - b[:, 1]) * (a[:, 2] + b[:, 2])
+        normal[active, 1] += (a[:, 2] - b[:, 2]) * (a[:, 0] + b[:, 0])
+        normal[active, 2] += (a[:, 0] - b[:, 0]) * (a[:, 1] + b[:, 1])
+    areas = np.fromiter((0.5 * QVector3D(*map(float, n)).length()
+                         for n in normal), dtype=np.float64, count=len(sizes))
+    counts = plan.ring_counts
+    first = np.concatenate([[0], np.cumsum(counts[:-1])])
+    result = areas[first].copy()
+    for i in range(1, int(counts.max(initial=0))):
+        active = np.flatnonzero(counts > i)
+        result[active] -= areas[first[active] + i]
+    result[sizes[first] < 3] = 0
+    return np.maximum(result, 0)
+
+
 def entity_count(mesh) -> int:
     """``len(mesh.faces) + len(mesh.edges)``, a lazy mesh left unbuilt."""
     plan = plan_of(mesh)

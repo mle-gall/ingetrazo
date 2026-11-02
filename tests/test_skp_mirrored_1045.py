@@ -75,9 +75,8 @@ def test_an_unmirrored_placement_is_left_as_it_was():
 ])
 def test_a_nested_door_and_its_mirrored_twin_both_face_out(matrix, mirrored):
     # The report: a cupboard door made a component, copied and scaled by -1
-    # in X for the other hand. Both doors sit inside one cupboard group; the
-    # importer flattens them into the cupboard, and both must keep their
-    # painted side out.
+    # in X for the other hand. Both doors stay placements of one definition
+    # inside the cupboard: the mesh faces out, the mirror is the placement's.
     door = _square_def(6, "Door")
     left = NS(ref_idx=6, matrix=[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1])
     right = NS(ref_idx=6, matrix=matrix)
@@ -87,8 +86,11 @@ def test_a_nested_door_and_its_mirrored_twin_both_face_out(matrix, mirrored):
                                                        0, 0, 0, 1])])
     payload = skp_openskp._adapt(NS(definitions={0: root, 5: cupboard, 6: door}),
                                  "kitchen")
-    faces = [f for p in payload.get("protos", []) for f in p["faces"]]
-    faces += [f for g in payload.get("groups", []) for f in g["faces"]]
-    assert len(faces) == 2
+    protos = payload.get("protos", [])
+    faces = [f for p in protos for f in p["faces"]]
+    assert len(faces) == 1
+    holder = next(p for p in protos if p["children"])
+    assert len(holder["children"]) == 2
+    assert (holder["children"][1]["xform"].determinant() < 0) is mirrored
     for outer, _holes, _attrs in faces:
         assert _ring_normal_z(outer) > 0

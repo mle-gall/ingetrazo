@@ -178,6 +178,25 @@ def _configure_surface_format() -> None:
     QSurfaceFormat.setDefaultFormat(fmt)
 
 
+def _open_once_free(window, doc: "Path") -> None:
+    """Open *doc* once no dialog is modal. A macOS double-click's FileOpen
+    lands after the window is up, and on a fast start the units question
+    is already on screen: loading under it left the document unopened, or
+    took the app down later (an NSModalSession ended twice). The question
+    is dismissed — a file brings its own units — and any other modal
+    (a recovery or error box) is simply waited out."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+    modal = QApplication.activeModalWidget()
+    if modal is not None:
+        from views.units_start_dialog import UnitsStartDialog
+        if isinstance(modal, UnitsStartDialog):
+            modal.reject()
+        QTimer.singleShot(50, lambda: _open_once_free(window, doc))
+        return
+    _open_document_in(window, doc)
+
+
 def _open_document_in(window, doc: "Path") -> None:
     """Open *doc* in *window*: .igz as the document, .skp imported through
     the native backend after the first paint (big models parse for seconds —
@@ -251,7 +270,7 @@ class _App(QApplication):
         if e.type() == QEvent.Type.FileOpen:
             path = Path(e.file())
             if self.open_window is not None:
-                _open_document_in(self.open_window, path)
+                _open_once_free(self.open_window, path)
             else:
                 # Arrived before MainWindow exists — a cold macOS launch can
                 # deliver it this early. main() flushes this once it does.

@@ -21,22 +21,8 @@ from pathlib import PurePath
 def part_points(part):
     """``part``'s vertex positions in its container's coordinates, as an
     ``(N, 3)`` float64 array (its nested placements included)."""
-    import numpy as np
-    from core.group import iter_placements
-    chunks = []
-    for g, m in iter_placements(part):
-        verts = g.mesh.vertices
-        if not verts:
-            continue
-        pos = np.array([[v.position.x(), v.position.y(), v.position.z()]
-                        for v in verts], dtype=np.float64)
-        if m is not None:
-            rot = np.array([[m(r, c) for c in range(3)] for r in range(3)])
-            pos = pos @ rot.T + np.array([m(0, 3), m(1, 3), m(2, 3)])
-        chunks.append(pos)
-    if not chunks:
-        return np.empty((0, 3))
-    return np.concatenate(chunks)
+    from core.group import placement_points
+    return placement_points(part)
 
 
 #: How much smaller the part's own box must be to beat the model's axes.
@@ -91,39 +77,77 @@ def _material_label(attrs) -> str | None:
     return None
 
 
-def part_material(part) -> str:
-    """The material covering most of ``part``'s surface ('' when none).
-    A default face shows its container's paint, as it draws."""
-    from core.group import iter_placements
+def _mesh_material_areas(mesh, inherited):
+    """Material histogram of one prototype, without building lazy topology."""
     from core.materials import has_own_material
-    area: dict = {}
-    for g, _m in iter_placements(part):
-        inherited = getattr(g, "material", None) or getattr(
-            part, "material", None)
-        for f in g.mesh.faces:
+    from core.mesh import DeferredMesh
+    area = {}
+    if type(mesh) is DeferredMesh:
+        import numpy as np
+        from core.lazy_mesh import plan_of, face_net_areas
+        from formats.igz import _face_attrs_from_json
+        source = mesh.__dict__["_deferred_source"]
+        table = source["meta"].get("face_attrs") or []
+        keys = np.asarray(source["face_attr"], dtype=np.int64)
+        plan = plan_of(mesh)
+        geometry = mesh.__dict__.get("_deferred_geom")
+        if geometry is not None and (plan.ring_counts == 1).all():
+            # The renderer already computed these exact Qt-compatible
+            # Newell lengths. With no holes, net area is half that length.
+            values = 0.5 * geometry[1].astype(np.float64)
+        else:
+            values = face_net_areas(plan)
+        totals = np.bincount(keys + 1, weights=values,
+                             minlength=len(table) + 1)
+        _, first = np.unique(keys, return_index=True)
+        for key in keys[np.sort(first)].tolist():
+            attrs = _face_attrs_from_json(table[key]) if key >= 0 else {}
+            label = _material_label(attrs if has_own_material(attrs) else inherited)
+            if label:
+                area[label] = area.get(label, 0.0) + float(totals[key + 1])
+    else:
+        for f in mesh.faces:
             attrs = f.attrs if has_own_material(f.attrs) else inherited
             label = _material_label(attrs)
             if label:
-                # Net: a face's opening covers nothing, so it must not
-                # vote for the material either (#742).
                 area[label] = area.get(label, 0.0) + f.net_area()
-    if not area:
-        return ""
-    return max(area.items(), key=lambda kv: kv[1])[0]
+    return area
 
 
-def part_rows(container) -> list:
+def part_material(part, cache=None) -> str:
+    """The material covering most of ``part``'s surface ('' when none).
+    A default face shows its container's paint, as it draws. Shared
+    prototypes are measured once, rather than once for every placement."""
+    from core.group import iter_placements
+    if cache is None:
+        cache = {}
+    area = {}
+    for g, _m in iter_placements(part):
+        inherited = getattr(g, "material", None) or getattr(part, "material", None)
+        key = (id(g.mesh), _material_label(inherited))
+        hist = cache.get(key)
+        if hist is None:
+            hist = cache[key] = _mesh_material_areas(g.mesh, inherited)
+        for label, value in hist.items():
+            area[label] = area.get(label, 0.0) + value
+    return max(area, key=area.get) if area else ""
+
+
+def part_rows(container, material_cache=None) -> list:
     """One row per part of ``container``: ``{"part", "name", "material",
     "size", "faces"}``, in the container's order."""
     from core.group import iter_placements
+    from core.mesh import face_count
+    if material_cache is None:
+        material_cache = {}
     rows = []
     for child in getattr(container, "children", None) or ():
         rows.append({
             "part": child,
             "name": child.name,
-            "material": part_material(child),
+            "material": part_material(child, material_cache),
             "size": part_size(part_points(child)),
-            "faces": sum(len(g.mesh.faces) for g, _m in iter_placements(child)),
+            "faces": sum(face_count(g.mesh) for g, _m in iter_placements(child)),
             "hidden": bool(getattr(child, "hidden", False)),
         })
     return rows

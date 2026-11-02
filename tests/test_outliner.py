@@ -405,7 +405,8 @@ def test_ten_thousand_nodes_build_once_and_refresh_quickly():
     t0 = time.perf_counter()
     panel.refresh()
     build = time.perf_counter() - t0
-    assert len(panel._items) == 10_000
+    assert len(panel._groups) == 10_000
+    assert len(panel._items) == len(roots)  # collapsed branches are not Qt rows
     t0 = time.perf_counter()
     panel.refresh()
     again = time.perf_counter() - t0
@@ -1764,3 +1765,32 @@ def test_a_tab_dropped_on_the_other_side_moves_there():
     QSettings().remove("composer/tab_layout")
     QSettings().remove("composer/views_visible")
     _close(win)
+
+
+def test_large_tree_materializes_paths_and_keeps_hidden_children_current():
+    branches = [Group(Mesh(), name=f'Branch {i}') for i in range(3)]
+    for branch in branches:
+        branch.adopt([Group(Mesh(), name=f'Leaf {i}') for i in range(750)])
+    root = _container('Root', branches)
+    win, scene, panel = _window_with(root)
+    try:
+        assert len(panel._items) == 1
+        panel._items[id(root)].setExpanded(True)
+        assert len(panel._items) == 4
+        root.hidden = True
+        scene.version += 1
+        panel.refresh()
+        target = branches[1].children[33]
+        scene.selection = {target}
+        panel.refresh()
+        assert id(target) in panel._items
+        assert panel._state[id(target)][11] == 'Root'
+        assert id(branches[0].children[0]) not in panel._items
+        panel._on_filter('Leaf 749')
+        assert len(panel._items) == len(panel._groups)
+        assert not panel._items[id(branches[2].children[749])].isHidden()
+        panel._on_filter('')
+        panel._collapse_all()
+        assert not panel._items[id(branches[1])].isExpanded()
+    finally:
+        _close(win)

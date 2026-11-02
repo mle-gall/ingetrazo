@@ -537,6 +537,7 @@ class _GlTape:
 
     DRAW, VAO, U1I, U1F, U4F, ENABLE, DISABLE, CULL, FRONT, ACTIVE, TEX, \
         STENCIL = range(12)
+    DRAW_INDEXED = 12
 
     def __init__(self):
         self.calls: list = []
@@ -555,6 +556,11 @@ class _GlTape:
     def draw(self, fn, mode, first, count, n):
         self.call(fn, mode, first, count, n)
         self._op(self.DRAW, (mode, first, count, n))
+
+    def draw_indexed(self, fn, mode, first, count, n):
+        from shiboken6 import VoidPtr
+        self.call(fn, mode, count, 0x1405, VoidPtr(first * 4), n)
+        self._op(self.DRAW_INDEXED, (mode, count, first * 4, n))
 
     def bind_vao(self, vao):
         self.call(vao.bind)
@@ -599,10 +605,10 @@ class _GlTape:
         if native is not None:
             if self.arrays is None:
                 import numpy as np
-                self.arrays = (np.asarray(self.ops, dtype=np.int64)
-                               .reshape(-1, 5),
-                               np.asarray(self.vals, dtype=np.float32)
-                               .reshape(-1, 4))
+                from views.gl_commands import compact_tape
+                self.arrays = compact_tape(
+                    np.asarray(self.ops, dtype=np.int64).reshape(-1, 5),
+                    np.asarray(self.vals, dtype=np.float32).reshape(-1, 4))
             native.run(*self.arrays)
             return
         for fn, args in self.calls:
@@ -621,7 +627,8 @@ def _callable_proc(addr: int) -> bool:
 _TAPE_FUNCS = (b"glDrawArraysInstanced", b"glBindVertexArray",
                b"glUniform1i", b"glUniform1f", b"glUniform4f", b"glEnable",
                b"glDisable", b"glCullFace", b"glFrontFace",
-               b"glActiveTexture", b"glBindTexture", b"glStencilFunc")
+               b"glActiveTexture", b"glBindTexture", b"glStencilFunc",
+               b"glDrawElementsInstanced")
 
 
 class _InstanceBatch(list):
@@ -630,7 +637,7 @@ class _InstanceBatch(list):
     matrix buffer is filled by one NumPy take instead of sixteen floats
     read per placement."""
 
-    __slots__ = ("idx", "mats")
+    __slots__ = ("idx", "mats", "context_batches")
 
 
 def _proto_wrapper(vp, mesh, paint=None):
@@ -1955,6 +1962,12 @@ class Viewport(QOpenGLWidget):
         self.scene.hide_similar_components = _load_hide_similar()
         self._invert_wheel = _load_invert_wheel()
         self._invert_orbit_y = _load_invert_orbit_y()
+        from PySide6.QtCore import QSettings
+        self._navigation_feedback = str(QSettings().value(
+            "display/navigation_feedback", "0")) == "1"
+        self._navigation_feedback_active = False
+        self._navigation_edge_lod_px = max(0, int(QSettings().value(
+            "display/navigation_edge_lod_px", 0)))
         self._msaa = _load_msaa()
 
         # Hover highlight (Select tool). Not version-tracked — it changes with
@@ -2091,6 +2104,9 @@ class Viewport(QOpenGLWidget):
         self._forget_context_objects()
         self._gl = QOpenGLFunctions(self.context())
         self._gl.initializeOpenGLFunctions()
+        if _PERF:
+            from views.gl_timing import GpuTimings
+            self._gpu_timings = GpuTimings(_plog)
         # Who is drawing: the GPU driver or a software rasteriser. Recorded
         # for Help ▸ About, written to the log folder, and announced to the
         # main window so a CPU-drawn viewport says so before anyone wonders
@@ -2386,6 +2402,112 @@ class Viewport(QOpenGLWidget):
         b = QVector3D(max(xs), max(ys), max(zs))
         cam.depth_reach = ((a + b) * 0.5, (b - a).length() * 0.5)
 
+    def set_navigation_feedback(self, enabled: bool) -> None:
+        """Opt-in edge-free camera feedback; never affects image exports."""
+        if bool(enabled) != self._navigation_feedback:
+            self._navigation_feedback_camera = None
+        self._navigation_feedback = bool(enabled)
+        if not enabled:
+            self._finish_navigation_feedback()
+
+    def _finish_navigation_feedback(self) -> None:
+        timer = getattr(self, "_navigation_feedback_timer", None)
+        if timer is not None:
+            timer.stop()
+        if not getattr(self, "_navigation_feedback_active", False):
+            return
+        self._navigation_feedback_active = False
+        # Derive the final camera's profiles now, without the normal moving-
+        # camera silhouette throttle borrowing the last view's outline.
+        # Keep an already exact outline when the camera returned to it.
+        cam = getattr(self, "_navigation_feedback_camera", None)
+        key = (_content_ver(self), id(self.scene.mesh))
+        last = getattr(self, "_sil_last", None)
+        if last is None or len(last) < 4 or last[3] != self._sil_inputs(key, cam):
+            self._sil_last = None
+        self._sil_cam = getattr(self, "_navigation_feedback_camera", None)
+        self._sil_cam_t = 0.0
+        self.update()
+
+    def _navigation_feedback_frame(self, mvp) -> bool:
+        if (not getattr(self, "_navigation_feedback", False)
+                or self._export_size is not None):
+            return False
+        camera = tuple(mvp.data())
+        previous = getattr(self, "_navigation_feedback_camera", None)
+        self._navigation_feedback_camera = camera
+        if previous is not None and previous != camera:
+            from PySide6.QtCore import QTimer
+            timer = getattr(self, "_navigation_feedback_timer", None)
+            if timer is None:
+                timer = self._navigation_feedback_timer = QTimer(self)
+                timer.setSingleShot(True)
+                timer.timeout.connect(self._finish_navigation_feedback)
+            self._navigation_feedback_active = True
+            timer.start(150)
+        return self._navigation_feedback_active
+
+    def _fit_scene_depth(self):
+        """Reuse the renderer's placement boxes, once per content epoch.
+
+        Ancillary layers and live previews may extend beyond model bounds;
+        until they supply conservative boxes, retain the original range.
+        """
+        import numpy as np
+        self.camera._depth_range = None
+        if (not self.camera.perspective
+                or self.scene.edit_group is not None
+                or getattr(self, "_preview_groups", None)
+                or getattr(self, "_frozen_cache_version", None) is not None
+                or self._base_map_showing() or self._terrain_showing()
+                or self._photo_showing()
+                or getattr(self.scene, "guides", None)
+                or getattr(self.scene.shadows, "enabled", False)):
+            return
+        key = (self._placements_epoch(), _content_ver(self), id(self.scene.mesh))
+        memo = getattr(self, "_depth_boxes", None)
+        if memo is None or memo[0] != key:
+            boxes = []
+            for g in self._placements():
+                if not self.scene.entity_visible(g):
+                    continue
+                if getattr(g, "billboard", False):
+                    verts = self._billboard_mesh(g).vertices
+                    if verts:
+                        a = np.asarray([v.position.toTuple() for v in verts])
+                        lo, hi = a.min(axis=0), a.max(axis=0)
+                        ctr = (lo + hi) * .5
+                        radius = np.linalg.norm(hi[:2] - lo[:2]) * .5
+                        boxes.append(((ctr[0]-radius, ctr[1]-radius, lo[2]),
+                                      (ctr[0]+radius, ctr[1]+radius, hi[2])))
+                    continue
+                box = (self._placement_bbox(g) if g.xform is not None
+                       else self._group_chunk(g).get("bbox"))
+                if box is None:
+                    from core.lazy_mesh import entity_count
+                    if entity_count(g.mesh) == 0:
+                        continue  # empty containers do not constrain depth
+                    # Cache a conservative refusal too: otherwise one
+                    # unknown box repeats the entire placement walk on
+                    # every camera frame (about 90 ms on a large model).
+                    self._depth_boxes = (key, None, None)
+                    return
+                boxes.append(box)
+            # Loose/edit geometry has no placement box; preserve its bounds
+            # without materialising any deferred component prototypes.
+            points = [v.position.toTuple() for v in self.scene.mesh.vertices]
+            if points:
+                a = np.asarray(points)
+                boxes.append((a.min(axis=0), a.max(axis=0)))
+            for im in getattr(self.scene, "image_planes", ()):
+                if self.scene.entity_visible(im):
+                    a = np.asarray([p.toTuple() for p in im.corners()])
+                    boxes.append((a.min(axis=0), a.max(axis=0)))
+            a = np.asarray(boxes, dtype=float).reshape(-1, 2, 3)
+            memo = self._depth_boxes = (key, a[:, 0], a[:, 1])
+        if memo[1] is not None:
+            self.camera.fit_depth_range(memo[1], memo[2])
+
     def paintGL(self) -> None:
         self._tick = getattr(self, "_tick", 0) + 1     # a new epoch memo
         self._depth_clean = None          # see the read-back at the end
@@ -2397,6 +2519,9 @@ class Viewport(QOpenGLWidget):
             return
         self._sync_depth_reach()
         _pt0 = _time_mod.perf_counter() if _PERF else 0.0
+        if _PERF:
+            self._gpu_timings.frame(self._tick)
+            self._gpu_timings.begin("setup")
 
         # Render the 3D scene into our own FBO (which has a real depth buffer)
         # then blit the colour to the widget's default framebuffer. Sizes are
@@ -2453,9 +2578,11 @@ class Viewport(QOpenGLWidget):
         self._gl.glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
         self._gl.glStencilMask(AO_FOLIAGE_BIT)
 
+        self._fit_scene_depth()
         mvp = self.camera.projection_matrix() * self.camera.view_matrix()
         # Frustum planes for chunk culling — also consumed by the
         # silhouette pass (skip whole chunks that are off screen).
+        self._frame_feedback = self._navigation_feedback_frame(mvp)
         self._frame_planes = self._frustum_planes(mvp)
         # P0 frame telemetry: coarse per-section CPU times, logged with the
         # cull counters when the frame is slow (INGETRAZO_PERF=1).
@@ -2610,6 +2737,8 @@ class Viewport(QOpenGLWidget):
             self._gl.glEnable(GL_DEPTH_TEST)
 
         self._program.release()
+        if _PERF:
+            self._gpu_timings.end()
 
         if self._export_size is not None:
             # Hi-res export: the scene stays in the FBO for render_image to
@@ -2635,10 +2764,17 @@ class Viewport(QOpenGLWidget):
         if not kept:
             self._depth_snap = None
             if self._annotations_need_depth():
+                if _PERF:
+                    self._gpu_timings.begin("depth_readback")
                 self._capture_depth(w, h)
+                if _PERF:
+                    self._gpu_timings.end()
         # What the scene FBO now holds: the depth under the cursor can be
         # read from it while the camera stays here (``_depth_world_at``).
         self._painted_view = (tuple(mvp.data()), w, h)
+
+        if _PERF:
+            self._gpu_timings.begin("blit")
 
         # Blit colour from our scene FBO to the widget's default framebuffer.
         # We can't use QOpenGLFramebufferObject.blitFramebuffer(None, src) here
@@ -2657,11 +2793,13 @@ class Viewport(QOpenGLWidget):
             _plog("paintGL.gl+blit",
                   (_time_mod.perf_counter() - _pt0) * 1000.0, floor=30.0)
             _ov0 = _time_mod.perf_counter()
+            self._gpu_timings.begin("overlay")
 
         # 2D overlays on top of the OpenGL framebuffer.
         self._draw_overlay()
 
         if _PERF:
+            self._gpu_timings.end()
             _plog("paintGL.overlay",
                   (_time_mod.perf_counter() - _ov0) * 1000.0, floor=30.0)
             _dt = (_time_mod.perf_counter() - _pt0) * 1000.0
@@ -2698,6 +2836,8 @@ class Viewport(QOpenGLWidget):
         # Frustum culling (P1): the consolidated VBOs carry per-chunk draw
         # spans; only spans whose chunk AABB touches the frustum are
         # submitted. Conservative — a missing bbox always draws.
+        if _PERF:
+            self._gpu_timings.begin("faces")
         planes = self._frame_planes
         # Inside a group with the context faded, the buffers hold the
         # surroundings first and the edited group last; the split keeps the
@@ -2717,7 +2857,8 @@ class Viewport(QOpenGLWidget):
             face_spans, culled_fv = [(0, self._faces_count)], 0
         espans = getattr(self, "_edge_spans", None)
         if espans:
-            edge_spans, culled_ev = self._visible_spans(espans, planes, split_e)
+            edge_spans, culled_ev = self._visible_spans(
+                self._navigation_edge_spans(espans), planes, split_e)
         else:
             edge_spans, culled_ev = [(0, self._edges_count)], 0
         self._frame_edge_spans = edge_spans
@@ -3101,6 +3242,8 @@ class Viewport(QOpenGLWidget):
             self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
 
         _fmark("faces")
+        if _PERF:
+            self._gpu_timings.begin("previews_axes")
         # Shaded solid preview (Push/Pull box forming as you drag). Drawn after
         # the persistent faces, depth-tested so it occludes geometry behind it
         # and reads as a real solid; its wireframe goes on top via the rubber
@@ -3110,10 +3253,13 @@ class Viewport(QOpenGLWidget):
         self._draw_groups_preview(mvp)
         self._draw_hidden_ghosts(mvp)
 
-        self._draw_scaffold(mvp, w, h)
+        self._draw_scaffold_depth(mvp, w, h)
 
         self._set_section_clip(True)
-        show_edges = style.edges or mode == "wireframe"
+        if _PERF:
+            self._gpu_timings.begin("edges")
+        show_edges = mode == "wireframe" or (style.edges and (
+            not self._frame_feedback or self._navigation_edge_lod_px > 0))
         ec = style.edge_color
         # Line weight for sheet renders: a GL line is one pixel whatever
         # the DPI (core-profile Mesa clamps glLineWidth), and one pixel at
@@ -3184,10 +3330,14 @@ class Viewport(QOpenGLWidget):
         if len(_jit_e) > 1:
             self._program.setUniformValue(self._loc_mvp, mvp)
 
+        if _PERF:
+            self._gpu_timings.begin("silhouettes")
+
         # Profile (silhouette) edges: soft seams of a curved surface are hidden,
         # except where the surface turns away from the viewer — the cylinder's
         # outline. View-dependent, so rebuilt every frame.
-        if show_edges and style.profiles:
+        if show_edges and style.profiles and (
+                not self._frame_feedback or mode == "wireframe"):
             sil_count = self._upload_silhouette_edges()
             if sil_count > 0:
                 self._set_color(ec[0], ec[1], ec[2], 1.0)
@@ -3201,6 +3351,8 @@ class Viewport(QOpenGLWidget):
                 if len(_jit_p) > 1:
                     self._program.setUniformValue(self._loc_mvp, mvp)
         _fmark("edges")
+        if _PERF:
+            self._gpu_timings.begin("selection_preview")
 
         # Selected edges (drawn on top, highlighted) — never in an export
         if self._selected_count > 0 and self._export_size is None:
@@ -3220,6 +3372,18 @@ class Viewport(QOpenGLWidget):
             self._hover_edges_vao.release()
         self._set_section_clip(False)
         self._draw_section_cut_edges()   # ON the plane — drawn unclipped
+
+    def _draw_scaffold_depth(self, mvp, w, h):
+        # Axes extend beyond model bounds. Keep their projected lines while
+        # clamping their depth to the fitted range (no geometry is clamped).
+        fitted = self.camera._fitted_depth_range() is not None
+        if fitted:
+            self._gl.glEnable(0x864F)  # GL_DEPTH_CLAMP, core since GL 3.2
+        try:
+            self._draw_scaffold(mvp, w, h)
+        finally:
+            if fitted:
+                self._gl.glDisable(0x864F)
 
     def _draw_scaffold(self, mvp, w, h) -> None:
         """The axes, the guides and the dashed box of the group being
@@ -3352,7 +3516,8 @@ class Viewport(QOpenGLWidget):
         versions (a selection bumps it), every buffer sent to the GPU since
         (``_gpu_epoch``), the style, the open group, the guides, the
         textures loaded, the shadow map."""
-        if not _FRAME_CACHE or self._export_size is not None:
+        if (not _FRAME_CACHE or self._export_size is not None
+                or getattr(self, "_frame_feedback", False)):
             return None
         sc = self.scene
         if (mode == "xray" or getattr(style, "back_edges", False)
@@ -3472,7 +3637,7 @@ class Viewport(QOpenGLWidget):
                 self._gl.glStencilFunc(GL_EQUAL, 1, 0xFF)
                 self._gl.glStencilMask(0x00)
                 self._gl.glDepthFunc(GL_LESS)
-                self._draw_scaffold(mvp, w, h)
+                self._draw_scaffold_depth(mvp, w, h)
                 self._program.setUniformValue(self._loc_mvp, mvp)
                 self._gl.glDepthFunc(GL_LEQUAL)
                 self._gl.glStencilMask(0xFF)
@@ -3696,7 +3861,19 @@ class Viewport(QOpenGLWidget):
         material the variant is baked in (issue #47): a painted instance
         has its own bake of the prototype, unpainted siblings share the
         plain one."""
-        return self._group_chunk(_proto_wrapper(self, mesh, paint))
+        stamp = (getattr(self, "_tick", 0), _cache_ver(self), id(self.scene.mesh))
+        memo = getattr(self, "_proto_base_memo", None)
+        if memo is None or memo[0] != stamp:
+            memo = self._proto_base_memo = (stamp, {})
+        key = (id(mesh), getattr(mesh, "_mut_serial", None),
+               getattr(mesh, "_render_attrs_serial", 0), _material_sig(paint))
+        hit = memo[1].get(key)
+        if (hit is not None and hit[0] is mesh
+                and not getattr(mesh, "_attrs_dirty", False)):
+            return hit[1]
+        chunk = self._group_chunk(_proto_wrapper(self, mesh, paint))
+        memo[1][key] = (mesh, chunk)
+        return chunk
 
     def _placements_epoch(self):
         """A signature of everything the per-frame placement passes read:
@@ -3764,12 +3941,12 @@ class Viewport(QOpenGLWidget):
             # the version-keyed half (rebuilt per frame of a drag), not the
             # placements half — counting its serial here re-keyed every
             # cache on every drag frame (81 ms a frame instead of 56).
-            serial = (getattr(m, "_mut_serial", None)
+            serial = ((getattr(m, "_mut_serial", 0) - getattr(m, "_materialization_serial", 0))
                       if m is not None and m is not loose else None)
             # ``locked`` too: the pick block lists a group as selectable or
             # not, and a padlock that did not re-key it left the group
             # movable and openable from the view.
-            return (id(g), id(m), serial,
+            return (id(g), id(m), (serial, getattr(m, "_render_attrs_serial", 0)),
                     tuple(xf.data()) if xf is not None else None,
                     g.layer, bool(g.billboard), bool(g.hidden),
                     bool(getattr(g, "locked", False)),
@@ -3793,20 +3970,44 @@ class Viewport(QOpenGLWidget):
             return epoch
         movers: list = []
         head = len(parts)
-
-        def walk(g):
-            if id(g) in pv:
-                movers.append((len(parts), g))
-            parts.append(part(g))
-            for c in (g.children or ()):
-                walk(c)
-        # Where each top-level object's subtree sits in ``parts``: what
-        # ``_epoch_kept_tops`` compares, object by object.
-        tops: list = []
-        for g in sc.groups:
-            start = len(parts)
-            walk(g)
-            tops.append((id(g), start, len(parts)))
+        tree_key = (sc.content_version, id(sc.groups), len(sc.groups))
+        tree = getattr(self, "_epoch_tree", None)
+        change = getattr(sc, "_placement_change", None)
+        if (live and not pv and tree is not None and change is not None
+                and change[0] == tree_key[0] == tree[0][0] + 1
+                and tree_key[1:] == tree[0][1:] and id(change[1]) in tree[4]):
+            rows = list(tree[1])
+            i = tree[4][id(change[1])]
+            row = rows[i]
+            rows[i] = row[:3] + (tuple(change[1].xform.data()),) + row[4:]
+            tree = self._epoch_tree = (tree_key, rows, tree[2], tree[3], tree[4])
+        if not live or pv or tree is None or tree[0] != tree_key:
+            rows, tops, meshes, nodes = [], [], {}, {}
+            def walk(g):
+                nodes[id(g)] = len(rows)
+                if id(g) in pv:
+                    movers.append((head + len(rows), g))
+                row = part(g)
+                # Cache the real serial, independently of which mesh is open.
+                row = row[:2] + ((getattr(g.mesh, "_mut_serial", 0) -
+                                  getattr(g.mesh, "_materialization_serial", 0),
+                                  row[2][1]),) + row[3:]
+                meshes.setdefault(id(g.mesh), []).append(len(rows))
+                rows.append(row)
+                for c in (g.children or ()):
+                    walk(c)
+            for g in sc.groups:
+                start = head + len(rows)
+                walk(g)
+                tops.append((id(g), start, head + len(rows)))
+            tree = (tree_key, rows, tops, meshes, nodes)
+            self._epoch_tree = tree if live and not pv else None
+        rows = list(tree[1])
+        for i in tree[3].get(id(loose), ()):
+            row = rows[i]
+            rows[i] = row[:2] + ((None, row[2][1]),) + row[3:]
+        parts.extend(rows)
+        tops = tree[2]
         epoch = hash(tuple(parts))
         self._epoch_remember(epoch, head, parts, tops)
         # (cheap key, the parts before the walk, every part, the movers'
@@ -3930,6 +4131,47 @@ class Viewport(QOpenGLWidget):
         self._kept_tops_memo = ((old, new, ctx), out)
         return out
 
+    def _kept_render_placements(self, old_epoch):
+        """Unchanged world placements, including siblings inside an edited tree.
+
+        Top-level invalidation discards all 63k rows when one child of an
+        imported assembly changes. Compare the already-expanded world
+        placements instead; owner paint and inherited visibility are part
+        of the snapshot, so ancestor edits still invalidate their children.
+        """
+        epoch = self._placements_epoch()
+        history = getattr(self, "_render_placement_history", None)
+        if history is None:
+            history = self._render_placement_history = {}
+        if epoch in history:
+            history[epoch] = history.pop(epoch)
+        if epoch not in history:
+            sc = self.scene
+            header = (tuple((ly.name, ly.visible, ly.locked) for ly in sc.layers),
+                      bool(getattr(sc, "hide_similar_components", False)),
+                      id(sc.edit_definition()) if sc.hide_similar_components else None)
+            states = {}
+            for g in self._placements():
+                xf = g.xform
+                states[id(g)] = (g.mesh, getattr(g.mesh, "_mut_serial", None),
+                                 getattr(g.mesh, "_render_attrs_serial", 0),
+                                 tuple(xf.data()) if xf is not None else None,
+                                 g.layer, bool(g.hidden), bool(g.billboard),
+                                 _material_sig(_paint_of(self, g)),
+                                 sc.similar_hidden(g))
+            history[epoch] = (header, states)
+            while len(history) > 4:
+                del history[next(iter(history))]
+        new = history[epoch]
+        old = history.get(old_epoch)
+        if old is None or old[0] != new[0]:
+            return frozenset()
+        memo = getattr(self, "_kept_render_memo", None)
+        if memo is None or memo[0] != (old_epoch, epoch):
+            kept = frozenset(k for k, v in new[1].items() if old[1].get(k) == v)
+            memo = self._kept_render_memo = ((old_epoch, epoch), kept)
+        return memo[1]
+
     def _refilter(self, old_epoch, old_out, source, test, old_source=None,
                   ctx=False):
         """``[g for g in source if test(g)]`` worked out only for the
@@ -3939,11 +4181,12 @@ class Viewport(QOpenGLWidget):
         ids the old answer was taken from, when not every placement.
         ``None`` when ``_epoch_kept_tops`` cannot tell; ``ctx`` as there,
         for a ``test`` that reads what a placement is, not the context."""
-        kept = self._epoch_kept_tops(old_epoch, ctx=ctx)
+        kept = (self._kept_render_placements(old_epoch) if ctx else
+                self._epoch_kept_tops(old_epoch))
         if kept is None:
             return None
         was = {id(g) for g in old_out}
-        top_of = self._placement_top
+        top_of = id if ctx else self._placement_top
         if old_source is not None:
             src = set(old_source)
             return [g for g in source
@@ -3990,10 +4233,26 @@ class Viewport(QOpenGLWidget):
         cache = getattr(self, "_placement_proxies", None)
         if cache is None:
             cache = self._placement_proxies = {}
+        world_key = (self.scene.content_version,
+                     getattr(self, "_preview_epoch", 0),
+                     tuple((ly.name, ly.visible, ly.locked) for ly in self.scene.layers))
+        previous_world = getattr(self, "_placement_world_key", None)
+        # The epoch too: a live drag moves a matrix and no content version.
+        reuse_world = (key is not None and previous_world == world_key
+                       and getattr(self, "_placement_world_epoch", None) == key
+                       and not getattr(self, "_preview_groups", None))
+        self._placement_world_epoch = key
+        change = getattr(self.scene, "_placement_change", None)
+        moved_group = (change[1] if change is not None and previous_world is not None
+                       and change[0] == world_key[0] == previous_world[0] + 1
+                       and world_key[1:] == previous_world[1:]
+                       and not getattr(self, "_preview_groups", None) else None)
         out: list = []
         seen: set = set()
         for g in groups:
-            self._expand_placements(g, out, seen)
+            self._expand_placements(g, out, seen, reuse_world=reuse_world,
+                                    moved_group=moved_group)
+        self._placement_world_key = world_key
         # Proxies are pinned while a preview is running: the movers' ids are
         # what the draw passes skip on, and dropping one mid-drag would make
         # a fresh object (chunk cache miss) that the preview no longer knows.
@@ -4007,7 +4266,8 @@ class Viewport(QOpenGLWidget):
         self._placements_memo = (key, out)
         return out
 
-    def _expand_placements(self, group, out=None, seen=None):
+    def _expand_placements(self, group, out=None, seen=None, *, reuse_world=False,
+                           moved_group=None):
         """``group`` followed by its nested placements, as stable proxies.
 
         Used both for the whole scene (``_placements``) and for ONE group's
@@ -4032,7 +4292,7 @@ class Viewport(QOpenGLWidget):
         ctx = self.scene.edit_group
 
         def walk(node, world, dentro=None, hidden=False, forced=forced,
-                 inherited=None):
+                 inherited=None, world_changed=False):
             """``dentro`` = the first-level child of the open context this
             subtree hangs from, or ``None`` outside it.
 
@@ -4045,29 +4305,30 @@ class Viewport(QOpenGLWidget):
             anidados»).
             """
             for child in node.children:
-                m = (child.xform if world is None
-                     else (world * child.xform if child.xform is not None
-                           else world))
                 proxy = cache.get(id(child))
+                changed = world_changed or child is moved_group
+                keep_matrix = reuse_world or (moved_group is not None and not changed)
+                m = (proxy.xform if keep_matrix and proxy is not None else
+                     child.xform if world is None else
+                     world * child.xform if child.xform is not None else world)
                 if proxy is None:
                     proxy = cache[id(child)] = Group(child.mesh,
                                                      name=child.name)
                 if seen is not None:
                     seen.add(id(child))
                 tops[id(proxy)] = id(group)
-                proxy.mesh = child.mesh
-                # A nested entity with no tag of its own inherits the
-                # nearest tag above it (the .skp convention); and when a tag
-                # above is hidden or locked the whole instance goes with it,
-                # whatever its children are tagged — at ANY depth, not only
-                # below the top-level object: a hidden group two levels down
-                # left its own children on screen.
-                proxy.layer = forced or child.layer or inherited or node.layer
-                proxy.billboard = child.billboard
-                # Hide on an object takes its whole subtree along, and a
-                # hidden child stays hidden inside a visible parent.
-                proxy.hidden = hidden or bool(child.hidden)
-                proxy.material = getattr(child, "material", None)
+                if not reuse_world and moved_group is None:
+                    proxy.mesh = child.mesh
+                    # A nested entity with no tag of its own inherits the
+                    # nearest tag above it (the .skp convention); and when a tag
+                    # above is hidden or locked the whole instance goes with
+                    # it, whatever its children are tagged, at any depth.
+                    proxy.layer = forced or child.layer or inherited or node.layer
+                    proxy.billboard = child.billboard
+                    # Hide on an object takes its whole subtree along, and a
+                    # hidden child stays hidden inside a visible parent.
+                    proxy.hidden = hidden or bool(child.hidden)
+                    proxy.material = getattr(child, "material", None)
                 if child is ctx:
                     # The group being edited, reached as a nested placement:
                     # it is the SUBJECT, not surroundings. Comparing by
@@ -4090,9 +4351,10 @@ class Viewport(QOpenGLWidget):
                             kid_forced = proxy.layer
                     walk(child, m,
                          child if (ctx is not None and node is ctx) else dentro,
-                         proxy.hidden, kid_forced, proxy.layer)
+                         proxy.hidden, kid_forced, proxy.layer, changed)
 
-        walk(group, getattr(group, "xform", None), hidden=bool(group.hidden))
+        walk(group, getattr(group, "xform", None), hidden=bool(group.hidden),
+             world_changed=group is moved_group)
         return out
 
     def prepare_drawing(self, progress=None) -> None:
@@ -4142,7 +4404,18 @@ class Viewport(QOpenGLWidget):
         bake: the silhouette pass asks for both for every placement at up
         to 12 Hz, and working them out in Python each time cost ~7 ms a
         pass on the plaza's 1 359 placements (release check, 30-09)."""
-        base = self._proto_base_chunk(g.mesh, _paint_of(self, g))
+        paint = _paint_of(self, g)
+        # Thousands of placements share a few prototypes. Within one
+        # render/pick tick, validate each prototype once, not once per copy.
+        stamp = (getattr(self, "_tick", 0), _cache_ver(self), id(self.scene.mesh))
+        memo = getattr(self, "_placement_frame_bases", None)
+        if memo is None or memo[0] != stamp:
+            memo = self._placement_frame_bases = (stamp, {})
+        bkey = (id(g.mesh), getattr(g.mesh, "_mut_serial", None),
+                getattr(g.mesh, "_render_attrs_serial", 0), _material_sig(paint))
+        base = memo[1].get(bkey)
+        if base is None or getattr(g.mesh, "_attrs_dirty", False):
+            base = memo[1][bkey] = self._proto_base_chunk(g.mesh, paint)
         m = g.xform
         key = (base.get("uid"), tuple(m.data()))
         cache = getattr(self, "_placement_frames", None)
@@ -4154,17 +4427,21 @@ class Viewport(QOpenGLWidget):
         bb = base.get("bbox")
         box = None
         if bb:
-            (x0, y0, z0), (x1, y1, z1) = bb
-            pts = [m.map(QVector3D(x, y, z))
-                   for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
-            box = ((min(p.x() for p in pts), min(p.y() for p in pts),
-                    min(p.z() for p in pts)),
-                   (max(p.x() for p in pts), max(p.y() for p in pts),
-                    max(p.z() for p in pts)))
+            if m.isAffine():
+                from views.placement_bounds import affine_bounds
+                lo, hi = affine_bounds([bb], [m.data()])
+                box = (tuple(map(float, lo[0])), tuple(map(float, hi[0])))
+            else:
+                (x0, y0, z0), (x1, y1, z1) = bb
+                pts = [m.map(QVector3D(x, y, z))
+                       for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
+                box = (tuple(min(p[i] for p in pts) for i in range(3)),
+                       tuple(max(p[i] for p in pts) for i in range(3)))
         inv, ok = m.inverted()
-        if len(cache) > 4 * max(64, len(getattr(self, "_inst_pool", (0, ()))[1]
-                                         if getattr(self, "_inst_pool", None)
-                                         else ())):
+        pool = getattr(self, "_inst_pool", None)
+        placements = getattr(self, "_placements_memo", None)
+        if len(cache) > 4 * max(64, len(pool[1]) if pool else 0,
+                               len(placements[1]) if placements else 0):
             cache.clear()                  # ids of placements long gone
         val = (box, inv if ok else None)
         cache[id(g)] = (key, val)
@@ -4175,6 +4452,24 @@ class Viewport(QOpenGLWidget):
         winding of every prototype triangle, and GL decides front and back
         (``gl_FrontFacing``, the culled back-tint pass) by winding."""
         self._gl.glFrontFace(GL_CW if mirrored else GL_CCW)
+
+    def _render_geometry_key(self):
+        """World render data survives context changes; inherited paint may not."""
+        sc = self.scene
+        epoch = self._placements_epoch()
+        memo = getattr(self, "_render_geometry_memo", None)
+        if memo is not None and memo[0] == (epoch, sc.content_version):
+            return memo[1]
+        from core.group import effective_material
+        key = (sc.content_version,
+               getattr(self, "_preview_epoch", 0),
+               bool(getattr(self, "_preview_groups", None)),
+               tuple((ly.name, ly.visible, ly.locked) for ly in sc.layers),
+               sc.show_hidden_objects, sc.show_hidden_geometry,
+               id(sc.edit_group) if sc.hide_similar_components else None,
+               tuple(_material_sig(effective_material(g)) for g in self._placements()))
+        self._render_geometry_memo = ((epoch, sc.content_version), key)
+        return key
 
     def _gather_instanced(self):
         """Visible, eligible instances grouped by prototype mesh — computed
@@ -4198,12 +4493,38 @@ class Viewport(QOpenGLWidget):
         # frozen preview key it: what the pool holds is the epoch's.
         key = (self._placements_epoch(), id(self.scene.mesh))
         pool = getattr(self, "_inst_pool", None)
+        geometry = self._render_geometry_key()
+        archive = getattr(self, "_inst_pool_archive", None)
+        if archive is None:
+            archive = self._inst_pool_archive = {}
+        archive_key = (key, getattr(self.scene.mesh, "_mut_serial", 0) -
+                       getattr(self.scene.mesh, "_materialization_serial", 0),
+                       getattr(self.scene.mesh, "_render_attrs_serial", 0))
+
+        previous = getattr(self, "_inst_pool_geometry", None)
+        if (pool is not None and pool[0] != key and previous is not None
+                and previous[0] is pool and previous[1] == geometry):
+            old_pool = pool
+            pool = self._inst_pool = (key,) + pool[1:]
+            for k, memo in (getattr(self, "_inst_frame_memo", None) or {}).items():
+                if memo[0] is old_pool:
+                    self._inst_frame_memo[k] = (pool,) + memo[1:]
         if pool is not None and pool[0] != key:
             moved = self._inst_pool_moved(pool, key)
-            pool = self._inst_pool = (moved if moved is not None
-                                      else self._inst_pool_build(key, pool))
+            if moved is not None:
+                pool = moved
+            elif archive_key in archive:
+                pool = archive[archive_key]
+                self._kept_render_placements(None)
+            else:
+                pool = self._inst_pool_build(key, pool)
+            self._inst_pool = pool
         if pool is None or pool[0] != key:
             pool = self._inst_pool = self._inst_pool_build(key)
+        self._inst_pool_geometry = (pool, geometry)
+        archive[archive_key] = pool
+        while len(archive) > 4:
+            del archive[next(iter(archive))]
         _k, groups, lo, hi, codes_a, protos, mats, by_code = pool
         out: dict = {}
         if not groups:
@@ -4285,26 +4606,24 @@ class Viewport(QOpenGLWidget):
         """The instanced pool for ``key``: every visible, eligible
         placement with its box, its batch (prototype, container paint,
         mirror) and its matrix. With the ``old`` pool, the rows of the
-        objects ``_epoch_kept_tops`` finds unchanged are taken from it, not
+        placements whose world state is unchanged are taken from it, not
         worked out again — the same pool, row for row, as one made afresh
         (a Delete or a Paste beside 21 406 placements, #158)."""
         import numpy as np
-        kept = (self._epoch_kept_tops(old[0][0], key[0], ctx=True)
-                if old is not None else None)
+        kept = self._kept_render_placements(old[0][0] if old is not None else None)
         row = {}
         if kept:
             _k, o_groups, o_lo, o_hi, o_codes, o_protos, o_mats, _b = old
             row = {id(g): i for i, g in enumerate(o_groups)}
             o_pk = [(id(m), _material_sig(p), mir) for m, p, mir in o_protos]
         placements = self._placements()
-        top_of = self._placement_top
         groups: list = []
         boxes: list = []                  # a box, or the old row's index
         codes: list = []
         protos: list = []                 # code → (mesh, paint, mirrored)
         code_of: dict = {}
         for g in placements:
-            if kept and top_of(g) in kept:
+            if kept and id(g) in kept:
                 # Unchanged: in the old pool exactly when it is in this one.
                 i = row.get(id(g))
                 if i is None:
@@ -4382,6 +4701,7 @@ class Viewport(QOpenGLWidget):
         old = pool[0]
         if old[1:] != key[1:] or not self._epoch_only_matrices(old[0], key[0]):
             return None
+        self._placements()  # refresh nested proxies after an ancestor move
         _k, groups, lo, hi, codes_a, protos, mats, by_code = pool
         if not groups:
             return (key,) + tuple(pool[1:])
@@ -4389,13 +4709,45 @@ class Viewport(QOpenGLWidget):
                        dtype=np.float32).reshape(-1, 16)
         moved = np.flatnonzero((now != mats).any(axis=1))
         lo, hi = lo.copy(), hi.copy()
-        for i in moved.tolist():
-            g = groups[i]
-            if (g.xform.determinant() < 0.0) != protos[int(codes_a[i])][2]:
-                return None
-            box = self._placement_bbox(g)
-            lo[i] = box[0] if box else (-np.inf,) * 3
-            hi[i] = box[1] if box else (np.inf,) * 3
+        if len(moved) >= 32 and all(groups[i].xform.isAffine() for i in moved):
+            from views.placement_bounds import affine_bounds
+            bases = [self._proto_base_chunk(mesh, paint) for mesh, paint, _ in protos]
+            boxes = [base.get("bbox") or ((-np.inf,)*3, (np.inf,)*3)
+                     for base in bases]
+            # Translations keep winding. For other transforms use Qt's
+            # determinant, exactly as the fresh pool does (near-singular
+            # imported matrices can disagree with NumPy's determinant).
+            if not np.array_equal(now[moved, :12], mats[moved, :12]):
+                mirrored = np.fromiter((groups[i].xform.determinant() < 0
+                                        for i in moved), bool, count=len(moved))
+                expected = np.asarray([p[2] for p in protos])[codes_a[moved]]
+                if not np.array_equal(mirrored, expected):
+                    return None
+            local = np.asarray(boxes)[codes_a[moved]]
+            missing = ~np.isfinite(local).all(axis=(1, 2))
+            local[missing] = 0
+            blo, bhi = affine_bounds(local, now[moved])
+            blo[missing], bhi[missing] = -np.inf, np.inf
+            lo[moved], hi[moved] = blo, bhi
+            cache = getattr(self, "_placement_frames", None)
+            if cache is None:
+                cache = self._placement_frames = {}
+            for j, i in enumerate(moved.tolist()):
+                g = groups[i]
+                base = bases[int(codes_a[i])]
+                inv, ok = g.xform.inverted()
+                box = ((tuple(map(float, blo[j])), tuple(map(float, bhi[j])))
+                       if not missing[j] else None)
+                cache[id(g)] = ((base.get("uid"), tuple(g.xform.data())),
+                                (box, inv if ok else None))
+        else:
+            for i in moved.tolist():
+                g = groups[i]
+                if (g.xform.determinant() < 0.0) != protos[int(codes_a[i])][2]:
+                    return None
+                box = self._placement_bbox(g)
+                lo[i] = box[0] if box else (-np.inf,) * 3
+                hi[i] = box[1] if box else (np.inf,) * 3
         return (key, groups, lo, hi, codes_a, protos, now, by_code)
 
     #: How far past the view the instanced batches reach, as a fraction of
@@ -4543,17 +4895,27 @@ class Viewport(QOpenGLWidget):
             # edit of a component, for the whole session.
             self._destroy_proto_draw_entry(entry)
 
-        def static_vbo(raw):
-            vbo = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
+        def static_vbo(raw, kind=QOpenGLBuffer.VertexBuffer):
+            temporary = None
+            if kind == QOpenGLBuffer.IndexBuffer:
+                # A core context requires a VAO even for allocating an EBO.
+                temporary = QOpenGLVertexArrayObject()
+                temporary.create()
+                temporary.bind()
+            vbo = QOpenGLBuffer(kind)
             vbo.setUsagePattern(QOpenGLBuffer.StaticDraw)
             vbo.create()
             vbo.bind()
             vbo.allocate(raw or b"\0" * 4, max(len(raw), 4))
             vbo.release()
+            if temporary is not None:
+                temporary.release()
+                temporary.destroy()
             return vbo
 
         self._program.bind()
-        vcol_raw = base["vcol"]
+        from views.vertex_index import index_vertices
+        vcol_raw, vcol_index = index_vertices(base["vcol"], 24)
         edges_raw = base["edges"]
         dback_raw = base.get("dback", b"")
         # textures: pos(3)+uv(2), one run per (path, shade)
@@ -4565,14 +4927,17 @@ class Viewport(QOpenGLWidget):
             n = len(raw) // 20
             tex_runs.append((tkey, start, n))
             start += n
+        tex_raw, tex_index = index_vertices(b"".join(tex_parts), 20)
         entry = {"key": key,
                  "vcol_vbo": static_vbo(vcol_raw),
-                 "vcol_count": len(vcol_raw) // 24,
+                 "vcol_index_vbo": static_vbo(vcol_index, QOpenGLBuffer.IndexBuffer) if vcol_index else None,
+                 "tex_index_vbo": static_vbo(tex_index, QOpenGLBuffer.IndexBuffer) if tex_index else None,
+                 "vcol_count": len(base["vcol"]) // 24,
                  "edges_vbo": static_vbo(edges_raw),
                  "edge_count": len(edges_raw) // 12,
                  "dback_vbo": static_vbo(dback_raw),
                  "dback_count": len(dback_raw) // 12,
-                 "tex_vbo": static_vbo(b"".join(tex_parts)),
+                 "tex_vbo": static_vbo(tex_raw),
                  "tex_runs": tex_runs}
         entry.update(self._wire_proto_vaos(entry))
         # The main program stays BOUND. This is built mid-frame, from a pass
@@ -4609,7 +4974,7 @@ class Viewport(QOpenGLWidget):
                 extra.glVertexAttribDivisor(loc, 1)
             mat_vbo.release()
 
-        def vao(vbo, attrs, stride):
+        def vao(vbo, attrs, stride, index=None):
             v = QOpenGLVertexArrayObject(self)
             v.create()
             v.bind()
@@ -4620,6 +4985,8 @@ class Viewport(QOpenGLWidget):
                                                  stride)
             vbo.release()
             wire_matrix()
+            if index is not None:
+                index.bind()  # element buffer belongs to this VAO
             v.release()
             return v
         pos = (self._loc_pos, 0, 3)
@@ -4627,11 +4994,13 @@ class Viewport(QOpenGLWidget):
                 # vcol: pos(3)+rgb(3); edges, default-back tint: pos(3);
                 # textures: pos(3)+uv(2)
                 "vcol_vao": vao(statics["vcol_vbo"],
-                                (pos, (self._loc_vcolor, 12, 3)), 24),
+                                (pos, (self._loc_vcolor, 12, 3)), 24,
+                                statics.get("vcol_index_vbo")),
                 "edges_vao": vao(statics["edges_vbo"], (pos,), 12),
                 "dback_vao": vao(statics["dback_vbo"], (pos,), 12),
                 "tex_vao": vao(statics["tex_vbo"],
-                               (pos, (self._loc_uv, 12, 2)), 20)}
+                               (pos, (self._loc_uv, 12, 2)), 20,
+                               statics.get("tex_index_vbo"))}
 
     def _proto_view(self, entry, mirrored: bool) -> dict:
         """The draw entry a batch of ``mirrored`` placements uses: the
@@ -4669,7 +5038,7 @@ class Viewport(QOpenGLWidget):
                 except (RuntimeError, AttributeError):
                     pass
         for k, obj in entry.items():
-            if k.endswith("_vao") or k.endswith("_vbo"):
+            if obj is not None and (k.endswith("_vao") or k.endswith("_vbo")):
                 try:
                     obj.destroy()
                     if k.endswith("_vao"):
@@ -4730,17 +5099,48 @@ class Viewport(QOpenGLWidget):
         container, which made its children instanced). Hiding works the same
         way: `hide` drops the surroundings instead of washing them.
         """
-        if self.scene.edit_group is None:
+        if self.scene.edit_group is None or self._edit_rest_mode not in ("fade", "hide"):
             return [(groups, 0.0)]
-        fuera = [g for g in groups if self._draws_in_edit_context(g)]
-        dentro = [g for g in groups if not self._draws_in_edit_context(g)]
-        if self._edit_rest_mode == "hide":
-            return [(dentro, 0.0)]
-        if self._edit_rest_mode != "fade":
+        if self._edit_rest_mode not in ("fade", "hide"):
             return [(groups, 0.0)]
         fade = float(getattr(self, "_edit_rest_fade_strength",
                              EDIT_REST_FADE))
-        return [(fuera, fade), (dentro, 0.0)]
+        key = (id(self.scene.edit_group), self._edit_rest_mode, fade)
+        memo = getattr(groups, "context_batches", None)
+        if memo is not None and memo[0] == key:
+            return memo[1]
+        outside = [i for i, g in enumerate(groups) if self._draws_in_edit_context(g)]
+        outside_set = set(outside)
+        inside = [i for i in range(len(groups)) if i not in outside_set]
+        def subset(indices):
+            if len(indices) == len(groups):
+                return groups
+            if isinstance(groups, _InstanceBatch):
+                batch = _InstanceBatch(groups[i] for i in indices)
+                batch.idx = groups.idx[indices]
+                batch.mats = groups.mats
+                return batch
+            return [groups[i] for i in indices]
+        batches = [(subset(inside), 0.0)]
+        if self._edit_rest_mode == "fade":
+            batches.insert(0, (subset(outside), fade))
+        if isinstance(groups, _InstanceBatch):
+            groups.context_batches = (key, batches)
+        return batches
+
+    @staticmethod
+    def _draw_proto_faces(entry, kind, extra, first, count, n, tape=None):
+        if entry.get(kind + "_index_vbo") is not None:
+            fn = extra.glDrawElementsInstanced
+            if tape is not None:
+                tape.draw_indexed(fn, GL_TRIANGLES, first, count, n)
+            else:
+                from shiboken6 import VoidPtr
+                fn(GL_TRIANGLES, count, 0x1405, VoidPtr(first * 4), n)
+        elif tape is not None:
+            tape.draw(extra.glDrawArraysInstanced, GL_TRIANGLES, first, count, n)
+        else:
+            extra.glDrawArraysInstanced(GL_TRIANGLES, first, count, n)
 
     def _draw_instanced_faces_lean(self, by_proto, mode, extra) -> None:
         """The instanced faces pass of the shaded and textured styles: the
@@ -4761,7 +5161,8 @@ class Viewport(QOpenGLWidget):
         back_rgb = effective_back_color(
             getattr(self.scene, "display_style", None), self.scene)
         key = (mode, tuple(back_rgb), id(getattr(self, "_tex_cache", None)),
-               id(self._program), self.edit_rest_fade)
+               id(self._program), id(self.scene.edit_group), self._edit_rest_mode,
+               self.edit_rest_fade)
         rec = getattr(self, "_lean_faces_rec", None)
         if (rec is not None and rec[0] == key and rec[1] is by_proto
                 and all(e.get("mat_batch") is b for e, b in rec[2])):
@@ -4839,7 +5240,7 @@ class Viewport(QOpenGLWidget):
                         state["back"] = True
                     bound = entry["vcol_vao"]
                     tape.bind_vao(bound)
-                    tape.draw(draw, GL_TRIANGLES, 0, entry["vcol_count"], n)
+                    self._draw_proto_faces(entry, "vcol", extra, 0, entry["vcol_count"], n, tape)
                 if entry["tex_runs"]:
                     need("cull", False, set_cull)
                     need("vcol", 0, set_vcol)
@@ -4851,7 +5252,7 @@ class Viewport(QOpenGLWidget):
                             need("shade", float(shade), set_shade)
                             set_color(r, g, b)
                             state["back"] = False
-                            tape.draw(draw, GL_TRIANGLES, s0, cnt, n)
+                            self._draw_proto_faces(entry, "tex", extra, s0, cnt, n, tape)
                     else:
                         need("tex", 1, set_tex)
                         for (path, shade), s0, cnt in entry["tex_runs"]:
@@ -4862,7 +5263,7 @@ class Viewport(QOpenGLWidget):
                             need("cut", 1 if getattr(tex, "_cutout", False)
                                  else 0, set_cut)
                             tape.tex_bind(tex, 0)
-                            tape.draw(draw, GL_TRIANGLES, s0, cnt, n)
+                            self._draw_proto_faces(entry, "tex", extra, s0, cnt, n, tape)
                             tape.tex_release(tex, 0)
                         need("cut", 0, set_cut)
                         need("tex", 0, set_tex)
@@ -4925,8 +5326,7 @@ class Viewport(QOpenGLWidget):
                         self._program.setUniformValue(self._loc_use_vcolor, 1)
                         self._set_back_face_color()
                     entry["vcol_vao"].bind()
-                    extra.glDrawArraysInstanced(
-                        GL_TRIANGLES, 0, entry["vcol_count"], n)
+                    self._draw_proto_faces(entry, "vcol", extra, 0, entry["vcol_count"], n)
                     entry["vcol_vao"].release()
                     self._program.setUniformValue(self._loc_use_vcolor, 0)
                 if entry["tex_runs"]:
@@ -4935,7 +5335,7 @@ class Viewport(QOpenGLWidget):
                         self._set_color(fr[0], fr[1], fr[2], 1.0)
                         entry["tex_vao"].bind()
                         for _tk, s0, cnt in entry["tex_runs"]:
-                            extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
+                            self._draw_proto_faces(entry, "tex", extra, s0, cnt, n)
                         entry["tex_vao"].release()
                     elif mode == "shaded":
                         entry["tex_vao"].bind()
@@ -4944,7 +5344,7 @@ class Viewport(QOpenGLWidget):
                             self._program.setUniformValue1f(
                                 self._loc_shade, float(shade))
                             self._set_color(r, g, b, 1.0)
-                            extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
+                            self._draw_proto_faces(entry, "tex", extra, s0, cnt, n)
                         entry["tex_vao"].release()
                         self._program.setUniformValue1f(self._loc_shade, 1.0)
                     else:            # textures / xray
@@ -4958,7 +5358,7 @@ class Viewport(QOpenGLWidget):
                                 self._loc_shade, float(shade))
                             self._set_cutout(getattr(tex, "_cutout", False))
                             tex.bind(0)
-                            extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
+                            self._draw_proto_faces(entry, "tex", extra, s0, cnt, n)
                             tex.release(0)
                         entry["tex_vao"].release()
                         self._set_cutout(False)
@@ -4995,13 +5395,12 @@ class Viewport(QOpenGLWidget):
             n = self._update_inst_matrices(entry, groups)
             if entry["vcol_count"]:
                 entry["vcol_vao"].bind()
-                extra.glDrawArraysInstanced(
-                    GL_TRIANGLES, 0, entry["vcol_count"], n)
+                self._draw_proto_faces(entry, "vcol", extra, 0, entry["vcol_count"], n)
                 entry["vcol_vao"].release()
             if entry["tex_runs"]:
                 entry["tex_vao"].bind()
                 for _tk, s0, cnt in entry["tex_runs"]:
-                    extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
+                    self._draw_proto_faces(entry, "tex", extra, s0, cnt, n)
                 entry["tex_vao"].release()
 
     def _draw_back_edges(self, color, w: int, h: int) -> None:
@@ -5054,7 +5453,8 @@ class Viewport(QOpenGLWidget):
         changes, recorded and replayed while the batches stay (see
         :meth:`_draw_instanced_faces_lean`)."""
         prog = self._program
-        key = (id(self._program), self.edit_rest_fade)
+        key = (id(self._program), id(self.scene.edit_group), self._edit_rest_mode,
+               self.edit_rest_fade)
         rec = getattr(self, "_lean_edges_rec", None)
         if (rec is not None and rec[0] == key and rec[1] is by_proto
                 and all(e.get("mat_batch") is b for e, b in rec[2])):
@@ -5114,10 +5514,57 @@ class Viewport(QOpenGLWidget):
         self._gl_replay_memo = (ctx, replay)
         return replay
 
+    def _navigation_edge_floor(self):
+        if (getattr(self, "_frame_feedback", False)
+                and self._effective_style().face_mode != "wireframe"):
+            return getattr(self, "_navigation_edge_lod_px", 0)
+        return 0
+
+    def _navigation_edge_spans(self, spans):
+        """Only motion LOD filters; unknown bounds and loose edges stay."""
+        import numpy as np
+        floor = self._navigation_edge_floor()
+        if not floor:
+            return spans
+        boxes = [bb if bb is not None else ((-np.inf,) * 3, (np.inf,) * 3)
+                 for bb, start, count in spans]
+        lo, hi = np.asarray(boxes).transpose(1, 0, 2)
+        ctr, rad = self._bounding_spheres(lo, hi)
+        small = self._spheres_below_a_pixel(ctr, rad, floor)
+        return [span for span, skip in zip(spans, small) if not skip]
+
+    def _navigation_edge_batches(self, by_proto):
+        import numpy as np
+        floor = self._navigation_edge_floor()
+        pool = getattr(self, "_inst_pool", None)
+        if not floor or pool is None:
+            return by_proto
+        small = self._instances_below_a_pixel(pool, floor / self._INST_MIN_PX)
+        memo = getattr(self, "_navigation_edge_memo", None)
+        if (memo is not None and memo[0] is by_proto
+                and np.array_equal(memo[1], small)):
+            return memo[2]
+        out = {}
+        for key, (mesh, paint, groups, mirrored) in by_proto.items():
+            if not isinstance(groups, _InstanceBatch):
+                out[key] = (mesh, paint, groups, mirrored)
+                continue
+            keep = ~small[groups.idx]
+            if keep.all():
+                out[key] = (mesh, paint, groups, mirrored)
+            elif keep.any():
+                batch = _InstanceBatch(g for g, yes in zip(groups, keep) if yes)
+                batch.idx = groups.idx[keep]
+                batch.mats = groups.mats
+                out[key] = (mesh, paint, batch, mirrored)
+        self._navigation_edge_memo = (by_proto, small, out)
+        return out
+
     def _draw_instanced_edges(self) -> None:
         by_proto = getattr(self, "_frame_instanced", None)
         if not by_proto:
             return
+        by_proto = self._navigation_edge_batches(by_proto)
         extra = self.context().extraFunctions()
         if _lean_instanced():
             self._draw_instanced_edges_lean(by_proto, extra)
@@ -5679,6 +6126,14 @@ class Viewport(QOpenGLWidget):
         document also slowed down reopen after reopen (the garbage collector
         walking the dead ones). And a CPython id() reused by a new group
         could meet an old entry — the composer's lesson with frames."""
+        self._inst_pool_archive = {}
+        self._sil_geometry_memo = None
+        self._static_geometry = None
+        self._epoch_tree = None
+        self._placement_world_key = None
+        self._render_geometry_memo = None
+        self._inst_pool_geometry = None
+        self._sil_epoch = None
         draws = getattr(self, "_proto_draw", None)
         if draws and self.context() is not None:
             self.makeCurrent()                # GPU objects need the context
@@ -5702,6 +6157,10 @@ class Viewport(QOpenGLWidget):
         self._sil_groups = None
         self._billboard_groups = None
         self._placements_memo = None
+        self._placement_frame_bases = None
+        self._proto_base_memo = None
+        self._render_placement_history = {}
+        self._kept_render_memo = None
         self._epoch_same = None
         self._pick_lazy_memo = None
         self._pick_near_memo = self._edge_near_memo = None
@@ -5785,6 +6244,9 @@ class Viewport(QOpenGLWidget):
         self._forget_frame_records()
         self.makeCurrent()
         try:
+            timing = getattr(self, "_gpu_timings", None)
+            if timing is not None:
+                timing.destroy()
             cache = getattr(self, "_tex_cache", None)
             if cache:
                 for tex in cache.values():
@@ -6542,8 +7004,7 @@ class Viewport(QOpenGLWidget):
             prog.bind()                # entry building binds the main program
             if entry["vcol_count"]:
                 entry["vcol_vao"].bind()
-                extra.glDrawArraysInstanced(
-                    GL_TRIANGLES, 0, entry["vcol_count"], n)
+                self._draw_proto_faces(entry, "vcol", extra, 0, entry["vcol_count"], n)
                 entry["vcol_vao"].release()
             if entry["tex_runs"]:
                 # Alpha-cutout casting for instances too — the hedge's
@@ -6555,11 +7016,11 @@ class Viewport(QOpenGLWidget):
                     if tex is not None:
                         prog.setUniformValue(self._loc_d_use_tex, 1)
                         tex.bind(0)
-                        extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
+                        self._draw_proto_faces(entry, "tex", extra, s0, cnt, n)
                         tex.release(0)
                     else:
                         prog.setUniformValue(self._loc_d_use_tex, 0)
-                        extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
+                        self._draw_proto_faces(entry, "tex", extra, s0, cnt, n)
                 prog.setUniformValue(self._loc_d_use_tex, 0)
                 entry["tex_vao"].release()
         # Billboard people cast their SILHOUETTE, as a quad turned toward
@@ -7104,6 +7565,12 @@ class Viewport(QOpenGLWidget):
                     and not getattr(g, "billboard", False)
                     and not self._instanced_eligible(g)]
         epoch = epoch_of()
+        geometry = self._render_geometry_key()
+        known = getattr(self, "_static_geometry", None)
+        if known is not None and known[0] == geometry:
+            out = [g for g in groups if id(g) in known[1]]
+            self._static_groups_memo = (epoch, tuple(map(id, groups)), self.scene.mesh, out)
+            return out
         ids = tuple(map(id, groups))
         memo = getattr(self, "_static_groups_memo", None)
         if (memo is not None and memo[1] == ids and memo[2] is self.scene.mesh
@@ -7112,6 +7579,7 @@ class Viewport(QOpenGLWidget):
             if memo[0] != epoch:
                 self._static_groups_memo = (epoch,) + memo[1:]
             return memo[3]
+        self._kept_render_placements(None)
         def static(g):
             return (self.scene.entity_visible(g)
                     and not getattr(g, "billboard", False)
@@ -7122,10 +7590,14 @@ class Viewport(QOpenGLWidget):
             # the open context makes of it — kept across a group opened or
             # closed too (~0.12 s each way on the plant of #158).
             out = self._refilter(memo[0], memo[3], groups, static, memo[1],
-                                 ctx=memo[2] is not self.scene.mesh)
+                                 ctx=True)
         if out is None:
             out = [g for g in groups if static(g)]
         self._static_groups_memo = (epoch, ids, self.scene.mesh, out)
+        # Use a complete placement set: a hidden edit context can pass only
+        # its subject, which must not certify unseen surroundings.
+        if len(groups) == len(self._placements()):
+            self._static_geometry = (geometry, frozenset(map(id, out)))
         return out
 
     #: Past this many objects gone, or this many bytes of their zeros in
@@ -7278,16 +7750,20 @@ class Viewport(QOpenGLWidget):
                 # single click on a ghost face looked like nothing (only
                 # a double click, which selected its visible edges too,
                 # seemed to work — Marco, 2026-09-21, issue #53).
+                from core.mesh import DeferredMesh
+
                 def shown(ent):
                     return (self.scene.entity_visible(ent)
                             or self.scene.entity_selectable(ent))
 
                 def alive(ent):
                     if isinstance(ent, Edge):
-                        if ent in self.scene.loose_mesh.edges:
+                        if (type(self.scene.loose_mesh) is not DeferredMesh
+                                and ent in self.scene.loose_mesh.edges):
                             return shown(ent)
                         return any(ent in gm.edges for gm in gmeshes)
-                    if ent in self.scene.loose_mesh.faces:
+                    if (type(self.scene.loose_mesh) is not DeferredMesh
+                            and ent in self.scene.loose_mesh.faces):
                         return shown(ent)
                     return any(ent in gm.faces for gm in gmeshes)
 
@@ -7372,11 +7848,26 @@ class Viewport(QOpenGLWidget):
                            if gone),)
         else:
             self._slot_layout = None
-        head = ([g for g in draw_groups if self._draws_in_edit_context(g)]
-                if editing else draw_groups)
-        subject = ([g for g in draw_groups
+        static_groups = self._static_draw_groups(draw_groups)
+        head = ([g for g in static_groups if self._draws_in_edit_context(g)]
+                if editing else static_groups)
+        subject = ([g for g in static_groups
                     if not self._draws_in_edit_context(g)]
                    if editing else [])
+        if editing:
+            # Keep the editable mesh and one boundary marker even if the
+            # entire subject draws instanced. Its eligibility can change
+            # during a loose edit without a placements-epoch change.
+            # The other 53k instanced children need not be checked twice
+            # just to find the fade boundary.
+            static_ids = {id(g) for g in subject}
+            subject = [g for g in draw_groups
+                       if not self._draws_in_edit_context(g)
+                       and (id(g) in static_ids or g.mesh is self.scene.mesh)]
+            first = next((g for g in draw_groups
+                          if not self._draws_in_edit_context(g)), None)
+            if first is not None and (not subject or subject[0] is not first):
+                subject.insert(0, first)
 
         def _collect(groups, rel):
             parts: list = []
@@ -7418,7 +7909,7 @@ class Viewport(QOpenGLWidget):
         if gcache is None or gcache[0] != gkey:
             head_parts, head_spans, head_n = (
                 _collect_slots(slots) if slots is not None else _collect(
-                    self._static_draw_groups(head), 0))
+                    head, 0))
             gcache = self._edge_groups_cache = (gkey, head_parts, head_spans,
                                                 head_n)
         _gk, head_parts, head_spans, head_n = gcache
@@ -7604,9 +8095,7 @@ class Viewport(QOpenGLWidget):
         # static filter leaves out of the surroundings adds no face. The
         # walk over every placement was ~0.8 s of each edit inside a group
         # on that plant.
-        walk = (self._static_draw_groups(draw_groups)
-                if self.scene.edit_group is None
-                else self._static_draw_groups(head) + subject)
+        walk = head + subject
         if slots is None:
             slots = [(_Slot(g), False) for g in walk]
         for sl, gone in slots:        # context first, edited group last
@@ -8559,30 +9048,18 @@ class Viewport(QOpenGLWidget):
         # a Move picks an object up — rebuilt, it was ~1 s on the plant.
         # Matrices alone (a Move picking up or putting down) change none of
         # the three tests: the list is kept, re-stamped (~0.1 s each way).
-        gkey = (self._placements_epoch(), skip_context)
+        gkey = self._render_geometry_key()
         gmemo = getattr(self, "_sil_groups", None)
-        if gmemo is not None and gmemo[0] != gkey and \
-                gmemo[0][1] == skip_context and \
-                gmemo[2] is self.scene.mesh and \
-                self._epoch_only_matrices(gmemo[0][0], gkey[0]):
-            self._placements()        # nested proxies: composed matrices
-            gmemo = self._sil_groups = (gkey,) + gmemo[1:]
         if gmemo is not None and gmemo[0] == gkey:
             groups = gmemo[1]
         else:
-            def outlined(g):
-                return (self.scene.entity_visible(g)
-                        and not getattr(g, "billboard", False)
-                        and not (skip_context
-                                 and self._draws_in_edit_context(g)))
-            groups = None
-            if (gmemo is not None and gmemo[0][1] == skip_context
-                    and gmemo[2] is self.scene.mesh):
-                groups = self._refilter(gmemo[0][0], gmemo[1],
-                                        self._placements(), outlined)
-            if groups is None:
-                groups = [g for g in self._placements() if outlined(g)]
+            groups = [g for g in self._placements()
+                      if not getattr(g, "billboard", False)]
             self._sil_groups = (gkey, groups, self.scene.mesh)
+        # Keep a complete table, with visibility/context as a separate mask.
+        pv_sil = set(pv_sil) | {id(g) for g in groups
+                               if not self.scene.entity_visible(g)
+                               or (skip_context and self._draws_in_edit_context(g))}
         if groups:
             import numpy as np
             e_np = np.array([eye.x(), eye.y(), eye.z()])
@@ -8626,6 +9103,21 @@ class Viewport(QOpenGLWidget):
         self._sil_cost = _time.monotonic() - now
         return count
 
+    def _silhouette_geometry_key(self):
+        # Visibility changes the draw mask, not the prototype outline data.
+        sc = self.scene
+        stamp = (self._placements_epoch(), sc.content_version)
+        memo = getattr(self, "_sil_geometry_memo", None)
+        if memo is not None and memo[0] == stamp:
+            return memo[1]
+        meshes = {id(g.mesh): g.mesh for g in self._placements()}
+        key = (sc.bounds_version, getattr(self, "_preview_epoch", 0),
+               tuple((mid, getattr(mesh, "_render_attrs_serial", 0))
+                     for mid, mesh in meshes.items()),
+               self._render_geometry_key()[-1])
+        self._sil_geometry_memo = (stamp, key)
+        return key
+
     def _silhouette_table(self, groups):
         """Per prototype, the arrays the silhouette pass reads for all its
         placements at once — built when the placements change, not per
@@ -8633,23 +9125,25 @@ class Viewport(QOpenGLWidget):
         take (loose groups, face-me, a singular matrix)."""
         import numpy as np
         ids = tuple(map(id, groups))
-        key = (self._placements_epoch(), ids)
+        key = (self._silhouette_geometry_key(), ids)
         memo = getattr(self, "_sil_table", None)
         if memo is not None and memo[0] == key:
+            self._sil_epoch = self._placements_epoch()
             return memo[1], memo[2]
         if (memo is not None and memo[0][1] == ids
-                and self._epoch_only_matrices(memo[0][0], key[0])
+                and self._epoch_only_matrices(getattr(self, "_sil_epoch", None), self._placements_epoch())
                 and self._sil_table_moved(memo[1], memo[2])):
             # Only matrices moved (a Move put an object down): the rows of
             # the placements that moved, not the whole table (~1 s).
             self._sil_table = (key, memo[1], memo[2])
+            self._sil_epoch = self._placements_epoch()
             return memo[1], memo[2]
         # An object or two added or taken away (a Delete, a Paste, their
         # undo): the rows of every unchanged object come from the old
         # table, and a prototype none of whose rows changed keeps its
         # entry — and with it the outline last worked out for this view.
-        kept = (self._epoch_kept_tops(memo[0][0], key[0], ctx=True)
-                if memo is not None else None)
+        kept = self._kept_render_placements(getattr(self, "_sil_epoch", None) if memo is not None else None)
+        self._sil_epoch = self._placements_epoch()
         old_rows: dict = {}
         old_rest: set = set()
         if kept:
@@ -8657,12 +9151,11 @@ class Viewport(QOpenGLWidget):
                 for j, g in enumerate(t["groups"]):
                     old_rows[id(g)] = (t, j)
             old_rest = {id(g) for g in memo[2]}
-        top_of = self._placement_top
         inf = float("inf")
         by_proto: dict = {}          # uid → [old entry, base, rows]
         rest: list = []
         for g in groups:
-            if kept and top_of(g) in kept:
+            if kept and id(g) in kept:
                 hit = old_rows.get(id(g))
                 if hit is None:
                     if id(g) in old_rest:
@@ -8792,8 +9285,9 @@ class Viewport(QOpenGLWidget):
                 tuple(map(tuple, planes)) if planes is not None else None)
         for t in table:
             # Only the left-out placements that are this prototype's.
-            mine = (frozenset(k for k in skip if k in t["ids"])
-                    if skip else frozenset())
+            mine = t["ids"].intersection(skip) if skip else frozenset()
+            if mine == t["ids"]:
+                continue
             memo = t.get("memo")
             if (memo is not None and memo[0] == view and memo[1] == t["rev"]
                     and memo[3] == mine):
@@ -10737,7 +11231,9 @@ class Viewport(QOpenGLWidget):
         h = max(self.height(), 1)
         ndc_x = 2.0 * x / w - 1.0
         ndc_y = 1.0 - 2.0 * y / h
-        mvp = self.camera.projection_matrix() * self.camera.view_matrix()
+        projection = getattr(self.camera, "picking_projection_matrix",
+                             self.camera.projection_matrix)
+        mvp = projection() * self.camera.view_matrix()
         inv, ok = mvp.inverted()
         if not ok:
             return None, None
@@ -15213,15 +15709,18 @@ class Viewport(QOpenGLWidget):
         followed the container's own matrix when entering pushed that
         matrix down into the children — the box slid to the axes while
         the fountain stayed put (Marco, 2026-09-11). So a container's box
-        is cached per scene version instead: it is recomputed on any
-        change, and ``placement_points`` makes that one matrix multiply
-        per placement."""
+        is cached by geometry/transform revision and its frame. Context,
+        paint and visibility changes preserve it; geometry edits and moves
+        recompute it from the placed prototype points."""
         kids = getattr(group, "children", None)
         if kids:
             cache = getattr(self, "_container_obb", None)
             if cache is None:
                 cache = self._container_obb = {}
-            key = _content_ver(self)
+            from core.group import group_frame
+            frame = group_frame(group)
+            key = (getattr(self.scene, "bounds_version", _content_ver(self)),
+                   tuple(frame.data()) if frame is not None else None)
             hit = cache.get(id(group))
             if hit is not None and hit[0] == key:
                 return hit[1]
@@ -15257,13 +15756,13 @@ class Viewport(QOpenGLWidget):
         (``_chunk_dirty``, O(1)). No chunk is built to find out: validating
         against fresh local chunks built one per nested child, 384 ms on
         the first box after entering the plaza."""
-        from core.group import iter_placements
+        from core.mesh import DeferredMesh
         store = getattr(self, "_proto_pts_store", None)
         if store is None:
             store = self._proto_pts_store = {}
         editing = self._editing_meshes()
         valid: dict = {}
-        from core.mesh import DeferredMesh
+        from core.group import iter_placements
         for g, _m in iter_placements(group):
             mesh = g.mesh
             if mesh is None or id(mesh) in valid:
@@ -15278,6 +15777,8 @@ class Viewport(QOpenGLWidget):
             if hit is None:
                 continue
             serial, arr = hit
+            # Deferred meshes cannot change before materialization. Do not
+            # build their topology merely to validate a cached point count.
             if (id(mesh) in editing
                     or getattr(mesh, "_mut_serial", None) != serial
                     or (not lazy and len(arr) != len(mesh.vertices))):
@@ -15300,12 +15801,16 @@ class Viewport(QOpenGLWidget):
 
     def _proto_points_store(self, group, protos: dict) -> None:
         store = self._proto_pts_store
-        if len(store) > 512:
+        if sum(arr.nbytes for _serial, arr in store.values()) > 128 << 20:
             store.clear()
-        from core.group import iter_placements
         editing = self._editing_meshes()
-        serials = {id(g.mesh): getattr(g.mesh, "_mut_serial", None)
-                   for g, _m in iter_placements(group) if g.mesh is not None}
+        serials = {}
+        pending = [group]
+        while pending:
+            g = pending.pop()
+            pending.extend(g.children or ())
+            if g.mesh is not None:
+                serials[id(g.mesh)] = getattr(g.mesh, "_mut_serial", None)
         for mid, arr in protos.items():
             if mid not in editing:
                 store[mid] = (serials.get(mid), arr)
@@ -17842,6 +18347,7 @@ class Viewport(QOpenGLWidget):
             self._end_look()
             return
         if ev.button() == Qt.MiddleButton:
+            self._finish_navigation_feedback()
             self._last_pos = None
             self._orbit_pivot = None
             self._pan_mode = False
@@ -17863,6 +18369,7 @@ class Viewport(QOpenGLWidget):
             return
 
         if ev.button() == Qt.LeftButton and self.nav_mode is not None:
+            self._finish_navigation_feedback()
             self._last_pos = None
             self._orbit_pivot = None
             self._pan_mode = False
@@ -18024,9 +18531,8 @@ class Viewport(QOpenGLWidget):
         # tick both wasted ~25 ms/tick against a big model (the zoom felt
         # heavy) and let float error drift the pinned point.
         import time as _time
-        steps = ev.angleDelta().y() / 120.0
-        if self._invert_wheel:          # Preferences ▸ General (the usual
-            steps = -steps              # Compatibility ▸ invert wheel)
+        from views.wheel_zoom import zoom_steps
+        steps = zoom_steps(ev, self._invert_wheel)
         pos = ev.position()
         now = _time.monotonic()
 

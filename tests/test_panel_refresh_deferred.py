@@ -15,6 +15,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+from PySide6.QtGui import QRegion
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
@@ -73,6 +74,8 @@ def test_a_burst_of_edits_refreshes_the_visible_panels_once(win, monkeypatch):
     outliner = win.project_browser.outliner
     if not (panel.isVisible() and outliner.isVisible()):
         pytest.skip("the factory layout hides one of the panels here")
+    # Offscreen nothing is ever exposed: this panel is on screen.
+    monkeypatch.setattr(panel, "visibleRegion", lambda: QRegion(0, 0, 9, 9))
     comp_calls = _count_calls(monkeypatch, panel, "refresh_in_model")
     tree_calls = _count_calls(monkeypatch, outliner, "refresh")
     for _ in range(5):
@@ -99,6 +102,7 @@ def test_a_selection_leaves_the_in_model_lists_as_they_are(win, monkeypatch):
     vp.scene.groups.append(g)
     vp.scene.version += 1
     panel = win.tray.components
+    monkeypatch.setattr(panel, "visibleRegion", lambda: QRegion(0, 0, 9, 9))
     panel.refresh_in_model()
     win.tray.materials.refresh_in_model()
     _app.processEvents()

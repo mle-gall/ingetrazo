@@ -3274,5 +3274,13 @@
  "Front color — paints faces in Hidden line and Monochrome": "Couleur de face — peint les faces dans les modes Lignes cachées et Monochrome",
  "Distance ({unit}):": "Distance ({unit}) :",
  "Restore defaults": "Rétablir les valeurs par défaut",
- "Puts the settings of this window back to how IngeTrazo comes. Nothing is saved until you press OK. The language, the AI Assistant, the keyboard shortcuts and the units of the open document stay as they are.": "Remet les réglages de cette fenêtre tels qu'IngeTrazo les fournit. Rien n'est enregistré tant que vous n'appuyez pas sur OK. La langue, l'Assistant IA, les raccourcis clavier et les unités du document ouvert restent tels quels."
+ "Puts the settings of this window back to how IngeTrazo comes. Nothing is saved until you press OK. The language, the AI Assistant, the keyboard shortcuts and the units of the open document stay as they are.": "Remet les réglages de cette fenêtre tels qu'IngeTrazo les fournit. Rien n'est enregistré tant que vous n'appuyez pas sur OK. La langue, l'Assistant IA, les raccourcis clavier et les unités du document ouvert restent tels quels.",
+ "Soften / Smooth Edges…": "Adoucir / Lisser les arêtes…",
+ "Soften / Smooth Edges": "Adoucir / Lisser les arêtes",
+ "Angle between faces": "Angle entre les faces",
+ "Soften coplanar edges": "Adoucir les arêtes coplanaires",
+ "Unsoften all selected edges": "Rendre toutes les arêtes sélectionnées vives",
+ "Select faces, edges or groups to soften": "Sélectionnez des faces, arêtes ou groupes à adoucir",
+ "No edges need changing": "Aucune arête à modifier",
+ "Edges at or below this angle become smooth; sharper edges stay hard. Selected groups include their nested geometry. Component copies share the change.": "Les arêtes dont l’angle est inférieur ou égal à cette valeur sont lissées ; les autres restent vives. Les groupes sélectionnés incluent leur géométrie imbriquée. Les copies de composants partagent la modification."
 }

@@ -1463,6 +1463,10 @@ class MainWindow(QMainWindow):
         unhide_all_action.triggered.connect(self._on_unhide_all)
         unhide_menu.addAction(unhide_all_action)
 
+        soften_action = QAction(tr("Soften / Smooth Edges…"), self)
+        soften_action.triggered.connect(self._on_soften_edges)
+        edit_menu.addAction(soften_action)
+
         reverse_action = QAction(tr("Reverse Faces"), self)
         reverse_action.setStatusTip(tr(
             "Swap the front and back sides of the selected faces."))
@@ -4135,17 +4139,53 @@ class MainWindow(QMainWindow):
     def _on_explode_group(self) -> None:
         # Inside an open group what comes out stays in it, one level up
         # from where it was — not out at the model (as Make Group).
-        if not self._can_make_here():
+        from core.history import CompoundCommand
+        from core.outliner import editing_inside_component
+        scene = self.viewport.scene
+        groups = [g for g in scene.selection if isinstance(g, Group)]
+        if not groups:
+            if any(type(e).__name__ == "ImagePlane" for e in scene.selection):
+                # The same command on a selected image explodes the image (#687).
+                self._on_explode_image()
+            else:
+                self.viewport.flash_status(tr("Select a group to explode"), 4000)
             return
-        groups = [g for g in self.viewport.scene.selection if isinstance(g, Group)]
-        for g in groups:
-            self._execute_make(ExplodeGroupCommand(g))
-        if groups:
-            self.viewport.update()
-        elif any(type(e).__name__ == "ImagePlane"
-                 for e in self.viewport.scene.selection):
-            # The same command on a selected image explodes the image (#687).
-            self._on_explode_image()
+        if editing_inside_component(scene):
+            # Inside a component every copy changes with this one.
+            from core.component_explode import ExplodeInContextCommand
+            self.viewport.history.execute(
+                ExplodeInContextCommand(scene.edit_group, groups))
+            history = self.viewport.history
+            if history.last_error or history.last_rejected:
+                QMessageBox.warning(self, tr("Explode Group"),
+                                    history.last_error or history.last_rejected)
+        else:
+            self._execute_make(CompoundCommand(
+                [ExplodeGroupCommand(g) for g in groups]))
+        self.viewport.notify_scene_changed()
+
+    def _on_soften_edges(self) -> None:
+        from core.soften import selected_edges, SoftenByAngleCommand
+        from views.soften_dialog import SoftenDialog
+        from PySide6.QtCore import QSettings
+        scene = self.viewport.scene
+        if not scene.selection:
+            self.viewport.flash_status(tr("Select faces, edges or groups to soften"), 4000)
+            return
+        dialog = SoftenDialog(self)
+        from PySide6.QtWidgets import QDialog
+        if dialog.exec() != QDialog.Accepted:
+            return
+        targets = selected_edges(scene)
+        command = SoftenByAngleCommand(targets, dialog.angle.value(),
+                                       dialog.coplanar.isChecked(), dialog.harden.isChecked())
+        command.changes = command._prepare()
+        if not command.changes:
+            self.viewport.flash_status(tr("No edges need changing"), 4000)
+            return
+        self.viewport.history.execute(command)
+        QSettings().setValue('tools/soften_angle', dialog.angle.value())
+        self.viewport.notify_scene_changed()
 
     def _on_simplify_mesh(self) -> None:
         from PySide6.QtWidgets import QInputDialog
@@ -4838,6 +4878,7 @@ class MainWindow(QMainWindow):
         if self._bridgeable(sel):
             menu.addAction(tr("Bridge"), self._on_bridge)
         if has_mesh or has_group:
+            menu.addAction(tr("Soften / Smooth Edges…"), self._on_soften_edges)
             # Flip Along ▸ Red / Green / Blue: a mirror in place about the
             # selection's centre in one click, the way modelling tutorials
             # do it (issue #178, Esteban Penzo). The same mirror as the

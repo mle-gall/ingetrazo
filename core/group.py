@@ -887,6 +887,7 @@ def placement_points(group, cache=None):
     before, already the wrong shape of work). Here each prototype's array is
     built ONCE and every placement is one matrix multiply over it."""
     import numpy as np
+    from core.lazy_mesh import plan_of
     out: list = []
     if cache is None:
         cache = {}

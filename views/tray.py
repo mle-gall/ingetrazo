@@ -1302,6 +1302,9 @@ class ComponentsPanel(QWidget):
         if not self._window.isVisible():
             self.refresh_in_model()
             return
+        if self.isVisible() and self.visibleRegion().isEmpty():
+            self._in_model_stale = True
+            return
         if not self.isVisible():
             if not getattr(self, "_in_model_stale", False):
                 # Its rows hold the groups they list: kept while it waits,
@@ -1326,8 +1329,21 @@ class ComponentsPanel(QWidget):
             self._in_model_stale = False
             self.refresh_in_model()
 
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if (getattr(self, "_in_model_stale", False)
+                and not self.visibleRegion().isEmpty()
+                and not getattr(self, "_in_model_booked", False)):
+            from PySide6.QtCore import QTimer
+            self._in_model_booked = True
+            def refresh_visible():
+                self._in_model_booked = False
+                self.on_scene_changed()
+            QTimer.singleShot(0, self, refresh_visible)
+
     def refresh_in_model(self) -> None:
         from views.component_thumbs import thumbnail
+        self._in_model_stale = False
         self._in_model_cv = self._window.viewport.scene.content_version
         rows = self._components_in_model()
 
@@ -1684,6 +1700,33 @@ class PartsPanel(QWidget):
         self.refresh()
 
     # ---- Model → view --------------------------------------------------------
+    def on_scene_changed(self) -> None:
+        # Selection changes must not measure an entire imported assembly
+        # for a collapsed panel or an inactive tray tab.
+        if not self.isVisible() or self.visibleRegion().isEmpty():
+            self._stale = True
+            if getattr(self, "_container", None) is self.container():
+                self._sync_selection()
+            return
+        self.refresh()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if getattr(self, "_stale", False):
+            self.on_scene_changed()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        # Scrolling a widget into view does not send showEvent. The first
+        # exposed paint schedules its deferred measurements outside paint.
+        if getattr(self, "_stale", False) and not getattr(self, "_refresh_booked", False):
+            from PySide6.QtCore import QTimer
+            self._refresh_booked = True
+            def refresh_visible():
+                self._refresh_booked = False
+                self.on_scene_changed()
+            QTimer.singleShot(0, self, refresh_visible)
+
     def _scene(self):
         return self._window.viewport.scene
 
@@ -1719,7 +1762,7 @@ class PartsPanel(QWidget):
         else:
             holder = type("_Holder", (), {})()
             holder.children = [part]
-            row = part_rows(holder)[0]
+            row = part_rows(holder, getattr(self, "_refresh_materials", None))[0]
             self._cache[id(part)] = (sig, row)
         row = dict(row)
         row["name"] = part.name
@@ -1738,13 +1781,16 @@ class PartsPanel(QWidget):
         from core.units import fmt_len_fine, fmt_triple
         if self.tree.state() == QAbstractItemView.EditingState:
             return                      # a rename in progress: leave it be
+        self._stale = False
         self._updating = True
         cont = self._container = self.container()
         kids = list(getattr(cont, "children", None) or ())
         alive = {id(k) for k in kids}
         for key in [k for k in self._cache if k not in alive]:
             del self._cache[key]
+        self._refresh_materials = {}
         self._rows = [self._row(k) for k in kids]
+        self._refresh_materials = None
         listed = [it.data(0, Qt.UserRole) for it in self._items]
         if len(listed) != len(kids) or any(a is not b
                                            for a, b in zip(listed, kids)):
@@ -2529,10 +2575,9 @@ class MaterialsPanel(QWidget):
         self._swatch_sig = sig
         self._swatch_count = self._in_model_grid.count()
         if bar is not None and keep is not None:
-            from PySide6.QtCore import QTimer
             bar.setValue(keep)
             # …and once more after the layout settles its new height.
-            QTimer.singleShot(0, lambda b=bar, v=keep: b.setValue(v))
+            _restore_scrollbar_later(bar, keep)
 
     # ---- Apply / add --------------------------------------------------------
     def _apply_color(self, rgb, name: str | None = None) -> None:
@@ -4219,9 +4264,28 @@ class _ScrollAnchor(QObject):
                 target = bar.value() + delta
                 # After the layout has taken the new height, or the bar's
                 # range would clamp the move.
-                QTimer.singleShot(0, lambda b=bar, t=target: b.setValue(t))
+                _restore_scrollbar_later(bar, target)
         return False
 
+
+
+def _restore_scrollbar_later(bar, value: int) -> None:
+    """Set ``bar`` to ``value`` once the pending layout pass has run.
+
+    The panel is rebuilt on every scene change, so by the time the zero-delay
+    timer fires the scroll area (and its bar) may already have been destroyed:
+    calling into the dead C++ object raises RuntimeError from inside the Qt
+    event loop. Skip the restore in that case; a bar that no longer exists has
+    nothing to keep in place.
+    """
+    from PySide6.QtCore import QTimer
+    from shiboken6 import isValid
+
+    def restore(b=bar, v=value):
+        if isValid(b):
+            b.setValue(v)
+
+    QTimer.singleShot(0, restore)
 
 def _wrapping_check(text: str):
     """A check box whose text wraps: ``(checkbox, row widget)``. A long
@@ -4834,7 +4898,7 @@ class Tray(QDockWidget):
     def _after_materials(self) -> None:
         self.scenes.refresh()
         self.components.on_scene_changed()
-        self.parts.refresh()
+        self.parts.on_scene_changed()
 
 
 class BimTray(QDockWidget):

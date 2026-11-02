@@ -29,6 +29,7 @@ def binary(monkeypatch):
 
 
 def _compare(plan, m):
+    net_areas = lazy_mesh.face_net_areas(plan)
     vid = {id(v): i for i, v in enumerate(m.vertices)}
     assert plan.pos.tolist() == [list(v.position.toTuple())
                                  for v in m.vertices]
@@ -49,6 +50,7 @@ def _compare(plan, m):
     got = [plan.ef_face[plan.ef_start[i]:plan.ef_start[i + 1]].tolist()
            for i in range(len(plan.edges))]
     assert got == ef
+    np.testing.assert_array_equal(net_areas, [f.net_area() for f in m.faces])
 
 
 @pytest.mark.parametrize("seed", range(10))
@@ -168,3 +170,58 @@ def test_near_coincident_cloud_keeps_the_plan_vertex_order(monkeypatch, engine, 
     pos, planned_ids = lazy_mesh.weld(points)
     assert pos.tolist() == [list(v.position.toTuple()) for v in mesh.vertices]
     assert [mesh.vertices.index(vertices[i]) for i in ids] == planned_ids.tolist()
+
+
+def test_attribute_edits_leave_deferred_prototypes_clean(binary, tmp_path, monkeypatch):
+    from core.group import Group
+    from core.history import _dirty_group_chunks, HideCommand
+    path = tmp_path / 'attrs.igz'
+    igz.save_scene(_random_scene(random.Random(6)), path)
+    scene = Scene()
+    igz.load_into(scene, path)
+    lazy = [m for m in _meshes(scene) if type(m) is M.DeferredMesh]
+    assert lazy
+    eager = M.Mesh()
+    container = Group(eager)
+    container.adopt(scene.groups)
+    scene.groups = [container, Group(eager)]
+    def forbidden(_self):
+        raise AssertionError('attribute invalidation materialized an untouched mesh')
+    monkeypatch.setattr(M.DeferredMesh, '_materialize', forbidden)
+    _dirty_group_chunks(scene)
+    assert eager._render_attrs_serial == 1  # once per shared prototype
+    assert all(not getattr(m, '_attrs_dirty', False) for m in lazy)
+    command = HideCommand([container])
+    command.do(scene)
+    command.undo(scene)
+    assert eager._render_attrs_serial == 1  # group visibility edits no geometry
+
+
+def test_deleted_selection_does_not_build_deferred_siblings(binary, tmp_path, monkeypatch):
+    from views.main_window import MainWindow
+    from core.group import Group
+    path = tmp_path / 'selection.igz'
+    igz.save_scene(_random_scene(random.Random(6)), path)
+    win = MainWindow()
+    vp = win.viewport
+    try:
+        igz.load_into(vp.scene, path)
+        eager = M.Mesh()
+        face = eager.add_face([V(0, 0, 0), V(1, 0, 0), V(0, 1, 0)])
+        vp.scene.groups.append(Group(eager))
+        vp.scene.selection = {face}
+        eager.remove_face(face)
+        def forbidden(_self):
+            raise AssertionError('deleted selection materialized an untouched mesh')
+        monkeypatch.setattr(M.DeferredMesh, '_materialize', forbidden)
+        monkeypatch.setattr(vp, '_sync_content_key', lambda: 'same')
+        monkeypatch.setattr(vp, '_sync_selection_buffers', lambda: None)
+        vp._edges_content_key = 'same'
+        vp._edges_version = -1
+        # The remaining notification is independent of the selection purge.
+        vp.sceneVersionChanged.disconnect()
+        vp._sync_edges()
+        assert face not in vp.scene.selection
+    finally:
+        win._saved_version = vp.scene.version
+        win.close()

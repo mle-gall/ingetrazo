@@ -540,7 +540,10 @@ def _apply_payload_inner(scene, payload, progress=None, *, consume=False) -> str
         # The placement's own name (what the user called the group or
         # copy), else the definition's.
         g = Group(proto_meshes[idx], name=name or pr.get("name"))
-        g.xform = xf
+        # Its own matrix: a child placement's matrix sits ONCE in its
+        # parent's prototype, and every copy of the parent places it.
+        from PySide6.QtGui import QMatrix4x4
+        g.xform = QMatrix4x4(xf)
         # A .skp GROUP stays a group: only a component definition is one.
         g.component = bool(pr.get("component", True))
         if layer:

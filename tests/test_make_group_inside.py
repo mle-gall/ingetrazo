@@ -329,7 +329,7 @@ def test_explode_inside_an_open_group_keeps_what_comes_out_in_it():
         _close(win)
 
 
-def test_explode_inside_a_component_still_refuses():
+def test_explode_inside_a_component_changes_the_definition_in_one_step():
     win = _window()
     try:
         scene = win.viewport.scene
@@ -342,7 +342,7 @@ def test_explode_inside_a_component_still_refuses():
         scene.selection.clear()
         scene.selection.add(pata)
         win._on_explode_group()
-        assert mesa.children == [pata]
+        assert mesa.children == []
     finally:
         _close(win)
 
@@ -486,7 +486,7 @@ def test_the_browser_explodes_each_kind_as_it_should_in_one_step():
         _close(win)
 
 
-def test_explode_is_in_the_row_menu_and_greyed_inside_a_component():
+def test_explode_is_in_the_row_menu_inside_a_component_too():
     from core.i18n import tr
     win = _window()
     try:
@@ -504,8 +504,6 @@ def test_explode_is_in_the_row_menu_and_greyed_inside_a_component():
         assert entry["enabled"]
         panel._items[id(comp)].setExpanded(True)
         entry = _menu_entry(panel, panel._items[id(a)], tr("Explode Group"))
-        assert entry["enabled"] is False
-        assert entry["tip"] == tr("Components keep their parts: Make Unique "
-                                  "first to change what is inside one")
+        assert entry["enabled"]
     finally:
         _close(win)

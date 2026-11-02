@@ -113,3 +113,66 @@ def test_cull_is_the_array_formula():
             pz = hi[:, 2] if nz >= 0.0 else lo[:, 2]
             got &= ((px * nx + py * ny) + pz * nz) + d >= 0.0
         assert np.array_equal(got, want)
+
+
+def test_placement_frames_share_prototype_validation_and_invalidate(monkeypatch):
+    from views.main_window import MainWindow
+    win = MainWindow()
+    try:
+        vp = win.viewport
+        mesh = _proto(0)
+        a, b = Group(mesh, 'a'), Group(mesh, 'b')
+        a.xform = QMatrix4x4()
+        b.xform = QMatrix4x4()
+        b.xform.translate(10, 0, 0)
+        vp.scene.groups = [a, b]
+        vp.scene.version += 1
+        calls = []
+        real = vp._proto_base_chunk
+        def base(mesh, paint=None):
+            calls.append((mesh, paint))
+            return real(mesh, paint)
+        monkeypatch.setattr(vp, '_proto_base_chunk', base)
+        aa = vp._placement_frame(a)[0]
+        bb = vp._placement_frame(b)[0]
+        assert len(calls) == 1
+        np.testing.assert_allclose(np.asarray(bb)-np.asarray(aa), [[10,0,0],[10,0,0]])
+        b.xform.translate(5, 0, 0)
+        moved = vp._placement_frame(b)[0]
+        assert moved[0][0] == bb[0][0] + 5
+        assert len(calls) == 1
+        mesh.vertices[0].position = V(-2, 0, 0)
+        mesh._mut_serial += 1
+        vp.scene.version += 1
+        assert vp._placement_frame(a)[0][0][0] == -2
+        assert len(calls) == 2
+        b.material = {'color': [1,0,0]}
+        vp._placement_frame(b)
+        assert len(calls) == 3
+        vp.reset_document_caches()
+        assert not getattr(vp, '_placement_frame_bases', None)
+    finally:
+        win._saved_version = vp.scene.version
+        win.close()
+
+
+def test_edit_fade_changes_invalidate_cached_split_without_copying_matrices():
+    from types import SimpleNamespace
+    from views.viewport import Viewport, _InstanceBatch
+    inside, outside = object(), object()
+    groups = _InstanceBatch([inside, outside])
+    groups.idx = np.array([3, 7])
+    groups.mats = np.zeros((8, 4, 4))
+    vp = SimpleNamespace(scene=SimpleNamespace(edit_group=object()),
+                         _edit_rest_mode='fade', _edit_rest_fade_strength=0.75,
+                         _draws_in_edit_context=lambda g: g is outside)
+    first = Viewport._instanced_batches(vp, groups)
+    assert Viewport._instanced_batches(vp, groups) is first
+    vp._edit_rest_fade_strength = 0.25
+    changed = Viewport._instanced_batches(vp, groups)
+    assert changed[0][1] == 0.25
+    assert changed[0][0] == [outside]
+    assert changed[1][0] == [inside]
+    assert changed[0][0].mats is groups.mats
+    assert changed[1][0].mats is groups.mats
+    assert Viewport._instanced_batches(vp, groups) is changed
