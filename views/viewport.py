@@ -5667,6 +5667,19 @@ class Viewport(QOpenGLWidget):
                         "_placement_tops", "_arc_mid_by_mesh",
                         "_billboard_extents", "_figure_tokens")
 
+    def refresh_after_edit(self) -> None:
+        """Refresh an externally executed command without discarding geometry.
+
+        Commands must bump the scene version and use the mesh mutation APIs,
+        just as interactive tools do. The renderer compares mesh, material
+        and placement signatures and rebuilds only changed payloads. Keep
+        reset_document_caches() for New/Open, not individual bridge edits.
+        Call once after a batch, outside an active transform preview.
+        This does not create an undo step or mark a clean document dirty.
+        """
+        self.scene.bump_view()
+        self.notify_scene_changed()
+
     def reset_document_caches(self) -> None:
         """Forget the previous document's chunks at the document boundary.
 

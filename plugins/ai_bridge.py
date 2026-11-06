@@ -246,13 +246,14 @@ class _Bridge(QObject):
         from core.ai import run_transactional
         return run_transactional(self._viewport, code, self._scope)
 
-    def _tool_query_model(self) -> dict:
+    def _tool_query_model(self, include_bounds: bool = True) -> dict:
         vp = self._viewport
         scene = vp.scene
-        lo, hi = scene.bounds()
+        lo, hi = scene.bounds() if include_bounds else (None, None)
         insts = sum(1 for g in scene.groups
                     if getattr(g, "xform", None) is not None)
         return {
+            "version": scene.version,
             "faces": len(scene.mesh.faces),
             "edges": len(scene.mesh.edges),
             "groups": len(scene.groups) - insts,
@@ -267,6 +268,65 @@ class _Bridge(QObject):
                        {"min": [lo.x(), lo.y(), lo.z()],
                         "max": [hi.x(), hi.y(), hi.z()]}),
         }
+
+    def _tool_query_groups(self, name: str = "", offset: int = 0,
+                           limit: int = 100) -> dict:
+        """Read nested group metadata without snapshots, bakes or bounds.
+
+        Return detached JSON values, never live objects or executable Python.
+        Paths contain stable uids so identically named groups are distinct.
+        """
+        if not isinstance(name, str):
+            raise ValueError("name must be a string")
+        if type(offset) is not int or offset < 0:
+            raise ValueError("offset must be a non-negative integer")
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        scene = self._viewport.scene
+        stack = [(g, []) for g in reversed(scene.groups)]
+        rows = []
+        matched = 0
+        while stack:
+            group, parents = stack.pop()
+            path = parents + [group.uid]
+            stack.extend((g, path) for g in reversed(group.children or []))
+            if name.casefold() not in (group.name or "").casefold():
+                continue
+            if matched >= offset:
+                if len(rows) == limit:
+                    return {"groups": rows, "next_offset": offset + limit,
+                            "version": scene.version}
+                rows.append({"uid": group.uid, "name": group.name,
+                             "path": path, "layer": group.layer,
+                             "hidden": group.hidden,
+                             "children": len(group.children or []),
+                             "component": group.component})
+            matched += 1
+        return {"groups": rows, "next_offset": None, "version": scene.version}
+
+    def _tool_query_status(self, name: str) -> dict:
+        """Read JSON status published in run_python's persistent scope.
+
+        A recipe can assign ``job_status = {'done': True}``. Reading it
+        never executes code, touches history or schedules a redraw.
+        """
+        if not isinstance(name, str) or name.startswith("_"):
+            raise ValueError("name must be a public scope variable")
+        if name not in self._scope:
+            return {"found": False, "value": None}
+        # Restrict to plain JSON containers/scalars; do not invoke custom
+        # encoders, properties or arbitrary object's iteration methods.
+        def copy(value, depth=0):
+            if depth > 32:
+                raise ValueError("status is too deeply nested")
+            if type(value) in (str, int, float, bool, type(None)):
+                return value
+            if type(value) is list:
+                return [copy(v, depth + 1) for v in value]
+            if type(value) is dict and all(type(k) is str for k in value):
+                return {k: copy(v, depth + 1) for k, v in value.items()}
+            raise ValueError("status must contain only JSON values")
+        return {"found": True, "value": copy(self._scope[name])}
 
     def _tool_screenshot(self, width: int = 1024, height: int = 768) -> dict:
         width = max(64, min(int(width), 4096))

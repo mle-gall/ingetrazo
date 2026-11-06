@@ -96,6 +96,13 @@ def test_bridge_runs_python_transactionally(monkeypatch):
         assert reply["result"]["edges"] == edges0
         assert "layers" in reply["result"]
 
+        reply = _ask(bridge, "query_groups", {"limit": 1})
+        assert reply["ok"] and "next_offset" in reply["result"]
+        bridge._scope["job_status"] = {"done": True}
+        reply = _ask(bridge, "query_status", {"name": "job_status"})
+        assert reply["ok"] and reply["result"]["value"] == {"done": True}
+        assert len(vp.history.undo_stack) == depth
+
         reply = _ask(bridge, "no_such_tool")
         assert reply["ok"] is False and "unknown tool" in reply["error"]
 
@@ -222,7 +229,7 @@ def test_mcp_server_protocol_and_bridge_down_message(monkeypatch):
 
     tools = mcp.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = {t["name"] for t in tools["result"]["tools"]}
-    assert {"run_python", "query_model", "screenshot",
+    assert {"run_python", "query_model", "query_groups", "query_status", "screenshot",
             "undo", "redo"} <= names
 
     assert mcp.handle({"jsonrpc": "2.0",

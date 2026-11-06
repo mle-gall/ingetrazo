@@ -88,6 +88,49 @@ Sin el puente encendido, las tools responden con el aviso de cómo
 encenderlo. El servidor acepta un cliente a la vez y nunca escucha fuera
 de localhost.
 
+## Fast inspection and incremental refresh (agent API)
+
+Use the structured read-only tools instead of `run_python` for inspection:
+
+- `query_model(include_bounds=false)` returns the overview and scene version
+  without walking the model for bounds. Omitting the option preserves the
+  existing response with bounds.
+- `query_groups(name="saddle", offset=0, limit=100)` searches nested group
+  names (case insensitive), returning uid paths, layer, visibility and child
+  counts. Follow `next_offset` until null. If `version` changes between pages,
+  restart the traversal because the live document changed.
+- `query_status(name="job_status")` reads a plain JSON variable previously
+  assigned in `run_python`'s persistent scope, e.g.
+  `job_status = {"done": True}`. Missing variables return `found=false`.
+  Objects, Python expressions and private names are not accepted. Status
+  stored elsewhere (e.g. `builtins`) must first be explicitly published in
+  this scope by the recipe.
+
+These tools execute on the main thread but do not capture undo snapshots,
+run arbitrary Python, bake geometry or request a redraw. They still wait
+when the main thread is busy; they cannot interrupt an in-progress edit.
+
+Normal `run_python` recipes refresh automatically. For a deferred callback
+that executes its own undoable command, finish the batch with:
+
+```python
+viewport.history.execute(command)
+viewport.refresh_after_edit()
+```
+
+This uses the renderer's existing per-mesh/material/placement validation,
+retaining unchanged geometry and GPU caches. Commands must bump
+`scene.version` and use the supported mesh mutation APIs, including their
+attribute dirty flags. Raw writes bypassing those APIs are not supported by
+this refresh contract. Undo and redo must follow the same mutation contract.
+Do not call `reset_document_caches()` for local edits: it is for New/Open.
+Do not refresh in the middle of an interactive transform preview.
+
+Updating a checkout does not update an already-running packaged application.
+Use a build containing these changes and reconnect the MCP client to expose
+the new tool schemas. Existing scripts must replace their explicit full
+reset with `refresh_after_edit()`; this does not rewrite them automatically.
+
 ## Asistente IA (dentro de la app)
 
 Para el usuario que no usa Claude Code: la pestaña **IA** de la barra

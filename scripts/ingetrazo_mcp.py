@@ -69,7 +69,12 @@ TOOLS = [
         "description": (
             "Execute Python against the LIVE IngeTrazo document (Z-up, "
             "metres). Returns stdout/stderr. The reference below is "
-            "everything you need — read it instead of exploring the API.\n\n"
+            "everything you need — read it instead of exploring the API. "
+            "Use query_model/query_groups/query_status for inspection. "
+            "Batch related edits; never reset_document_caches after a local "
+            "edit. A deferred history command can call "
+            "viewport.refresh_after_edit() once after its batch; normal "
+            "run_python recipes already refresh automatically.\n\n"
             + REFERENCE),
         "inputSchema": {
             "type": "object",
@@ -81,7 +86,28 @@ TOOLS = [
         "name": "query_model",
         "description": ("Model overview: entity counts, group/component "
                         "names, materials, layers, bounds, selection size."),
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {"type": "object", "properties": {
+            "include_bounds": {"type": "boolean", "default": True,
+                               "description": "False skips the scene bounds traversal."}}},
+    },
+    {
+        "name": "query_groups",
+        "description": ("Read-only nested group metadata with stable uid paths. "
+                        "No undo snapshot, geometry baking or redraw. Filter by "
+                        "name substring; paginate with next_offset. Pages refer "
+                        "to the returned scene version; restart if it changes."),
+        "inputSchema": {"type": "object", "properties": {
+            "name": {"type": "string", "default": ""},
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 1000}}},
+    },
+    {
+        "name": "query_status",
+        "description": ("Read a JSON status variable published in run_python's "
+                        "persistent scope. No Python execution, undo snapshot "
+                        "or redraw. Missing variables return found=false."),
+        "inputSchema": {"type": "object", "properties": {
+            "name": {"type": "string"}}, "required": ["name"]},
     },
     {
         "name": "screenshot",
