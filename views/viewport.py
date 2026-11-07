@@ -18207,8 +18207,13 @@ class Viewport(QOpenGLWidget):
         return ("hit", point)
 
     def _world_under_cursor(self, x: float, y: float) -> Optional[QVector3D]:
-        """The world point the cursor points at: nearest geometry hit, else the
-        ground plane (Z=0), else the focal plane through the target."""
+        """Nearest geometry hit, otherwise the focal plane through the target.
+
+        An empty-space ray near the horizon meets Z=0 arbitrarily far away.
+        Zooming toward that point magnified a tiny trackpad gesture into a
+        huge camera translation. The focal plane keeps background zoom at
+        the current viewing distance, on either side of the horizon.
+        """
         origin, direction = self._pixel_to_ray(x, y)
         if origin is None or direction is None:
             return None
@@ -18219,7 +18224,7 @@ class Viewport(QOpenGLWidget):
             return seen[1]
         # No frame to read (wheel notches faster than paints): on a huge
         # model the ray against the index cost 2 s a notch (live profile,
-        # #158) — the ground and focal planes below answer at once.
+        # #158) — the focal plane below answers at once.
         huge = (seen is None and hasattr(self, "_pick_lazy_table")
                 and self._pick_lazy_table() is not None)
         idx = (self._pick_index(near=("px", x, y))
@@ -18232,10 +18237,6 @@ class Viewport(QOpenGLWidget):
                 best_t = float(t)
         if best_t is not None:
             return origin + direction * best_t
-        if abs(direction.z()) > 1e-6:
-            t = -origin.z() / direction.z()
-            if t > 0:
-                return origin + direction * t
         view = (self.camera.target - self.camera.eye())
         if view.length() > 1e-9:
             view = view.normalized()
@@ -18265,6 +18266,9 @@ class Viewport(QOpenGLWidget):
         import time as _time
         from views.wheel_zoom import zoom_steps
         steps = zoom_steps(ev, self._invert_wheel)
+        if steps == 0.0:
+            ev.accept()            # trackpad begin/end events do not zoom or pick
+            return
         pos = ev.position()
         now = _time.monotonic()
 
@@ -18308,9 +18312,11 @@ class Viewport(QOpenGLWidget):
         if focus is not None:
             # A perceptible retreat even from a close-up: ~1 % of the
             # model's size per notch when the frame scaling alone would move
-            # the eye less than that (the "zoom is stuck" report).
+            # the eye less than that (the "zoom is stuck" report). Scale the
+            # floor by the actual wheel fraction: a trackpad can send dozens
+            # of tiny events per gesture, each previously getting a full notch.
             self.camera.zoom_to(steps, focus,
-                                min_step=self._zoom_out_step())
+                                min_step=self._zoom_out_step() * abs(steps))
         else:
             self.camera.zoom(steps)
         self._zoom_focus = (pose(), pos.x(), pos.y(),
