@@ -2389,6 +2389,38 @@ class Viewport(QOpenGLWidget):
         b = QVector3D(max(xs), max(ys), max(zs))
         cam.depth_reach = ((a + b) * 0.5, (b - a).length() * 0.5)
 
+    def _navigation_detail(self, mvp, mode):
+        """Defer edge linework during camera movement in dense assemblies.
+
+        Keep faces/materials intact and repaint at rest even if no mouse event
+        follows. Exports, line styles and editing contexts retain full detail.
+        """
+        if self._export_size is not None:
+            return False
+        cam = tuple(mvp.data())
+        previous = getattr(self, "_nav_detail_camera", None)
+        self._nav_detail_camera = cam
+        pool = getattr(self, "_inst_pool", None)
+        eligible = (pool is not None and len(pool[1]) >= 2000
+                    and mode in ("shaded", "textures", "monochrome")
+                    and self.scene.edit_group is None
+                    and not self.scene.selection)
+        if not eligible:
+            self._nav_detail_until = 0.0
+            return False
+        now = _time_mod.monotonic()
+        if previous is not None and previous != cam:
+            self._nav_detail_until = now + 0.35
+            timer = getattr(self, "_nav_detail_timer", None)
+            if timer is None:
+                timer = self._nav_detail_timer = QTimer(self)
+                timer.setSingleShot(True)
+                timer.timeout.connect(self.update)
+            timer.start(370)
+        if now < getattr(self, "_nav_detail_until", 0.0):
+            return True
+        return False
+
     def paintGL(self) -> None:
         self._tick = getattr(self, "_tick", 0) + 1     # a new epoch memo
         self._depth_clean = None          # see the read-back at the end
@@ -2457,6 +2489,13 @@ class Viewport(QOpenGLWidget):
         self._gl.glStencilMask(AO_FOLIAGE_BIT)
 
         mvp = self.camera.projection_matrix() * self.camera.view_matrix()
+        old_detail = getattr(self, "_nav_fast_feedback", False)
+        self._nav_fast_feedback = self._navigation_detail(mvp, mode)
+        if old_detail and not self._nav_fast_feedback:
+            # The settling frame must derive the current outline, not reuse
+            # the expensive-profile throttle's pre-navigation segments.
+            self._sil_last = None
+            self._sil_cam_t = 0.0
         # Frustum planes for chunk culling — also consumed by the
         # silhouette pass (skip whole chunks that are off screen).
         self._frame_planes = self._frustum_planes(mvp)
@@ -3120,7 +3159,8 @@ class Viewport(QOpenGLWidget):
         self._draw_scaffold(mvp, w, h)
 
         self._set_section_clip(True)
-        show_edges = style.edges or mode == "wireframe"
+        show_edges = ((style.edges or mode == "wireframe")
+                      and not getattr(self, "_nav_fast_feedback", False))
         ec = style.edge_color
         # Line weight for sheet renders: a GL line is one pixel whatever
         # the DPI (core-profile Mesa clamps glLineWidth), and one pixel at
@@ -3194,7 +3234,8 @@ class Viewport(QOpenGLWidget):
         # Profile (silhouette) edges: soft seams of a curved surface are hidden,
         # except where the surface turns away from the viewer — the cylinder's
         # outline. View-dependent, so rebuilt every frame.
-        if show_edges and style.profiles:
+        if (show_edges and style.profiles
+                and not getattr(self, "_nav_fast_feedback", False)):
             sil_count = self._upload_silhouette_edges()
             if sil_count > 0:
                 self._set_color(ec[0], ec[1], ec[2], 1.0)
@@ -3396,7 +3437,8 @@ class Viewport(QOpenGLWidget):
                 getattr(self, "_shadow_key", None),
                 self._faces_count, self._edges_count, self._sel_faces_count,
                 self._selected_count, self.camera.fov_deg,
-                self.camera.perspective)
+                self.camera.perspective,
+                getattr(self, "_nav_fast_feedback", False))
 
     def _frame_cache_track(self, mvp_key) -> bool:
         """Note this frame's view (``mvp_key``: the frame cache key's MVP
@@ -4238,7 +4280,14 @@ class Viewport(QOpenGLWidget):
         memos = getattr(self, "_inst_frame_memo", None)
         if memos is None:
             memos = self._inst_frame_memo = {}
-        last = memos.get(planes is None)       # the camera's, the shadows'
+        # Dense assemblies retain a wider guard band even at rest, so the
+        # first navigation frame can reuse its instance buffers as well.
+        dense = len(groups) >= 2000
+        margin = (max(self._INST_VIEW_MARGIN, 0.35) if dense
+                  else self._INST_VIEW_MARGIN)
+        superset = (max(self._INST_SUPERSET_MAX, 3) if dense
+                    else self._INST_SUPERSET_MAX)
+        last = memos.get(planes is None)
         pvkey = frozenset(pv)
         if last is not None and last[3] != pvkey:
             last = None           # its batches still hold what is picked up
@@ -4257,11 +4306,11 @@ class Viewport(QOpenGLWidget):
             # the view is clipped; nothing on screen changes.
             if (last is not None and last[0] is pool
                     and not (keep & ~last[1]).any()
-                    and int(last[1].sum()) <= self._INST_SUPERSET_MAX * int(keep.sum()) + 64):
+                    and int(last[1].sum()) <= superset * int(keep.sum()) + 64):
                 self._frame_instanced = last[2]
                 return last[2]
             keep = self._instances_in_frustum(
-                lo, hi, self._widened_planes(planes, self._INST_VIEW_MARGIN))
+                lo, hi, self._widened_planes(planes, margin))
             keep &= ~self._instances_below_a_pixel(pool, 0.5)
             if pv:
                 keep &= ~self._inst_pool_previewed(pool, pv)
@@ -18214,9 +18263,8 @@ class Viewport(QOpenGLWidget):
         # tick both wasted ~25 ms/tick against a big model (the zoom felt
         # heavy) and let float error drift the pinned point.
         import time as _time
-        steps = ev.angleDelta().y() / 120.0
-        if self._invert_wheel:          # Preferences ▸ General (the usual
-            steps = -steps              # Compatibility ▸ invert wheel)
+        from views.wheel_zoom import zoom_steps
+        steps = zoom_steps(ev, self._invert_wheel)
         pos = ev.position()
         now = _time.monotonic()
 
