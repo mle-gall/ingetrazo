@@ -1810,6 +1810,9 @@ class DeferredMesh(Mesh):
         del self.__dict__["_deferred_nfaces"]
         del self.__dict__["_deferred_source"]
         self.__dict__.pop("_deferred_plan", None)
+        self.__dict__.pop("_drawing_staged", None)
+        self.__dict__.pop("_drawing_source_key", None)
+        self.__dict__.pop("_drawing_texture_paths", None)
         self.__class__ = Mesh
         build(self)
 

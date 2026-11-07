@@ -513,8 +513,10 @@ def test_escape_steps_out_of_the_open_group_from_the_window_action_too(viewport)
         scene.begin_group_edit(container)
         scene.begin_group_edit(child)
         assert scene.edit_group is child
+        scene.select([scene.mesh.edges[0]])
         viewport.escape()                                   # what the window action calls
         assert scene.edit_group is container                # one level out…
+        scene.select([child])
         viewport.escape()
         assert scene.edit_group is None                     # …and out
     finally:

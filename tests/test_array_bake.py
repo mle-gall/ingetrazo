@@ -28,6 +28,14 @@ pytestmark = pytest.mark.skipif(
 _SKIP = {"uid", "faces", "serial", "mesh", "vkey", "obb", "rev"}
 
 
+@pytest.fixture(autouse=True)
+def uncached_bake(monkeypatch):
+    # This suite validates the actual bake against the object renderer.
+    # Persistent reuse is covered separately in test_drawing_cache.
+    from views import drawing_cache
+    monkeypatch.setattr(drawing_cache, '_STORE', False)
+
+
 @pytest.fixture(params=["binary", "json-walk", "json-bulk"])
 def lazy(request, monkeypatch):
     """Lazy meshes from binary blocks, or from JSON ones read by the

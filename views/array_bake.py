@@ -207,7 +207,8 @@ class LazyFingerprint:
 
     def value(self) -> tuple:
         if self._value is None:
-            self._value = fingerprint(*self._args) + self._suffix
+            args = self._args() if callable(self._args) else self._args
+            self._value = fingerprint(*args) + self._suffix
             self._args = None
         return self._value
 
@@ -259,7 +260,36 @@ def _smooth_stream(vp, plan, normal, unit, tfa, tva, col_a, f_rgb,
     return normals
 
 
+def restore_cached(vp, variants, progress=None):
+    import time
+    from views import drawing_cache
+    last = time.monotonic()
+    seen = set()
+    from core.materials import material_sig
+    for mesh, paint in variants:
+        if not can_bake(mesh):
+            continue
+        key = (id(mesh), material_sig(paint))
+        if key not in seen:
+            seen.add(key)
+            drawing_cache.restore(vp, mesh, paint)
+            now = time.monotonic()
+            if progress is not None and now - last > 0.25:
+                progress(0.0, "Preparing the drawing…")
+                last = now
+
+
 def bake(vp, mesh, paint, msig, vkey, uid):
+    from views import drawing_cache
+    hit = drawing_cache.restored_chunk(vp, mesh, paint, msig, vkey, uid)
+    if hit is not None:
+        return hit
+    result = _bake_uncached(vp, mesh, paint, msig, vkey, uid)
+    drawing_cache.remember(vp, mesh, paint, result)
+    return result
+
+
+def _bake_uncached(vp, mesh, paint, msig, vkey, uid):
     """The chunk entry of deferred ``mesh`` inside a container of paint
     ``paint`` — ``Viewport._group_chunk``'s rebuild, from arrays."""
     from core.materials import back_is_default, effective_attrs

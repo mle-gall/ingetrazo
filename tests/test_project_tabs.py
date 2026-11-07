@@ -429,6 +429,11 @@ def test_each_untitled_project_autosaves_to_its_own_slot(win):
     assert a.untitled_no != b.untitled_no
     try:
         win._on_autosave_tick()
+        import time
+        deadline = time.monotonic() + 10
+        while win._background_autosave.busy and time.monotonic() < deadline:
+            _settle(10)
+        assert not win._background_autosave.busy
         slot_a = autosave.pending(None, untitled=a.untitled_no)
         slot_b = autosave.pending(None, untitled=b.untitled_no)
         assert slot_a and slot_b and slot_a != slot_b

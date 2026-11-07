@@ -751,55 +751,18 @@ class MainWindow(QMainWindow):
         timer.stop()
         if enabled:
             timer.start(minutes * 60 * 1000)
+        elif getattr(self, "_background_autosave", None) is not None:
+            self._background_autosave.cancel()
 
     def _on_autosave_tick(self) -> None:
-        """Write the recovery slot — only when there is something new to
-        keep, and never under the user's hands (a 283k-face save takes real
-        time; mid-drag it would read as a freeze)."""
-        from PySide6.QtWidgets import QApplication
+        """Queue recovery snapshots; serialization and IO never block this tick."""
         if getattr(self, "_opening_document", False):
-            return  # Progress pumps events; never autosave a partial load.
-        # Housekeeping that rides the same slow tick: a clean collection
-        # now and then — never mid-gesture (over a big model it is ~0.3 s).
-        import sys
-        if sys.getallocatedblocks() > 40_000_000:
-            self._gc_too_slow = True       # tens of millions of objects: ~5 s
-        if getattr(self.viewport, "_last_pos", None) is None \
-                and not getattr(self, "_gc_too_slow", False):
-            import gc
-            import time
-            t0 = time.perf_counter()
-            gc.collect()
-            # On a model of 14 million faces a full collection froze the
-            # app for 4.5 s every five minutes (live profile, #158): once
-            # one takes that long, the housekeeping stops for the session.
-            if time.perf_counter() - t0 > 0.5:
-                self._gc_too_slow = True
-        if QApplication.mouseButtons() != Qt.NoButton:
-            return                      # try again next tick
-        # Every open project, the tabs behind too: each into its own slot.
-        from core import autosave
-        wrote = False
-        for doc in list(self._documents):
-            vp = doc.viewport
-            if vp is None:
-                continue
-            if doc is self._doc and self._workspace is not None:
-                continue                # parked; the workspace saves its own
-            if not self._doc_is_dirty(doc):
-                continue
-            version = vp.scene.version
-            if version == doc.autosaved_version:
-                continue
-            try:
-                vp.scene.camera_home = self._camera_dict(vp)
-                autosave.write(vp.scene, doc.path, untitled=doc.untitled_no)
-            except Exception:  # noqa: BLE001 — recovery must never break modeling
-                continue
-            doc.autosaved_version = version
-            wrote = True
-        if wrote:
-            self.statusBar().showMessage(tr("Auto-saved."), 2000)
+            return
+        from core.background_autosave import BackgroundAutosave
+        manager = getattr(self, "_background_autosave", None)
+        if manager is None:
+            manager = self._background_autosave = BackgroundAutosave(self)
+        manager.request(list(self._documents))
 
     def _offer_untitled_recovery(self) -> None:
         """Offer back every untitled drawing the last session left in its
@@ -1696,8 +1659,8 @@ class MainWindow(QMainWindow):
         camera_menu.addAction(self._act_hidden_objects)
         self._act_hidden_geometry = QAction(tr("Hidden Geometry"), self)
         self._act_hidden_geometry.setStatusTip(tr(
-            "Show hidden faces and edges as a see-through grid, so they "
-            "can be selected again."))
+            "Show softened and hidden edges as dashed lines, and hidden "
+            "faces as a see-through grid."))
         self._act_hidden_geometry.setCheckable(True)
         self._act_hidden_geometry.toggled.connect(
             lambda on: self._set_hidden_view("show_hidden_geometry", on))
@@ -4299,7 +4262,7 @@ class MainWindow(QMainWindow):
             for ent in list(scene.selection):
                 if scene.entity_hidden(ent) or getattr(ent, "hidden", False):
                     scene.selection.discard(ent)
-        scene.version += 1
+        scene.bump_view()
         self.viewport.update()
 
     def _set_show_axes(self, on: bool) -> None:
@@ -6929,7 +6892,10 @@ class MainWindow(QMainWindow):
         import gc
         import sys
         gc.unfreeze()                 # (in case an older session froze it)
-        gc.set_threshold(self.GC_THRESHOLD0, 10, 0)
+        # Python 3.13 (the macOS bundle) still uses threshold2. Zero
+        # schedules an expensive full-heap pass at every generation-1
+        # opportunity; 3.14's incremental collector had ignored this slot.
+        gc.set_threshold(self.GC_THRESHOLD0, 10, 10)
         # Past 40 M blocks (the plaza is 3 M; the model of #158, 58.6 M) a
         # full collection is seconds of a window that does not answer, and
         # the desktop says so: skipped, as the autosave housekeeping is.

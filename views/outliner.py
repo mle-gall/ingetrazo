@@ -1424,17 +1424,33 @@ class OutlinerPanel(QWidget):
             self.tree.addTopLevelItem(root)
             self._heads = self._make_heads(scene, root)
             editable = Qt.ItemIsEditable
+            # Imported assemblies contain many rows with identical roles,
+            # icons and tooltips. Copy those Qt values once instead of
+            # issuing dozens of setters for every hidden child row.
+            templates = {}
+            from core.materials import material_sig
             around = inherited_states(scene.groups)
             for g, parent, _depth in self._display_walk(scene):
                 key = id(g)
                 state = self._row_state(g, counts, opened,
                                         around.get(key, (None, None)))
-                item = QTreeWidgetItem([state[0], "", "", state[1],
-                                        state[2], state[7], state[8],
-                                        state[9]])
-                item.setData(COL_NAME, Qt.UserRole, g)
-                item.setFlags(item.flags() | editable)
-                self._paint(item, None, state)
+                template_key = (state[1:], material_sig(g.material))
+                template = templates.get(template_key)
+                if template is not None:
+                    item = template.clone()
+                    item.setText(COL_NAME, state[0])
+                    item.setData(COL_NAME, Qt.UserRole, g)
+                else:
+                    item = QTreeWidgetItem([state[0], "", "", state[1],
+                                            state[2], state[7], state[8],
+                                            state[9]])
+                    item.setData(COL_NAME, Qt.UserRole, g)
+                    item.setFlags(item.flags() | editable)
+                    self._paint(item, None, state)
+                    if len(templates) < 512:
+                        # Store a detached leaf: cloning an attached row
+                        # later would also copy its descendants.
+                        templates[template_key] = item.clone()
                 if parent is not None:
                     holder = self._items[id(parent)]
                 else:

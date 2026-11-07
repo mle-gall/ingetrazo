@@ -3156,6 +3156,7 @@ class Viewport(QOpenGLWidget):
         self._draw_groups_preview(mvp)
         self._draw_hidden_ghosts(mvp)
 
+        self._draw_hidden_geometry_edges(mvp, w, h)
         self._draw_scaffold(mvp, w, h)
 
         self._set_section_clip(True)
@@ -3249,6 +3250,8 @@ class Viewport(QOpenGLWidget):
                 if len(_jit_p) > 1:
                     self._program.setUniformValue(self._loc_mvp, mvp)
         _fmark("edges")
+
+        self._draw_selected_group_edges(mvp, w, h)
 
         # Selected edges (drawn on top, highlighted) — never in an export
         if self._selected_count > 0 and self._export_size is None:
@@ -3822,7 +3825,13 @@ class Viewport(QOpenGLWidget):
                     tuple(xf.data()) if xf is not None else None,
                     g.layer, bool(g.billboard), bool(g.hidden),
                     bool(getattr(g, "locked", False)),
-                    _material_sig(getattr(g, "material", None)))
+                    _material_sig(getattr(g, "material", None)),
+                    # Empty container meshes can be shared by unrelated
+                    # assemblies. Opening one must not invalidate the
+                    # entire other assembly just because its empty mesh
+                    # becomes the active mesh. Never expand a lazy mesh.
+                    (m is not None and "_deferred" not in m.__dict__
+                     and not m.edges and not m.faces))
 
         pv = getattr(self, "_preview_groups", None) or ()
         base = getattr(self, "_epoch_frozen_base", None)
@@ -3969,9 +3978,14 @@ class Viewport(QOpenGLWidget):
                 o = ab[0]
                 for k in range(s, e):
                     x, y = pa[o + k - s], pb[k]
+                    empty = len(x) > 9 and len(y) > 9 and x[9] and y[9]
                     if x is not y and x != y:
-                        break
-                    if loose and y[1] in loose:
+                        # The active mesh's serial is intentionally None.
+                        # For two empty meshes that change alone has no
+                        # effect on geometry, eligibility or bounds.
+                        if not (empty and x[:2] == y[:2] and x[3:] == y[3:]):
+                            break
+                    if loose and y[1] in loose and not empty:
                         break
                 else:
                     kept.add(t)
@@ -4154,19 +4168,25 @@ class Viewport(QOpenGLWidget):
         groups = self._placements()
         n = max(1, len(groups))
         from views import array_bake
+        paints = [_paint_of(self, g) for g in groups]
+        array_bake.restore_cached(self, ((g.mesh, paint)
+                                         for g, paint in zip(groups, paints)),
+                                  progress=progress)
         array_bake.prefetch(g.mesh for g in groups)
         last = time.monotonic()
-        done: set = set()
-        for i, g in enumerate(groups):
+        # Eligibility depends on the prototype and paint, not the placement
+        # matrix. Check it once per variant during this preparation pass.
+        done: dict = {}
+        for i, (g, paint) in enumerate(zip(groups, paints)):
             if getattr(g, "billboard", False):
                 continue
             try:
                 if getattr(g, "xform", None) is not None:
-                    key = (id(g.mesh), _material_sig(_paint_of(self, g)))
+                    key = (id(g.mesh), _material_sig(paint))
                     if key not in done:
-                        done.add(key)
-                        self._proto_base_chunk(g.mesh, _paint_of(self, g))
-                    if not self._instanced_eligible(g):
+                        self._proto_base_chunk(g.mesh, paint)
+                        done[key] = self._instanced_eligible(g)
+                    if not done[key]:
                         self._group_chunk(g)
                 else:
                     self._group_chunk(g)
@@ -4211,9 +4231,14 @@ class Viewport(QOpenGLWidget):
                    (max(p.x() for p in pts), max(p.y() for p in pts),
                     max(p.z() for p in pts)))
         inv, ok = m.inverted()
-        if len(cache) > 4 * max(64, len(getattr(self, "_inst_pool", (0, ()))[1]
-                                         if getattr(self, "_inst_pool", None)
-                                         else ())):
+        # The instance pool is not assigned until its first build finishes.
+        # Sizing this cache from that pool capped a 100k-placement import
+        # at 256 rows during opening, discarding the bounds just computed
+        # and making the first pick compute them all again.
+        placements = getattr(self, "_placements_memo", None)
+        population = (len(placements[1]) if placements is not None
+                      else len(self.scene.groups))
+        if len(cache) > 4 * max(64, population):
             cache.clear()                  # ids of placements long gone
         val = (box, inv if ok else None)
         cache[id(g)] = (key, val)
@@ -4845,6 +4870,10 @@ class Viewport(QOpenGLWidget):
             return [(groups, 0.0)]
         fuera = [g for g in groups if self._draws_in_edit_context(g)]
         dentro = [g for g in groups if not self._draws_in_edit_context(g)]
+        if not dentro:
+            fuera = groups
+        elif not fuera:
+            dentro = groups
         if self._edit_rest_mode == "hide":
             return [(dentro, 0.0)]
         if self._edit_rest_mode != "fade":
@@ -5854,7 +5883,7 @@ class Viewport(QOpenGLWidget):
     #: meshes and placements — the render/pick chunks and what hangs off
     #: them. Nothing but the document boundary makes them all stale at once.
     _DOCUMENT_CACHES = ("_group_chunks", "_inst_chunks", "_fp_memo",
-                        "_proto_wrappers", "_proto_draw", "_faceme_cache",
+                        "_proto_wrappers", "_proto_draw", "_hidden_edge_draws", "_faceme_cache",
                         "_proto_pts_store", "_container_obb", "_placement_frames",
                         "_pick_live", "_pick_foot_keep",
                         # Also keyed by id(): a face-me's placed sprite, the
@@ -5891,7 +5920,9 @@ class Viewport(QOpenGLWidget):
         document also slowed down reopen after reopen (the garbage collector
         walking the dead ones). And a CPython id() reused by a new group
         could meet an old entry — the composer's lesson with frames."""
-        draws = getattr(self, "_proto_draw", None)
+        draws = dict(getattr(self, "_proto_draw", None) or {})
+        draws.update({("hidden", k): v for k, v in
+                      getattr(self, "_hidden_edge_draws", {}).items()})
         if draws and self.context() is not None:
             self.makeCurrent()                # GPU objects need the context
             try:
@@ -5905,6 +5936,8 @@ class Viewport(QOpenGLWidget):
                 cache.clear()
         self._edges_version = -1          # rebuild the VBOs from nothing
         self._frozen_cache_version = None
+        self._selected_placements_cache = None
+        self._selected_profile_key = None
         self._sil_table = None            # holds the old document's bakes
         self._pick_cat_memo = None        # ...and its pick triangles
         self._pick_te_memo = None
@@ -7096,6 +7129,7 @@ class Viewport(QOpenGLWidget):
             self._ghost_vcol_vao, self._ghost_vcol_vbo = \
                 self._create_dynamic_vcol()
             self._ghost_tex_vao, self._ghost_tex_vbo = self._create_dynamic_uv()
+            self._program.bind()
         edge_parts: list = []
         vcol_parts: list = []
         tex_parts: dict = {}
@@ -7127,13 +7161,6 @@ class Viewport(QOpenGLWidget):
                                  t2.x(), t2.y(), t2.z(), r, gg, b])
             if data:
                 vcol_parts.append(data.tobytes())
-            edata = array("f")
-            for e in sc.mesh.edges:
-                if getattr(e, "hidden", False) and sc._layer_state(e)[0]:
-                    edata.extend([e.a.x(), e.a.y(), e.a.z(),
-                                  e.b.x(), e.b.y(), e.b.z()])
-            if edata:
-                edge_parts.append(edata.tobytes())
         raw = b"".join(edge_parts)
         self._ghost_edges_vbo.bind()
         self._ghost_edges_vbo.allocate(raw or b"\0" * 24, max(len(raw), 24))
@@ -7161,6 +7188,139 @@ class Viewport(QOpenGLWidget):
         self._ghost_key = key
         return bool(n_vcol or n_edges or runs)
 
+    def _hidden_edge_draw(self, mesh, edge_kind="hidden"):
+        """Local overlay data, keyed by the mesh bake rather than the document.
+
+        A selection must never materialize a deferred imported mesh merely
+        to read its edges; the renderer already has its arrays.
+        """
+        from core.lazy_mesh import plan_of
+        import numpy as np
+        cache = getattr(self, "_hidden_edge_draws", None)
+        if cache is None:
+            cache = self._hidden_edge_draws = {}
+        base = self._proto_base_chunk(mesh)
+        key = (base["uid"], base.get("rev", 0),
+               tuple((ly.name, ly.visible) for ly in self.scene.layers))
+        cache_id = (id(mesh), edge_kind)
+        entry = cache.get(cache_id)
+        if entry is not None and entry["mesh"] is mesh and entry["key"] == key:
+            return entry
+        if entry is not None:
+            self._destroy_proto_draw_entry(entry)
+        if edge_kind == "visible":
+            data = base["edges"]
+        else:
+            plan = plan_of(mesh)
+            if plan is not None:
+                mask = plan.soft | plan.hidden
+                if any(layer is not None for layer in plan.layer):
+                    from types import SimpleNamespace
+                    visible = {layer: self.scene._layer_state(
+                        SimpleNamespace(layer=layer))[0] for layer in set(plan.layer)}
+                    mask = mask & np.fromiter((visible[l] for l in plan.layer), bool)
+                data = plan.pos[plan.edges[mask]].astype(np.float32).tobytes()
+            else:
+                raw = array("f")
+                for e in mesh.edges:
+                    if (e.soft or e.hidden) and self.scene._layer_state(e)[0]:
+                        raw.extend((*e.a.toTuple(), *e.b.toTuple()))
+                data = raw.tobytes()
+        entry = {"mesh": mesh, "key": key, "count": len(data) // 12,
+                 "mat_sig": None}
+        if data:
+            vao, vbo = self._create_dynamic()
+            self._program.bind()
+            vbo.bind()
+            vbo.allocate(data, len(data))
+            vbo.release()
+            entry.update(plain_vao=vao, edges_vbo=vbo)
+            inst = QOpenGLVertexArrayObject(self)
+            inst.create()
+            inst.bind()
+            vbo.bind()
+            self._program.enableAttributeArray(self._loc_pos)
+            self._program.setAttributeBuffer(self._loc_pos, GL_FLOAT, 0, 3, 12)
+            vbo.release()
+            matrices = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
+            matrices.create()
+            matrices.bind()
+            matrices.allocate(64)
+            extra = self.context().extraFunctions()
+            for i, loc in enumerate(self._loc_inst):
+                self._program.enableAttributeArray(loc)
+                self._program.setAttributeBuffer(loc, GL_FLOAT, i * 16, 4, 64)
+                extra.glVertexAttribDivisor(loc, 1)
+            matrices.release()
+            inst.release()
+            entry.update(inst_vao=inst, mat_vbo=matrices)
+        cache[cache_id] = entry
+        return entry
+
+    def _draw_hidden_geometry_edges(self, mvp, w, h):
+        """Reveal soft/hidden edges, including nested instances, without
+        changing the solid shading or drawing occluded back edges."""
+        if (not self.scene.show_hidden_geometry
+                or getattr(self, "_nav_fast_feedback", False)):
+            return
+        self._program.bind()
+        self._set_section_clip(True)
+        self._program.setUniformValue(self._loc_viewport_px,
+                                      QVector2D(float(w), float(h)))
+        self._program.setUniformValue1f(
+            self._loc_dash_px, 3.0 * max(1.0, float(self.devicePixelRatioF())))
+        self._program.setUniformValue(self._loc_stipple, 4)
+        ec = self._effective_style().edge_color
+        self._set_color(*ec[:3], 1.0)
+        self._gl.glDepthMask(GL_FALSE)
+        extra = self.context().extraFunctions()
+        try:
+            for mesh, paint, groups, mirrored in getattr(
+                    self, "_frame_instanced", {}).values():
+                entry = self._hidden_edge_draw(mesh)
+                if not entry["count"]:
+                    continue
+                for batch, fade in self._instanced_batches(groups):
+                    if not batch:
+                        continue
+                    n = self._update_inst_matrices(entry, batch)
+                    self._program.setUniformValue1f(self._loc_fade, fade)
+                    entry["inst_vao"].bind()
+                    extra.glDrawArraysInstanced(GL_LINES, 0, entry["count"], n)
+                    entry["inst_vao"].release()
+            # Non-instanced placements and the active editing mesh use the
+            # same local buffer, with their world transform in the MVP.
+            for g in [None] + self._static_draw_groups(self._placements()):
+                if g is None:
+                    mesh, xf, fade = self.scene.mesh, None, 0.0
+                else:
+                    if id(g) in (getattr(self, "_preview_groups", None) or ()):
+                        continue
+                    fade = self._edit_rest_fade(g)
+                    if fade is None:
+                        continue
+                    bounds = (self._placement_bbox(g) if g.xform is not None
+                              else self._group_chunk(g).get("bbox"))
+                    if (self._frame_planes is not None and bounds is not None
+                            and not self._aabb_visible(
+                                self._frame_planes, bounds[0], bounds[1])):
+                        continue
+                    mesh, xf = g.mesh, g.xform
+                entry = self._hidden_edge_draw(mesh)
+                if not entry["count"]:
+                    continue
+                self._program.setUniformValue(self._loc_mvp,
+                                              mvp * xf if xf is not None else mvp)
+                self._program.setUniformValue1f(self._loc_fade, fade)
+                entry["plain_vao"].bind()
+                self._gl.glDrawArrays(GL_LINES, 0, entry["count"])
+                entry["plain_vao"].release()
+        finally:
+            self._program.setUniformValue(self._loc_mvp, mvp)
+            self._program.setUniformValue1f(self._loc_fade, 0.0)
+            self._program.setUniformValue(self._loc_stipple, 0)
+            self._gl.glDepthMask(GL_TRUE)
+
     def _draw_hidden_ghosts(self, mvp) -> None:
         """View ▸ Hidden Objects / Hidden Geometry: what Hide put
         away is drawn as a see-through grid (faces) and dotted lines
@@ -7172,6 +7332,7 @@ class Viewport(QOpenGLWidget):
         if not self._sync_hidden_ghosts():
             return
         n_vcol, n_edges = self._ghost_counts
+        self._program.bind()
         self._program.setUniformValue(self._loc_mvp, mvp)
         self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
         self._gl.glPolygonOffset(1.0, 1.0)
@@ -8106,6 +8267,119 @@ class Viewport(QOpenGLWidget):
                 bool(getattr(sc, "show_hidden_geometry", False)),
                 getattr(self, "_edges_front_tint", None))
 
+    def _selected_group_placements(self):
+        selected = frozenset(e for e in self.scene.selection
+                             if isinstance(e, Group))
+        if not selected:
+            return []
+        key = (self._placements_epoch(), selected)
+        memo = getattr(self, "_selected_placements_cache", None)
+        if memo is None or memo[0] != key:
+            pv = getattr(self, "_preview_groups", None) or ()
+            groups = [g for g in self._placements()
+                      if self._owner_of(g) in selected
+                      and self.scene.entity_visible(g)
+                      and not getattr(g, "billboard", False)
+                      and id(g) not in pv]
+            memo = self._selected_placements_cache = (key, groups)
+        return memo[1]
+
+    def _draw_selected_profiles(self, groups):
+        """Reuse cached soft-edge data for the selected curved outlines."""
+        if not self._effective_style().profiles:
+            return
+        eye = self.camera.eye()
+        key = (self._placements_epoch(), tuple(map(id, groups)), eye.toTuple())
+        if getattr(self, "_selected_profile_key", None) != key:
+            import numpy as np
+            parts = []
+            planes = self._frame_planes
+            e_np = np.array(eye.toTuple())
+            for g in groups:
+                if g.xform is not None:
+                    raw = self._instance_silhouette(g, eye, planes)
+                    if raw is not None:
+                        parts.append(raw)
+                        continue
+                ch = self._group_chunk(g)
+                if ch["soft_pts"] is None:
+                    continue
+                bb = ch.get("bbox")
+                if bb is not None and planes is not None and not self._aabb_visible(planes, *bb):
+                    continue
+                s0 = np.einsum("ij,ij->i", ch["soft_n0"], ch["soft_c0"] - e_np)
+                s1 = np.einsum("ij,ij->i", ch["soft_n1"], ch["soft_c1"] - e_np)
+                mask = ch["soft_single"] | ((s0 < 0) != (s1 < 0))
+                parts.append(ch["soft_pts"][mask].tobytes())
+            if getattr(self, "_selected_profile_vao", None) is None:
+                self._selected_profile_vao, self._selected_profile_vbo = self._create_dynamic()
+                self._program.bind()
+            raw = b"".join(parts)
+            self._selected_profile_vbo.bind()
+            self._selected_profile_vbo.allocate(raw or b"\0" * 24, max(24, len(raw)))
+            self._selected_profile_vbo.release()
+            self._selected_profile_count = len(raw) // 12
+            self._selected_profile_key = key
+        if self._selected_profile_count:
+            self._selected_profile_vao.bind()
+            self._gl.glDrawArrays(GL_LINES, 0, self._selected_profile_count)
+            self._selected_profile_vao.release()
+
+    def _draw_selected_group_edges(self, mvp, w, h):
+        """Tint the selected occurrences, sharing local buffers, not meshes
+        baked and copied into the selection VBO on every click."""
+        if self._export_size is not None or self._nav_fast_feedback:
+            return
+        groups = self._selected_group_placements()
+        if not groups:
+            return
+        by_mesh = {}
+        loose = []
+        for g in groups:
+            bounds = (self._placement_bbox(g) if g.xform is not None
+                      else self._group_chunk(g).get("bbox"))
+            if (bounds is not None and self._frame_planes is not None
+                    and not self._aabb_visible(self._frame_planes, *bounds)):
+                continue
+            if g.xform is None:
+                loose.append(g)
+            else:
+                by_mesh.setdefault(g.mesh, []).append(g)
+        extra = self.context().extraFunctions()
+        self._program.bind()
+        self._set_color(0.95, 0.45, 0.16, 1.0)
+        self._gl.glDepthMask(GL_FALSE)
+        kinds = ["visible"]
+        if self.scene.show_hidden_geometry:
+            kinds.append("selected_hidden")
+        try:
+            for kind in kinds:
+                dashed = kind == "selected_hidden"
+                self._program.setUniformValue(self._loc_stipple, 4 if dashed else 0)
+                if dashed:
+                    self._program.setUniformValue(self._loc_viewport_px,
+                                                  QVector2D(float(w), float(h)))
+                    self._program.setUniformValue1f(self._loc_dash_px,
+                        3.0 * max(1.0, float(self.devicePixelRatioF())))
+                for mesh, batch in by_mesh.items():
+                    entry = self._hidden_edge_draw(mesh, kind)
+                    if entry["count"]:
+                        n = self._update_inst_matrices(entry, batch)
+                        entry["inst_vao"].bind()
+                        extra.glDrawArraysInstanced(GL_LINES, 0, entry["count"], n)
+                        entry["inst_vao"].release()
+                for g in loose:
+                    entry = self._hidden_edge_draw(g.mesh, kind)
+                    if entry["count"]:
+                        entry["plain_vao"].bind()
+                        self._gl.glDrawArrays(GL_LINES, 0, entry["count"])
+                        entry["plain_vao"].release()
+            self._program.setUniformValue(self._loc_stipple, 0)
+            self._draw_selected_profiles(groups)
+        finally:
+            self._program.setUniformValue(self._loc_stipple, 0)
+            self._gl.glDepthMask(GL_TRUE)
+
     def _sync_selection_buffers(self) -> None:
         """The selection's highlight buffers (``_sync_edges``)."""
         pv = getattr(self, "_preview_groups", None) or ()
@@ -8133,14 +8407,8 @@ class Viewport(QOpenGLWidget):
                     # the chunk here left an orange GHOST at the origin
                     # until the commit (user report).
                     continue
-                # A selected group reads as its BOUNDING BOX, the way
-                # modellers usually show one — twelve segments instead of the whole
-                # object. Highlighting the geometry meant uploading every
-                # edge AND a triangle copy of every face on each click: the
-                # 230k-face hedge in piscina.igz pushed 416k edges through
-                # the selection buffers just to say "this is selected". The
-                # box also reads better on a dense group, where an all-orange
-                # mass says less than an outline does.
+                # Keep the box; mesh edges are tinted by the shared-buffer
+                # selection pass without copying the assembly into this VBO.
                 sel_edge_parts.append(_box_edges(*self._group_obb(ent)))
         self._selected_count = self._upload_vbo(
             self._selected_vbo, "sel_edges",
@@ -18588,8 +18856,8 @@ class Viewport(QOpenGLWidget):
     def escape(self) -> None:
         """The Esc cascade (standard CAD), ONE step per press: a typed value
         buffer, then a sticky constraint (axis lock / reference), then the
-        array window a copy just opened, then the tool's in-progress action, then the selection, then — nothing in
-        progress — step out ONE level of the open group, and
+        array window a copy just opened, then the tool's in-progress action, then — nothing in progress — step out ONE level of the open group,
+        then clear the selection at the root, and
         finally the tool's own cancel. The window's «Cancel current tool»
         action (shortcut Esc, which fires BEFORE this widget's key event)
         calls this too: it used to carry its own copy of the cascade,
@@ -18618,13 +18886,14 @@ class Viewport(QOpenGLWidget):
             tool.on_cancel(self)
             self._release_linear_mode()
             return
+        if self.scene.edit_group is not None:
+            self.clear_extension_pick()
+            self.end_one_group_edit()       # selection must not consume Esc
+            return
         if self.scene.selection or self.extension_pick is not None:
             self.scene.clear_selection()
             self.clear_extension_pick()
             self.update()
-            return
-        if self.scene.edit_group is not None:
-            self.end_one_group_edit()       # step out ONE level
             return
         if tool is not None:
             tool.on_cancel(self)

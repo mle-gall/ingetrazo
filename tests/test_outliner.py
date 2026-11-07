@@ -1764,3 +1764,30 @@ def test_a_tab_dropped_on_the_other_side_moves_there():
     QSettings().remove("composer/tab_layout")
     QSettings().remove("composer/views_visible")
     _close(win)
+
+
+def test_repeated_row_templates_keep_distinct_objects_and_children():
+    """Identical presentation is shared, never the represented group/tree."""
+    from views.outliner import COL_NAME
+    mesh = Mesh()
+    first = Group(mesh, 'First')
+    second = Group(mesh, 'Second')
+    first.adopt([Group(mesh, 'Child A')])
+    second.adopt([Group(mesh, 'Child B'), Group(mesh, 'Child C')])
+    win, scene, panel = _window_with(first, second)
+    try:
+        a, b = panel._items[id(first)], panel._items[id(second)]
+        assert a.data(COL_NAME, Qt.UserRole) is first
+        assert b.data(COL_NAME, Qt.UserRole) is second
+        assert a.text(COL_NAME) == 'First'
+        assert b.text(COL_NAME) == 'Second'
+        assert a.childCount() == 1
+        assert b.childCount() == 2
+        second.hidden = True
+        scene.version += 1
+        panel.refresh()
+        assert not a.data(COL_EYE, Qt.UserRole)
+        assert b.data(COL_EYE, Qt.UserRole)
+    finally:
+        _close(win)
+        win.close()

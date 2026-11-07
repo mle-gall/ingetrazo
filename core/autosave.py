@@ -81,6 +81,14 @@ def discarded_dir() -> Path:
     return d
 
 
+_slot_epochs: dict[Path, int] = {}
+
+
+def slot_epoch(slot: Path) -> int:
+    """UI-thread generation: prevents a pending writer reviving a retired slot."""
+    return _slot_epochs.get(slot, 0)
+
+
 def clear(path: Path | None, untitled: int = 1) -> None:
     """Retire the document's slot (clean save / clean close / discarded).
 
@@ -93,6 +101,7 @@ def clear(path: Path | None, untitled: int = 1) -> None:
     Only the newest :data:`KEEP_DISCARDED` are kept."""
     import datetime
     slot = slot_for(path, untitled)
+    _slot_epochs[slot] = slot_epoch(slot) + 1
     if not slot.is_file():
         return
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")

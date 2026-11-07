@@ -27,6 +27,7 @@ def test_a_new_document_raises_the_gc_threshold_and_does_not_freeze():
         gc.set_threshold(2000, 10, 0)
         win._on_new()
         assert gc.get_threshold()[0] == MainWindow.GC_THRESHOLD0
+        assert gc.get_threshold()[2] > 0
         assert gc.get_freeze_count() <= frozen_before
         win.viewport._last_pos = None
         win._on_autosave_tick()                             # a collection, no freeze

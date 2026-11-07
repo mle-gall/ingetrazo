@@ -312,21 +312,27 @@ def _edge_json(e) -> dict:
 
 
 def _mesh_json(mesh, geom_sink=None) -> dict:
-    """The mesh block. With a ``geom_sink`` (a large document) a big mesh
-    goes to a binary block in the sink and the JSON keeps only its
-    reference and face-attribute table (format 3)."""
+    """In large documents, store every nonempty mesh as format-3 arrays.
+
+    Thousands of individually small components are still a large amount
+    of JSON geometry to parse and convert back to arrays on each open.
+    """
     from core.lazy_mesh import plan_of
     plan = plan_of(mesh)
-    if plan is not None and geom_sink is not None and _bulk_sized(
-            len(plan.edges), plan.nfaces):
+    if plan is not None and geom_sink is not None:
         # A lazy mesh (experimental engine): written from its arrays, the
         # same bytes, without building it.
-        return {"geom": _pack_plan(mesh, plan, geom_sink)}
+        meta = _pack_plan(mesh, plan, geom_sink)
+        if not _bulk_sized(len(plan.edges), plan.nfaces):
+            meta["sequential"] = True
+        return {"geom": meta}
     if plan is not None:
         return _plan_json(mesh, plan)
-    if geom_sink is not None and _bulk_sized(len(mesh.edges),
-                                             len(mesh.faces)):
-        return {"geom": _pack_geometry(mesh, geom_sink)}
+    if geom_sink is not None and (mesh.edges or mesh.faces):
+        meta = _pack_geometry(mesh, geom_sink)
+        if not _bulk_sized(len(mesh.edges), len(mesh.faces)):
+            meta["sequential"] = True
+        return {"geom": meta}
     return {
         "edges": [_edge_json(e) for e in mesh.edges],
         "faces": [_face_json(f) for f in mesh.faces],
@@ -606,16 +612,29 @@ def _pack_plan(mesh, plan, sink: dict) -> dict:
 
 
 def save_scene(scene, path: Path) -> dict:
-    """Write ``scene`` to ``path``. Returns ``{"embedded", "missing"}``: how
-    many texture images were packed into the document, and how many could not
-    be read (those keep pointing at their original path)."""
+    """Synchronous explicit save; autosave drives the same preparation in slices."""
+    steps = prepare_scene_steps(scene)
+    while True:
+        try:
+            next(steps)
+        except StopIteration as done:
+            return write_prepared(done.value, path)
+
+
+def prepare_scene_steps(scene, mesh_steps=None):
+    """Yield between model blocks, returning an unencoded document payload."""
     # Accept a Scene or a bare Mesh (the M1 read-compat path feeds a Mesh).
     mesh = scene.mesh if hasattr(scene, "mesh") else scene
     # Decided BEFORE anything is serialized: a large document writes its
     # big meshes as binary blocks (format 3) and never builds their JSON.
-    large = _live_element_count(scene) > _LARGE_DOCUMENT
+    large = mesh_steps is not None or _live_element_count(scene) > _LARGE_DOCUMENT
     geom: dict | None = {} if large else None
-    payload = _mesh_json(mesh, geom)
+    def block(m):
+        if mesh_steps is not None:
+            return (yield from mesh_steps(m))
+        return _mesh_json(m, geom)
+
+    payload = yield from block(mesh)
     groups = getattr(scene, "groups", None)
     kept = getattr(scene, "kept_components", None)
     if groups or kept:
@@ -633,7 +652,7 @@ def save_scene(scene, path: Path) -> dict:
                 if idx is None:
                     idx = proto_index[id(g.mesh)] = len(protos)
                     protos.append(None)          # reserve: recursion is depth
-                    protos[idx] = _mesh_json(g.mesh, geom)
+                    protos[idx] = yield from block(g.mesh)
                 entry = {"proto": idx,
                          "xform": [float(x) for x in xf.data()]}
                 # Group or component (issue #90): a group of groups and a
@@ -642,7 +661,7 @@ def save_scene(scene, path: Path) -> dict:
                 # the reader tells apart its own way. Older readers ignore it.
                 entry["component"] = bool(getattr(g, "component", True))
             else:
-                entry = _mesh_json(g.mesh, geom)
+                entry = yield from block(g.mesh)
             # The name — never written until 2026-09-11, so every reopened
             # document renumbered its groups and a "Pérgola" came back as
             # "Group 7". Older readers ignore the key.
@@ -690,15 +709,22 @@ def save_scene(scene, path: Path) -> dict:
                 entry["explode_offset"] = list(g.explode_offset)
             kids = getattr(g, "children", None)
             if kids:
-                entry["children"] = [_entry(c) for c in kids]
+                entry["children"] = []
+                for c in kids:
+                    entry["children"].append((yield from _entry(c)))
+            yield
             return entry
 
-        payload["groups"] = [_entry(g) for g in groups or ()]
+        payload["groups"] = []
+        for g in groups or ():
+            payload["groups"].append((yield from _entry(g)))
         if kept:
             # Definitions kept with no copy placed: written like instances
             # through the SAME prototype table, so one still in use is not
             # written twice. Older readers ignore the key (and lose them).
-            payload["kept_components"] = [_entry(t) for t in kept]
+            payload["kept_components"] = []
+            for t in kept:
+                payload["kept_components"].append((yield from _entry(t)))
         if protos:
             payload["protos"] = protos
     layers = getattr(scene, "layers", None)
@@ -834,16 +860,36 @@ def save_scene(scene, path: Path) -> dict:
     # Images ride INSIDE the document (see the module docstring). Only a scene
     # that actually has textures pays for the container; everything else stays
     # plain JSON at format 1, readable by older builds.
-    blobs, missing = _pack_textures(payload)
+    survey_blobs = {}
     # The photogrammetric survey (Track G, G6) rides inside the document too,
     # for the same reason the textures do: a reference mesh that lives in a
     # folder next to the .igz is one move away from being lost.
     survey = getattr(scene, "photo_mesh", None)
     if survey is not None and getattr(survey, "triangle_count", 0):
-        from georef.photomesh import pack_mesh
-        meta, survey_blobs = pack_mesh(survey)
-        payload["photo_mesh"] = meta
-        blobs.update(survey_blobs)
+        if mesh_steps is not None:
+            from formats.igz_snapshot import survey_steps
+            survey_blobs = yield from survey_steps(survey)
+        else:
+            from georef.photomesh import pack_mesh
+            meta, survey_blobs = pack_mesh(survey)
+            payload["photo_mesh"] = meta
+
+    return payload, geom, large, survey_blobs
+
+
+def write_prepared(prepared, path: Path, background=False) -> dict:
+    """Encode and write a detached payload. Never reads the live scene."""
+    payload, geom, large, survey_blobs = prepared
+    if background:
+        from formats.igz_snapshot import resolve_geometry
+        resolve_geometry(payload, geom)
+        from formats.igz_snapshot import Survey
+        if isinstance(survey_blobs, Survey):
+            from georef.photomesh import pack_mesh
+            meta, survey_blobs = pack_mesh(survey_blobs.mesh)
+            payload["photo_mesh"] = meta
+    blobs, missing = _pack_textures(payload)
+    blobs.update(survey_blobs)
     data = {
         "igz_format": (GEOMETRY_FORMAT if geom else
                        CONTAINER_FORMAT if blobs else PLAIN_FORMAT),
@@ -851,7 +897,12 @@ def save_scene(scene, path: Path) -> dict:
         "scene": payload,
     }
     try:
-        if large:
+        if background:
+            # The Python encoder yields the GIL between chunks; the C
+            # encoder can hold it throughout a huge placement hierarchy.
+            doc = "".join(json.JSONEncoder(separators=(",", ":"),
+                                           allow_nan=False).iterencode(data))
+        elif large:
             doc = json.dumps(data, separators=(",", ":"), allow_nan=False)
         else:
             doc = json.dumps(data, indent=2, allow_nan=False)
@@ -985,8 +1036,10 @@ def _read_document(path: Path, pump=None):
     """``(data, archive)`` for a document of either shape — the archive is
     ``None`` for a plain-JSON one, and stays open while the caller extracts
     embedded images."""
-    raw = path.read_bytes()
-    if not raw.startswith(_ZIP_MAGIC):
+    with path.open('rb') as stream:
+        magic = stream.read(len(_ZIP_MAGIC))
+    if magic != _ZIP_MAGIC:
+        raw = path.read_bytes()
         return _parse_json(raw.decode("utf-8"), pump), None
     import zipfile
     from core import zip_limits
@@ -1902,16 +1955,25 @@ def _load_geometry(mesh, meta, geom: dict) -> None:
         if top >= _mesh_mod._CURVE_COUNTER:
             _mesh_mod._CURVE_COUNTER = top + 1
 
+    source = dict(meta=meta, pos=pos, edges=edges, flags=flags,
+                  curves=curves, layers=layers, rings=rings, sizes=sizes,
+                  counts=counts, face_attr=face_attr)
+    if meta.get("sequential") is True:
+        source["sequential"] = True
+
     def build(mesh):
-        _build_geometry(mesh, meta, pos, edges, flags, curves, layers,
-                        rings, sizes, counts, face_attr)
+        if source.get("sequential"):
+            # Small meshes used the per-entity JSON reader. Preserve that
+            # vertex order even though their storage is now binary.
+            _load_mesh_small(mesh, _payload_from_arrays(source))
+        else:
+            _build_geometry(mesh, meta, pos, edges, flags, curves, layers,
+                            rings, sizes, counts, face_attr)
     from core import _native
     if not (_native.wanted()
             and _mesh_mod.DeferredMesh.defer(
                 mesh, build, len(counts),
-                dict(meta=meta, pos=pos, edges=edges, flags=flags,
-                     curves=curves, layers=layers, rings=rings, sizes=sizes,
-                     counts=counts, face_attr=face_attr))):
+                source)):
         build(mesh)
 
 

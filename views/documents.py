@@ -39,7 +39,7 @@ class Document:
         self.import_name: Optional[str] = None
         #: Content version at the last save (see MainWindow._saved_version).
         self.saved_content: int = 0
-        #: Scene version the auto-save last wrote, or None.
+        #: Content version the auto-save last wrote, or None.
         self.autosaved_version: Optional[int] = None
         #: Which untitled auto-save slot it writes while it has no path
         #: (``core.autosave.slot_for``): 1 is the classic ``untitled.igz``.

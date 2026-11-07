@@ -497,6 +497,15 @@ def main() -> int:
     app.setProperty("platform_forced", platform_forced)
     app.setApplicationName("IngeTrazo")
     app.setOrganizationName("IngeTrazo")
+    if "--prepare-drawing-cache" in sys.argv[1:]:
+        index = sys.argv.index("--prepare-drawing-cache")
+        if index + 1 >= len(sys.argv):
+            print("Usage: ingetrazo --prepare-drawing-cache <document.igz>", file=sys.stderr)
+            return 2
+        import json
+        from views.drawing_cache import prepare_file
+        print(json.dumps(prepare_file(sys.argv[index + 1])), flush=True)
+        return 0
     app.setProperty("gpu_pref", gpu_pref)
     # A driver that cannot serve the format we just asked for takes the
     # whole app down with it, window included — and Qt's own

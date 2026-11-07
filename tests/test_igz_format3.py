@@ -185,16 +185,29 @@ def test_a_nan_point_is_refused_on_save(tmp_path, binary):
     assert not out.exists()
 
 
-def test_a_mesh_goes_binary_only_where_json_would_load_in_bulk():
-    """The JSON reader rebuilds small meshes entity by entity and big ones
-    in bulk, and the two number vertices differently: a mesh the JSON
-    reader takes one by one must stay JSON, or it reopens in another
-    order (23 meshes of the #158 model did)."""
+@pytest.mark.parametrize("native", [False, True])
+def test_small_binary_mesh_preserves_json_vertex_order(monkeypatch, native):
+    from core import _native
+    monkeypatch.setattr(_native, "wanted", lambda: native)
     m = Mesh()
-    for i in range(600):                 # 600 edges: 1200 ends, < 1024 rule
-        m.add_edge(V(i, 0, 0), V(i, 1, 0))
+    for i in range(600):
+        e = m.add_edge(V(i, 0, 0), V(i, 1, 0))
+        e.soft, e.hidden, e.curve = i % 2 == 0, i % 3 == 0, i // 2
     assert not igz._bulk_sized(len(m.edges), len(m.faces))
-    assert "edges" in igz._mesh_json(m, {})
-    for i in range(500):
-        m.add_edge(V(i, 2, 0), V(i, 3, 0))
-    assert "geom" in igz._mesh_json(m, {})
+    payload = igz._mesh_json(m)
+    expected = Mesh(); igz._load_mesh(expected, payload)
+    blobs = {}
+    block = igz._mesh_json(m, blobs)
+    assert block["geom"]["sequential"] is True
+    actual = Mesh(); igz._load_mesh(actual, block, blobs)
+    assert [v.position.toTuple() for v in actual.vertices] == [
+        v.position.toTuple() for v in expected.vertices]
+    assert igz._mesh_json(actual) == igz._mesh_json(expected)
+
+
+def test_small_component_binary_roundtrip(tmp_path, monkeypatch):
+    json_back = _save_and_load(_scene(tmp_path), tmp_path / "small-json.igz")
+    monkeypatch.setattr(igz, "_LARGE_DOCUMENT", 0)
+    binary_back = _save_and_load(_scene(tmp_path), tmp_path / "small-binary.igz")
+    assert _canonical(binary_back) == _canonical(json_back)
+    assert binary_back.groups[0].mesh is binary_back.groups[1].mesh

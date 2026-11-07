@@ -467,15 +467,15 @@ class Scene:
         xform = getattr(group, "xform", None)
         if xform is None or xform == QMatrix4x4():
             return
+        from core.explode import rotate_offsets
+        from core.group import transformed_mesh
         for child in group.children:
             child.xform = xform * (child.xform if child.xform is not None
                                    else QMatrix4x4())
         # An exploded view's offsets live in the container's frame, which
         # has just become the world's.
-        from core.explode import rotate_offsets
         rotate_offsets(group, xform)
         if group.mesh.vertices:
-            from core.group import transformed_mesh
             group.mesh = transformed_mesh(group.mesh, xform)
         group.xform = QMatrix4x4()
 
