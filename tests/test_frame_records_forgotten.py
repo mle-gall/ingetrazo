@@ -8,6 +8,9 @@ initializeGL failed with a QOpenGLExtraFunctions for a context."""
 from __future__ import annotations
 
 _RECORDS = ("_lean_faces_rec", "_lean_edges_rec", "_gl_replay_memo",
+            "_lean_faces_rec_chunks", "_lean_edges_rec_chunks", "_inst_chunks_memo",
+            "_lean_faces_rec_merged", "_lean_edges_rec_merged",
+            "_lean_faces_rec_fast", "_lean_edges_rec_fast",
             "_inst_frame_memo", "_frame_instanced")
 
 

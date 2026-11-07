@@ -95,3 +95,26 @@ def test_picking_a_tool_ends_a_camera_drag():
     win._activate_tool("select")
     win._saved_version = vp.scene.version
     win.close()
+
+
+def test_navigation_does_not_run_editing_inference_between_drags(monkeypatch):
+    win = _window()
+    vp = win.viewport
+    try:
+        def no_pick(*args, **kwargs):
+            raise AssertionError('navigation must not run editing inference')
+        monkeypatch.setattr(vp, '_build_ctx', no_pick)
+        monkeypatch.setattr(vp, '_emit_coordinate', no_pick)
+        for mode in ('orbit', 'pan', 'zoom', 'zoom_window'):
+            vp.set_nav_mode(mode)
+            _move(vp, 180, 140)
+            vp._run_pending_hover()
+        vp.set_nav_mode(None)
+        called = []
+        monkeypatch.setattr(vp, '_process_hover', lambda *a: called.append(True))
+        _move(vp, 190, 150)
+        vp._run_pending_hover()
+        assert called, 'editing hover must resume after leaving navigation'
+    finally:
+        win._saved_version = vp.scene.version
+        win.close()

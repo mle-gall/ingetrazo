@@ -130,3 +130,25 @@ def test_identical_prototype_batching_preserves_smooth_mirrored_render(viewport,
     separate = pixels(vp.render_image(600, 400, overlays=False))
     assert len(vp._frame_instanced) == 6
     assert np.percentile(np.abs(combined - separate), 99.9) <= 2
+
+
+def test_command_chunks_match_one_continuous_pass(viewport, monkeypatch):
+    vp = viewport
+    for i in range(48):
+        g = Group(_cylinder(Mesh()), f'tube {i}')
+        g.xform = QMatrix4x4()
+        g.xform.translate((i % 8) * 3, (i // 8) * 3, 0)
+        g.material = {'color': [0.2 + i / 100, 0.4, 0.7]}
+        vp.scene.groups.append(g)
+    vp.camera.target, vp.camera.distance = V(10, 7, 1), 40.
+    vp.scene.version += 1
+    chunks = pixels(vp.render_image(600, 400, overlays=False))
+    assert len(vp._inst_draw_chunks(vp._frame_instanced)) >= 3
+    if vp._gl_replay() is not None:
+        assert vp._lean_faces_rec_merged is not None
+    monkeypatch.setattr(vp, '_draw_instanced_faces_lean', vp._draw_instanced_faces_chunk)
+    monkeypatch.setattr(vp, '_draw_instanced_edges_lean', vp._draw_instanced_edges_chunk)
+    vp._lean_faces_rec = vp._lean_edges_rec = None
+    vp.scene.version += 1
+    continuous = pixels(vp.render_image(600, 400, overlays=False))
+    assert np.percentile(np.abs(chunks-continuous), 99.99) <= 2

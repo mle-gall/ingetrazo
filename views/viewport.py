@@ -538,11 +538,12 @@ class _GlTape:
     DRAW, VAO, U1I, U1F, U4F, ENABLE, DISABLE, CULL, FRONT, ACTIVE, TEX, \
         STENCIL = range(12)
 
-    def __init__(self):
+    def __init__(self, execute=True):
         self.calls: list = []
         self.ops: list = []
         self.vals: list = []
         self.arrays = None
+        self.execute = execute
 
     def _op(self, code, ints=(), floats=()):
         self.ops.append((code, *ints, *(0,) * (4 - len(ints))))
@@ -550,7 +551,8 @@ class _GlTape:
 
     def call(self, fn, *args):
         self.calls.append((fn, args))
-        fn(*args)
+        if self.execute:
+            fn(*args)
 
     def draw(self, fn, mode, first, count, n):
         self.call(fn, mode, first, count, n)
@@ -595,15 +597,16 @@ class _GlTape:
         self._op(self.ACTIVE, (GL_TEXTURE0 + unit,))
         self._op(self.TEX, (tex.target().value, 0))
 
+    def array_data(self):
+        if self.arrays is None:
+            import numpy as np
+            self.arrays = (np.asarray(self.ops, dtype=np.int64).reshape(-1, 5),
+                           np.asarray(self.vals, dtype=np.float32).reshape(-1, 4))
+        return self.arrays
+
     def replay(self, native) -> None:
         if native is not None:
-            if self.arrays is None:
-                import numpy as np
-                self.arrays = (np.asarray(self.ops, dtype=np.int64)
-                               .reshape(-1, 5),
-                               np.asarray(self.vals, dtype=np.float32)
-                               .reshape(-1, 4))
-            native.run(*self.arrays)
+            native.run(*self.array_data())
             return
         for fn, args in self.calls:
             fn(*args)
@@ -630,7 +633,7 @@ class _InstanceBatch(list):
     matrix buffer is filled by one NumPy take instead of sixteen floats
     read per placement."""
 
-    __slots__ = ("idx", "mats")
+    __slots__ = ("idx", "mats", "draw_bucket")
 
 
 def _proto_wrapper(vp, mesh, paint=None):
@@ -4274,13 +4277,22 @@ class Viewport(QOpenGLWidget):
         starts = np.concatenate([[0], cuts])
         ends = np.concatenate([cuts, [len(kept)]])
         firsts = kept[starts]
+        previous = last[2] if last is not None and last[0] is pool else {}
         for j in np.argsort(firsts, kind="stable").tolist():
             idx = kept[starts[j]:ends[j]]
-            mesh, paint, mirrored = protos[int(kc[starts[j]])]
-            batch = _InstanceBatch(groups[i] for i in idx.tolist())
-            batch.idx = idx
-            batch.mats = mats
-            out[(id(mesh), _material_sig(paint), mirrored)] = (
+            code = int(kc[starts[j]])
+            mesh, paint, mirrored = protos[code]
+            batch_key = (id(mesh), _material_sig(paint), mirrored)
+            old = previous.get(batch_key)
+            if (old is not None and old[2].mats is mats
+                    and np.array_equal(old[2].idx, idx)):
+                batch = old[2]
+            else:
+                batch = _InstanceBatch(groups[i] for i in idx.tolist())
+                batch.idx = idx
+                batch.mats = mats
+                batch.draw_bucket = code // 16
+            out[batch_key] = (
                 mesh, paint, batch, mirrored)
         memos[planes is None] = (pool, keep, out, pvkey)
         self._frame_instanced = out
@@ -4792,7 +4804,88 @@ class Viewport(QOpenGLWidget):
                              EDIT_REST_FADE))
         return [(fuera, fade), (dentro, 0.0)]
 
+    def _inst_draw_chunks(self, by_proto):
+        """Stable short runs of draw batches, preserving their exact order.
+
+        A camera crossing one placement's bounds must not re-record every
+        visible prototype. Unchanged runs retain their command tapes.
+        """
+        memo = getattr(self, "_inst_chunks_memo", None)
+        if memo is not None and memo[0] is by_proto:
+            return memo[1]
+        old = {tuple(c): c for c in memo[1]} if memo is not None else {}
+        chunks, current, bucket = [], {}, None
+        for key, value in by_proto.items():
+            next_bucket = getattr(value[2], "draw_bucket", 0)
+            if current and (next_bucket != bucket or len(current) >= 16):
+                chunks.append(current)
+                current = {}
+            current[key] = value
+            bucket = next_bucket
+        if current:
+            chunks.append(current)
+        for i, chunk in enumerate(chunks):
+            prev = old.get(tuple(chunk))
+            if prev is not None and all(prev[k][2] is v[2]
+                                        for k, v in chunk.items()):
+                chunks[i] = prev
+        self._inst_chunks_memo = (by_proto, chunks)
+        return chunks
+
+    def _draw_instanced_chunked(self, by_proto, slot, draw, state_key):
+        cache = getattr(self, slot + "_chunks", None) or {}
+        kept = {}
+        native = self._gl_replay()
+        # Split edit-context batches can share and overwrite one matrix
+        # buffer, so those must still draw immediately. Ordinary navigation
+        # records changed chunks without drawing, then submits one joined
+        # native tape instead of crossing Python/native hundreds of times.
+        defer = native is not None and self.scene.edit_group is None
+        serial = getattr(self, "_inst_matrix_serial", 0)
+        fast = getattr(self, slot + "_fast", None)
+        if (defer and fast is not None and fast[0] is by_proto
+                and fast[1] == serial and fast[2] == state_key):
+            native.run(fast[3][1], fast[3][2])
+            return
+        self._defer_inst_tapes = defer
+        try:
+            for chunk in self._inst_draw_chunks(by_proto):
+                old = cache.get(id(chunk))
+                setattr(self, slot, old[1] if old is not None and old[0] is chunk else None)
+                draw(chunk)
+                kept[id(chunk)] = (chunk, getattr(self, slot))
+        finally:
+            self._defer_inst_tapes = False
+        if defer and kept:
+            tapes = tuple(rec[3] for _chunk, rec in kept.values())
+            merged = getattr(self, slot + "_merged", None)
+            if merged is None or merged[0] != tapes:
+                import numpy as np
+                arrays = [tape.array_data() for tape in tapes]
+                merged = (tapes, np.concatenate([a[0] for a in arrays]),
+                          np.concatenate([a[1] for a in arrays]))
+                setattr(self, slot + "_merged", merged)
+            native.run(merged[1], merged[2])
+            setattr(self, slot + "_fast", (by_proto,
+                    getattr(self, "_inst_matrix_serial", 0), state_key, merged))
+        else:
+            setattr(self, slot + "_fast", None)
+        setattr(self, slot + "_chunks", kept)
+
     def _draw_instanced_faces_lean(self, by_proto, mode, extra) -> None:
+        # Submit the preceding passes once, not once per command chunk.
+        # Mesa's Intel driver otherwise varied coincident edge pixels
+        # between frames when fed thousands of draws back to back (#158).
+        self._gl.glFlush()
+        self._draw_instanced_chunked(
+            by_proto, "_lean_faces_rec",
+            lambda chunk: self._draw_instanced_faces_chunk(chunk, mode, extra),
+            (mode, tuple(effective_back_color(
+                getattr(self.scene, "display_style", None), self.scene)),
+             id(getattr(self, "_tex_cache", None)), id(self._program),
+             self.edit_rest_fade, _NO_BACK_TINT))
+
+    def _draw_instanced_faces_chunk(self, by_proto, mode, extra) -> None:
         """The instanced faces pass of the shaded and textured styles: the
         very draws of the general loop below, in the same order, but each
         piece of GL state set only when it changes — on a plant of 2 000
@@ -4801,23 +4894,21 @@ class Viewport(QOpenGLWidget):
         batches (an orbit mostly keeps them) replays the list as is."""
         prog = self._program
         gl = self._gl
-        # Hand the frame's work so far to the driver first. Fed thousands
-        # of draws back to back, Mesa's Intel driver let an edge pixel
-        # beside a face come out either way from one frame to the next
-        # (1 pixel in ~7 frames on the plant of #158); the general loop's
-        # pace hid it, and a flush here — which does not wait for the GPU —
-        # makes every frame the same as that loop's.
-        gl.glFlush()
         back_rgb = effective_back_color(
             getattr(self.scene, "display_style", None), self.scene)
         key = (mode, tuple(back_rgb), id(getattr(self, "_tex_cache", None)),
                id(self._program), self.edit_rest_fade)
         rec = getattr(self, "_lean_faces_rec", None)
         if (rec is not None and rec[0] == key and rec[1] is by_proto
-                and rec[2] == getattr(self, "_inst_matrix_serial", 0)):
-            rec[3].replay(self._gl_replay())
+                and (rec[2] == getattr(self, "_inst_matrix_serial", 0)
+                     or all(e.get("mat_batch") is b for e, b in rec[4]))):
+            self._lean_faces_rec = (*rec[:2], getattr(self, "_inst_matrix_serial", 0),
+                                    *rec[3:])
+            if not getattr(self, "_defer_inst_tapes", False):
+                rec[3].replay(self._gl_replay())
             return
-        tape = _GlTape()
+        tape = _GlTape(execute=not getattr(self, "_defer_inst_tapes", False))
+        pairs = []
         back_vec = QVector4D(back_rgb[0], back_rgb[1], back_rgb[2], 1.0)
         # What the general loop never relies on is unknown on entry (None:
         # the first use sets it); the cull and textures switches are off
@@ -4877,6 +4968,8 @@ class Viewport(QOpenGLWidget):
                 n = self._update_inst_matrices(entry, lote)
                 if entry.get("mat_batch") is not lote:
                     cacheable = False          # an edit-context split
+                else:
+                    pairs.append((entry, lote))
                 need("fade", fade, set_fade)
                 if entry["vcol_count"]:
                     need("cull", False, set_cull)
@@ -4930,7 +5023,7 @@ class Viewport(QOpenGLWidget):
         if state["front"] is not None:
             need("front", False, set_front)
         serial = getattr(self, "_inst_matrix_serial", 0)
-        self._lean_faces_rec = (key, by_proto, serial, tape) if cacheable else None
+        self._lean_faces_rec = (key, by_proto, serial, tape, pairs) if cacheable else None
 
     def _draw_instanced_faces(self, mode, style) -> None:
         by_proto = self._gather_instanced()
@@ -5097,6 +5190,12 @@ class Viewport(QOpenGLWidget):
         self._gl.glColorMask(True, True, True, True)
 
     def _draw_instanced_edges_lean(self, by_proto, extra) -> None:
+        self._draw_instanced_chunked(
+            by_proto, "_lean_edges_rec",
+            lambda chunk: self._draw_instanced_edges_chunk(chunk, extra),
+            (id(self._program), self.edit_rest_fade))
+
+    def _draw_instanced_edges_chunk(self, by_proto, extra) -> None:
         """:meth:`_draw_instanced_edges`'s draws, the fade set only when it
         changes, recorded and replayed while the batches stay (see
         :meth:`_draw_instanced_faces_lean`)."""
@@ -5104,10 +5203,15 @@ class Viewport(QOpenGLWidget):
         key = (id(self._program), self.edit_rest_fade)
         rec = getattr(self, "_lean_edges_rec", None)
         if (rec is not None and rec[0] == key and rec[1] is by_proto
-                and rec[2] == getattr(self, "_inst_matrix_serial", 0)):
-            rec[3].replay(self._gl_replay())
+                and (rec[2] == getattr(self, "_inst_matrix_serial", 0)
+                     or all(e.get("mat_batch") is b for e, b in rec[4]))):
+            self._lean_edges_rec = (*rec[:2], getattr(self, "_inst_matrix_serial", 0),
+                                    *rec[3:])
+            if not getattr(self, "_defer_inst_tapes", False):
+                rec[3].replay(self._gl_replay())
             return
-        tape = _GlTape()
+        tape = _GlTape(execute=not getattr(self, "_defer_inst_tapes", False))
+        pairs = []
         cacheable = True
         fade_now = None
         bound = None
@@ -5123,6 +5227,8 @@ class Viewport(QOpenGLWidget):
                 n = self._update_inst_matrices(entry, lote)
                 if entry.get("mat_batch") is not lote:
                     cacheable = False
+                else:
+                    pairs.append((entry, lote))
                 if fade != fade_now:
                     tape.uniform_f(prog, self._loc_fade, fade)
                     fade_now = fade
@@ -5133,7 +5239,7 @@ class Viewport(QOpenGLWidget):
             tape.release_vao(bound)
         tape.uniform_f(prog, self._loc_fade, 0.0)
         serial = getattr(self, "_inst_matrix_serial", 0)
-        self._lean_edges_rec = (key, by_proto, serial, tape) if cacheable else None
+        self._lean_edges_rec = (key, by_proto, serial, tape, pairs) if cacheable else None
 
     def _gl_replay(self):
         """core._native's GlReplay for this viewport's GL context (the
@@ -5826,6 +5932,10 @@ class Viewport(QOpenGLWidget):
         later viewport's ``context()`` came back as a QOpenGLExtraFunctions
         and initializeGL failed (1 test run in ~10)."""
         for name in ("_lean_faces_rec", "_lean_edges_rec",
+                     "_lean_faces_rec_chunks", "_lean_edges_rec_chunks",
+                     "_lean_faces_rec_merged", "_lean_edges_rec_merged",
+                     "_lean_faces_rec_fast", "_lean_edges_rec_fast",
+                     "_inst_chunks_memo",
                      "_gl_replay_memo", "_inst_frame_memo",
                      "_frame_instanced"):
             if getattr(self, name, None) is not None:
@@ -17860,8 +17970,12 @@ class Viewport(QOpenGLWidget):
         return self.inference._extension_snap(snap, px_x, px_y)
 
     def _process_hover(self, pos, modifiers) -> None:
-        if self._last_pos is not None or self._box_active:
-            return          # a camera drag / box select started meanwhile
+        if (self._last_pos is not None or self._box_active
+                or self.nav_mode is not None):
+            # Navigation tools don't select or snap. In particular, a
+            # pointer move between orbit drags must not build the editing
+            # pick index and block the next press on a large assembly.
+            return
         self._tick = getattr(self, "_tick", 0) + 1     # a new epoch memo
         ev = _HoverEvent(pos, modifiers)
         _hp0 = _time_mod.perf_counter() if _PERF else 0.0
