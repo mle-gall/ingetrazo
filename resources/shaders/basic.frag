@@ -62,6 +62,8 @@ in vec2 v_uv;
 in vec3 v_color;
 in vec3 v_world;
 in vec3 v_local;
+in vec3 v_normal_world;
+in float v_baked_matte;
 // Instanced component pass (#482): face colours and texture shades were
 // baked from the PROTOTYPE's normals against the fixed world light, so a
 // rotated copy kept the light of the unrotated one. With this on, the
@@ -218,7 +220,10 @@ void main() {
     if (u_reshade == 1 && (u_use_texture == 1 || u_use_vcolor == 1)) {
         float ll = length(n_local);
         float lw = length(n_world);
-        if (ll > 1e-20 && lw > 1e-20) {
+        if (u_use_vcolor == 1 && length(v_normal_world) > 1e-10) {
+            c.rgb = min(c.rgb * matte(normalize(v_normal_world)) / v_baked_matte,
+                        vec3(1.0));
+        } else if (ll > 1e-20 && lw > 1e-20) {
             c.rgb = min(c.rgb * (matte(n_world / lw) / matte(n_local / ll)),
                         vec3(1.0));
         }
@@ -237,6 +242,10 @@ void main() {
         // sun — a face turned away never samples it, which also kills every
         // residual bias artifact along its roof line.
         vec3 nrm = normalize(cross(dFdx(v_world), dFdy(v_world)));
+        if (u_use_vcolor == 1 && length(v_normal_world) > 1e-10) {
+            vec3 smooth_normal = normalize(v_normal_world);
+            nrm = dot(smooth_normal, nrm) < 0.0 ? -smooth_normal : smooth_normal;
+        }
         float ndl = dot(nrm, u_sun_dir);
         float lit = (ndl > 0.0) ? shadow_light() : 0.0;
         c.rgb *= mix(u_shadow_dark, 1.0,

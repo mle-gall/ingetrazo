@@ -338,7 +338,7 @@ class SmoothNormals:
     """The smooth normals of one export, worked out once per vertex.
 
     Around a vertex, the faces joined through it by **soft** edges are one
-    surface there (a cylinder's sides, a sphere's patches): their normals
+    surface there (a cylinder's sides, a sphere's patches): their corner-angle-weighted normals
     are summed into one, so the file shades the surface round instead of
     showing every facet. A hard edge splits the fan, so a cylinder's cap
     keeps its crease against the sides. A face wound the other way counts
@@ -355,6 +355,7 @@ class SmoothNormals:
         self._flat: dict = {}
         self._xyz: dict = {}
         self._at: dict = {}
+        self._angles: dict = {}
 
     def flat(self, face):
         n = self._flat.get(face)
@@ -369,6 +370,27 @@ class SmoothNormals:
         if t is None:
             t = self._xyz[face] = self.flat(face).toTuple()
         return t
+
+    def _corner_weights(self, face):
+        """Interior angles: splitting a polygon must not change its weight."""
+        cached = self._angles.get(face)
+        if cached is not None:
+            return cached
+        import math
+        from PySide6.QtGui import QVector3D
+        weights = {}
+        normal = self.flat(face)
+        for loop in (face.loop, *face.hole_loops):
+            for i, vertex in enumerate(loop):
+                a = loop[i - 1].position - vertex.position
+                b = loop[(i + 1) % len(loop)].position - vertex.position
+                cross = QVector3D.crossProduct(a, b)
+                angle = math.atan2(cross.length(), QVector3D.dotProduct(a, b))
+                if QVector3D.dotProduct(cross, normal) > 0:
+                    angle = 2 * math.pi - angle
+                weights[vertex] = angle
+        self._angles[face] = weights
+        return weights
 
     def _fan(self, v) -> dict:
         """``{face: normal}`` for the faces round ``v`` on a curved surface."""
@@ -410,6 +432,8 @@ class SmoothNormals:
             sx = sy = sz = 0.0
             for g in members:
                 x, y, z = t(g)
+                weight = self._corner_weights(g).get(v, 0.0)
+                x, y, z = x * weight, y * weight, z * weight
                 if x * rx + y * ry + z * rz >= 0:
                     sx += x; sy += y; sz += z           # noqa: E702
                 else:

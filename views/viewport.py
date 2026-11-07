@@ -2940,10 +2940,13 @@ class Viewport(QOpenGLWidget):
 
         # Back-side material overrides (faces painted DIFFERENTLY per side,
         # two-sided paint from .skp): drawn with front-face culling so they
-        # only show from behind, without the face passes' polygon offset so
-        # they win the depth test over the front copy there.
+        # only show from behind. Match the front pass depth exactly: an
+        # unbiased back can otherwise punch through a millimetre-thin wall.
+        # LEQUAL lets the later back material replace its own front copy.
         if (self._back_vcol_run[1] > 0 or self._back_tex_runs) \
                 and mode in ("textures", "shaded", "xray"):
+            self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
+            self._gl.glPolygonOffset(1.0, 1.0)
             self._gl.glEnable(GL_CULL_FACE)
             self._gl.glCullFace(GL_FRONT)
             bstart, bcount = self._back_vcol_run
@@ -2970,6 +2973,7 @@ class Viewport(QOpenGLWidget):
                 self._program.setUniformValue1f(self._loc_shade, 1.0)
                 self._program.setUniformValue(self._loc_use_tex, 0)
             self._gl.glDisable(GL_CULL_FACE)
+            self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
 
         self._draw_section_fill(mode, style)
         # Ambient occlusion (#954): onto the opaque faces only — the glass
@@ -4568,6 +4572,8 @@ class Viewport(QOpenGLWidget):
         entry = {"key": key,
                  "vcol_vbo": static_vbo(vcol_raw),
                  "vcol_count": len(vcol_raw) // 24,
+                 "normal_vbo": (static_vbo(base["smooth_vcol"])
+                                if base.get("smooth_vcol") else None),
                  "edges_vbo": static_vbo(edges_raw),
                  "edge_count": len(edges_raw) // 12,
                  "dback_vbo": static_vbo(dback_raw),
@@ -4619,6 +4625,11 @@ class Viewport(QOpenGLWidget):
                 self._program.setAttributeBuffer(loc, GL_FLOAT, offset, size,
                                                  stride)
             vbo.release()
+            if vbo is statics["vcol_vbo"] and statics.get("normal_vbo"):
+                statics["normal_vbo"].bind()
+                self._program.enableAttributeArray(7)
+                self._program.setAttributeBuffer(7, GL_FLOAT, 0, 3, 12)
+                statics["normal_vbo"].release()
             wire_matrix()
             v.release()
             return v
@@ -12000,10 +12011,21 @@ class Viewport(QOpenGLWidget):
             a = np.frombuffer(raw, np.float32).reshape(-1, 3, stride)
             return a[:, :, :3].astype(np.float64)
 
-        def reshade6(raw, placed):      # pos(3)+rgb(3), local → placed
+        def reshade6(raw, placed, normals=None):  # local → placed
             if (not turned or not raw or len(raw) % 72
                     or len(placed) != len(raw)):
                 return placed
+            if normals:
+                local = np.frombuffer(normals, np.float32).reshape(-1, 3)
+                local = local.astype(np.float64)
+                world = tn(local)
+                k = ((0.62 + 0.38 * np.abs(world @ light))
+                     / (0.62 + 0.38 * np.abs(local @ light)))
+                if mirrored:
+                    k = k.reshape(-1, 3)[:, [0, 2, 1]].reshape(-1)
+                a = np.frombuffer(placed, np.float32).reshape(-1, 6).copy()
+                a[:, 3:] = np.minimum(a[:, 3:] * k[:, None], 1.0)
+                return a.tobytes()
             k = (matte(tri_pos(placed, 6), quantise=True)
                  / matte(tri_pos(raw, 6), quantise=True))
             a = np.frombuffer(placed, np.float32).reshape(-1, 3, 6).copy()
@@ -12059,7 +12081,8 @@ class Viewport(QOpenGLWidget):
             "soft_single": base["soft_single"],
         }, {
             "dback": lambda: tp32(base.get("dback", b""), 3),
-            "vcol": lambda: reshade6(base["vcol"], tp32(base["vcol"], 6)),
+            "vcol": lambda: reshade6(base["vcol"], tp32(base["vcol"], 6),
+                                    base.get("smooth_vcol")),
             "by_texture": lambda: rekey5(
                 {p: tp32(raw, 5) for p, raw in base["by_texture"].items()}),
             "tcol": lambda: {a: reshade6(raw, tp32(raw, 6))
@@ -12303,6 +12326,7 @@ class Viewport(QOpenGLWidget):
         # a third of the whole build on a 160k-face import).
         from core.triangulate import triangulate as _triangulate
         vcol = array("f")             # interleaved pos(3)+rgb(3) per vertex
+        smooth_vcol = array("f")      # optional corner normals for instances
         by_texture: dict = {}
         tcol: dict = {}               # opacity -> interleaved pos+rgb (translucent)
         by_ttexture: dict = {}        # (op, fcull) -> {path: pos+uv}
@@ -12397,6 +12421,10 @@ class Viewport(QOpenGLWidget):
                     fcull_vcol_parts.append(array("f", rows).tobytes())
                 else:
                     dest.extend(rows)
+                    if dest is vcol and curved:
+                        cn = smoother.corners(f) if f in curved else {}
+                        smooth_vcol.extend(c for tri in tri_list for p in tri
+                                           for c in cn.get(p, normal).toTuple())
             tris.extend(geom[6])
             tri_ent.extend([i] * len(tri_list))
             if tri_list and back_is_default(fattrs):
@@ -12492,6 +12520,7 @@ class Viewport(QOpenGLWidget):
                  "obb": None,
                  "edges": edges_data.tobytes(),
                  "vcol": vcol.tobytes(),
+                 "smooth_vcol": smooth_vcol.tobytes(),
                  "by_texture": {k: v.tobytes() for k, v in by_texture.items()},
                  "tcol": {a: v.tobytes() for a, v in tcol.items()},
                  "ttex": {(pth, a, fc): v.tobytes()
@@ -12571,7 +12600,7 @@ class Viewport(QOpenGLWidget):
             # Soft edges shade smooth since #131: a chunk stored before
             # bakes the curved surface flat. Only meshes with soft edges
             # take the term, so the rest keep their digests.
-            h.update(b"smooth-shading")
+            h.update(b"smooth-shading-angle-weighted-v3")
         if fp[6]:
             # Hidden-edge term, only when some edge IS hidden: meshes without
             # any (the overwhelming majority) keep their pre-existing digests,
@@ -12596,7 +12625,7 @@ class Viewport(QOpenGLWidget):
         return h.hexdigest()
 
     _CHUNK_CACHE_FIELDS = (
-        "edges", "vcol", "by_texture", "tcol", "ttex", "back_vcol",
+        "edges", "vcol", "smooth_vcol", "by_texture", "tcol", "ttex", "back_vcol",
         "back_tex", "back_tcol", "back_ttex", "fvcol", "dback", "areas",
         "v0", "e1", "e2", "tri_ent", "soft_pts", "soft_n0", "soft_c0",
         "soft_n1", "soft_c1", "soft_single", "bbox", "coordsum",
@@ -12631,7 +12660,8 @@ class Viewport(QOpenGLWidget):
         import threading
         try:
             key = self._chunk_cache_key(mesh, entry["fp"])
-            payload = {k: entry[k] for k in self._CHUNK_CACHE_FIELDS}
+            payload = {k: entry.get(k, b"") if k == "smooth_vcol" else entry[k]
+                       for k in self._CHUNK_CACHE_FIELDS}
             cdir = self._chunk_cache_dir()
         except Exception:                    # noqa: BLE001
             return

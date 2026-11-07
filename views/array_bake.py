@@ -25,9 +25,15 @@ from core.mesh import DeferredMesh, Face, Vertex
 
 
 def can_bake(mesh) -> bool:
-    """Whether ``mesh`` is deferred and this engine can bake it as is."""
+    """Whether the array path can reproduce the object bake exactly.
+
+    Soft-edge fans currently need the object baker's corner normals. Keep
+    their shared prototype bake (and GPU instancing), rather than silently
+    rendering a deferred curved mesh flat.
+    """
     return (type(mesh) is DeferredMesh and _native.native is not None
-            and _native.qt_hypot() is not None)
+            and _native.qt_hypot() is not None
+            and not lazy_mesh.plan_of(mesh).soft.any())
 
 
 class DeferredFaces:
@@ -548,6 +554,7 @@ def bake(vp, mesh, paint, msig, vkey, uid):
             "samples": samples, "coordsum": _coordsum(plan), "bbox": bbox,
             "obb": None,
             "edges": edges_data,
+            "smooth_vcol": b"",
             "vcol": vcol,
             "by_texture": by_texture_b,
             "tcol": tcol,

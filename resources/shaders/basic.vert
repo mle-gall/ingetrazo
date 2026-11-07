@@ -3,6 +3,11 @@
 layout(location = 0) in vec3 a_pos;
 layout(location = 1) in vec2 a_uv;
 layout(location = 2) in vec3 a_color;
+// Optional smooth prototype normals; disabled attributes default to zero.
+layout(location = 7) in vec3 a_normal;
+out vec3 v_normal_world;
+out float v_baked_matte;
+uniform vec3 u_light_fixed;
 // Per-instance model matrix columns (divisor 1) for the instanced component
 // pass. Non-instanced draws leave these attribute arrays DISABLED, and the
 // viewport resets their generic values to the IDENTITY columns every frame
@@ -43,6 +48,14 @@ void main() {
     // already in world coordinates), so the section plane keeps working
     // unchanged for both.
     vec4 world = mat4(a_inst0, a_inst1, a_inst2, a_inst3) * vec4(a_pos, 1.0);
+    v_normal_world = vec3(0.0);
+    v_baked_matte = 1.0;
+    if (dot(a_normal, a_normal) > 0.0) {
+        mat3 model = mat3(a_inst0.xyz, a_inst1.xyz, a_inst2.xyz);
+        if (abs(determinant(model)) > 1e-12)
+            v_normal_world = normalize(transpose(inverse(model)) * a_normal);
+        v_baked_matte = 0.62 + 0.38 * abs(dot(a_normal, u_light_fixed));
+    }
     v_world = world.xyz;
     v_local = a_pos;
     gl_ClipDistance[0] = (u_clip_enable == 1)
