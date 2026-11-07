@@ -6792,7 +6792,8 @@ class MainWindow(QMainWindow):
         # A bar while it loads (issue #59, @pacaeiro): a big document took
         # seconds with nothing on screen, «feeling of freeze». Small ones
         # never show it (the dialog waits 400 ms before appearing).
-        dlg, cb = self._import_progress(tr("Opening {name}…", name=path.name))
+        dlg, cb = self._import_progress(
+            tr("Opening {name}…", name=path.name), monotonic=True)
         # The viewport stays still while the document comes in: each
         # progress tick lets the window repaint, and a paint over a model
         # half loaded built every drawing chunk in one go — 61 s without
@@ -6802,7 +6803,8 @@ class MainWindow(QMainWindow):
         try:
             try:
                 igz_format.load_into(self.viewport.scene,
-                                     slot if recovered else path, progress=cb)
+                                     slot if recovered else path,
+                                     progress=lambda f, t: cb(0.25 * f, t))
             except Exception as exc:  # noqa: BLE001 - surface any IO/parse error to the user
                 dlg.close()
                 QMessageBox.critical(self, tr("Open failed"), str(exc))
@@ -6814,67 +6816,72 @@ class MainWindow(QMainWindow):
             # go, long enough for the desktop to call the app «not
             # responding»: it is built here, under the same dialog (#158).
             try:
-                self.viewport.prepare_drawing(cb)
+                cb(0.25, "Preparing the drawing…")
+                self.viewport.prepare_drawing(
+                    lambda f, t: cb(0.25 + 0.60 * f, t))
             except Exception:  # noqa: BLE001 - the first paint builds it anyway
                 pass
+            cb(0.85, "Finishing…")
+            self.viewport.inference.reset()
+            self._apply_camera_home()
+            self._current_path = path
+            self._remember_recent(path)
+            self._import_name = None
+            self._autosaved_version = None
+            # A recovered drawing is NOT the file on disk yet: keep it dirty so
+            # the title shows * and Ctrl+S makes it real (the slot stays until
+            # that clean save).
+            self._saved_version = (-1 if recovered
+                                   else self.viewport.scene.version)
+            self._sync_style_menu()      # the document may carry its own style
+            self._sync_section_menu()
+            # A stored survey (Track G, G6) arrives as plain arrays + images; the
+            # GL upload only happens here, where there's a context.
+            survey = getattr(self.viewport.scene, "photo_mesh", None)
+            if survey is not None:
+                self.viewport.upload_photo_mesh(survey, getattr(survey, "images", None))
+                # Frame it. The default camera sits ~20 m out (sized for the scale
+                # figure) and a survey is hundreds of metres across, so without this
+                # the whole thing falls outside the far plane and the document opens
+                # looking empty — with the mesh loaded and invisible.
+                mn, mx = survey.bounds()
+                if mn is not None:
+                    self.viewport.camera.set_view("iso")
+                    self.viewport.camera.fit_to(mn, mx)
+            else:
+                self.viewport.release_photo_textures()
+            # Mirror the document's base map and survey into the tray, and refetch
+            # the tiles for the capture the document carries — otherwise the panel
+            # shows stale defaults over a scene that has its own.
+            self.georef_tray.base_map.sync_from_document()
+            self.georef_tray.base_map.sync_photo_mesh()
+            repaired = getattr(self.viewport.scene, "load_repairs", 0)
+            if repaired:
+                # Pieces with a coordinate that is not a number (NaN / inf) were
+                # left out rather than refuse the whole document (#185). Keep it
+                # unsaved, so Ctrl+S writes the cleaned file, and say so.
+                self._saved_version = -1
+                box = QMessageBox(
+                    QMessageBox.Warning, tr("Document repaired"),
+                    tr("{n} damaged pieces (a coordinate that is not a number) "
+                       "were left out so the rest of “{name}” could open. Save "
+                       "it to keep the repaired document.",
+                       n=repaired, name=path.name), QMessageBox.Ok, self)
+                box.setAttribute(Qt.WA_DeleteOnClose)
+                box.open()                       # not modal to the event loop
+            self.viewport.notify_scene_changed()
+            self._update_title()
+            self.settle_heap()
+            cb(0.95, "Drawing the model…")
+            self.viewport.setUpdatesEnabled(True)
+            self.viewport.repaint()
+            cb(1.0, "Ready")
+            return True
         finally:
             self._opening_document = False
             self.viewport.setUpdatesEnabled(True)
-        dlg.close()
-        # Painting was off while it loaded: turning it back on does not ask
-        # for a frame, and the view stayed black until the first click.
-        self.viewport.update()
-        self.viewport.inference.reset()
-        self._apply_camera_home()
-        self._current_path = path
-        self._remember_recent(path)
-        self._import_name = None
-        self._autosaved_version = None
-        # A recovered drawing is NOT the file on disk yet: keep it dirty so
-        # the title shows * and Ctrl+S makes it real (the slot stays until
-        # that clean save).
-        self._saved_version = (-1 if recovered
-                               else self.viewport.scene.version)
-        self._sync_style_menu()      # the document may carry its own style
-        self._sync_section_menu()
-        # A stored survey (Track G, G6) arrives as plain arrays + images; the
-        # GL upload only happens here, where there's a context.
-        survey = getattr(self.viewport.scene, "photo_mesh", None)
-        if survey is not None:
-            self.viewport.upload_photo_mesh(survey, getattr(survey, "images", None))
-            # Frame it. The default camera sits ~20 m out (sized for the scale
-            # figure) and a survey is hundreds of metres across, so without this
-            # the whole thing falls outside the far plane and the document opens
-            # looking empty — with the mesh loaded and invisible.
-            mn, mx = survey.bounds()
-            if mn is not None:
-                self.viewport.camera.set_view("iso")
-                self.viewport.camera.fit_to(mn, mx)
-        else:
-            self.viewport.release_photo_textures()
-        # Mirror the document's base map and survey into the tray, and refetch
-        # the tiles for the capture the document carries — otherwise the panel
-        # shows stale defaults over a scene that has its own.
-        self.georef_tray.base_map.sync_from_document()
-        self.georef_tray.base_map.sync_photo_mesh()
-        repaired = getattr(self.viewport.scene, "load_repairs", 0)
-        if repaired:
-            # Pieces with a coordinate that is not a number (NaN / inf) were
-            # left out rather than refuse the whole document (#185). Keep it
-            # unsaved, so Ctrl+S writes the cleaned file, and say so.
-            self._saved_version = -1
-            box = QMessageBox(
-                QMessageBox.Warning, tr("Document repaired"),
-                tr("{n} damaged pieces (a coordinate that is not a number) "
-                   "were left out so the rest of “{name}” could open. Save "
-                   "it to keep the repaired document.",
-                   n=repaired, name=path.name), QMessageBox.Ok, self)
-            box.setAttribute(Qt.WA_DeleteOnClose)
-            box.open()                       # not modal to the event loop
-        self.viewport.notify_scene_changed()
-        self._update_title()
-        self.settle_heap()
-        return True
+            self.viewport.update()
+            dlg.close()
 
     #: Young-generation threshold: how many net allocations between
     #: collector passes. Python's default (2000) made the incremental
@@ -7394,7 +7401,7 @@ class MainWindow(QMainWindow):
             "sketchfab.com</a> " + tr("(filter by CC licence, download OBJ)"))
 
 
-    def _import_progress(self, title):
+    def _import_progress(self, title, *, monotonic=False):
         """A modal progress dialog + the callback the loaders call at
         milestones (big imports take ~20 s; a bar is the usual answer)."""
         from PySide6.QtWidgets import QApplication, QProgressDialog
@@ -7414,9 +7421,14 @@ class MainWindow(QMainWindow):
         dlg.setWindowModality(Qt.WindowModal)
         dlg.setMinimumDuration(400)
         dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        last = 0
 
         def cb(frac, text):
-            dlg.setValue(int(frac * 100))
+            nonlocal last
+            value = max(0, min(100, int(frac * 100)))
+            last = max(last, value) if monotonic else value
+            dlg.setValue(last)
             dlg.setLabelText(tr(text))
             QApplication.processEvents()
 

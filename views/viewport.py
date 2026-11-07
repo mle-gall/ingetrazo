@@ -4171,8 +4171,13 @@ class Viewport(QOpenGLWidget):
         paints = [_paint_of(self, g) for g in groups]
         array_bake.restore_cached(self, ((g.mesh, paint)
                                          for g, paint in zip(groups, paints)),
-                                  progress=progress)
+                                  progress=(lambda f, t: progress(0.65 * f, t))
+                                  if progress is not None else None)
+        if progress is not None:
+            progress(0.65, "Preparing the drawing…")
         array_bake.prefetch(g.mesh for g in groups)
+        if progress is not None:
+            progress(0.80, "Preparing the drawing…")
         last = time.monotonic()
         # Eligibility depends on the prototype and paint, not the placement
         # matrix. Check it once per variant during this preparation pass.
@@ -4194,8 +4199,10 @@ class Viewport(QOpenGLWidget):
                 pass
             now = time.monotonic()
             if progress is not None and now - last > 0.25:
-                progress(i / n, "Preparing the drawing…")
+                progress(0.80 + 0.20 * (i + 1) / n, "Preparing the drawing…")
                 last = now
+        if progress is not None:
+            progress(1.0, "Preparing the drawing…")
 
     def _placement_bbox(self, g):
         """World AABB of an instanced placement from its PROTOTYPE's local

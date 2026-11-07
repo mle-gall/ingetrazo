@@ -266,7 +266,9 @@ def restore_cached(vp, variants, progress=None):
     last = time.monotonic()
     seen = set()
     from core.materials import material_sig
-    for mesh, paint in variants:
+    variants = list(variants)
+    total = max(1, len(variants))
+    for i, (mesh, paint) in enumerate(variants):
         if not can_bake(mesh):
             continue
         key = (id(mesh), material_sig(paint))
@@ -275,7 +277,7 @@ def restore_cached(vp, variants, progress=None):
             drawing_cache.restore(vp, mesh, paint)
             now = time.monotonic()
             if progress is not None and now - last > 0.25:
-                progress(0.0, "Preparing the drawing…")
+                progress((i + 1) / total, "Preparing the drawing…")
                 last = now
 
 

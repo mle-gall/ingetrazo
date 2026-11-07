@@ -614,3 +614,38 @@ def test_hovering_a_tab_behind_shows_its_picture(win):
         assert shown is wanted
     bar._hide_preview()
     win.hide()
+
+
+def test_open_progress_is_one_monotonic_lifecycle(win, tmp_path, monkeypatch):
+    path = _igz(tmp_path, 'progress.igz')
+    events = []
+    original = win._import_progress
+    def dialog(title, **kwargs):
+        dlg, callback = original(title, **kwargs)
+        def record(fraction, text):
+            callback(fraction, text)
+            events.append(dlg.value())
+        return dlg, record
+    monkeypatch.setattr(win, '_import_progress', dialog)
+    # Some preparation backends restart their own local counters. The
+    # overall opening bar must never move backwards or finish early.
+    def prepare(progress):
+        assert win._opening_document
+        assert not win.viewport.updatesEnabled()
+        for f in (0.0, 0.6, 0.1, 1.0):
+            progress(f, 'Preparing the drawing…')
+    monkeypatch.setattr(win.viewport, 'prepare_drawing', prepare)
+    drawn = []
+    def repaint():
+        drawn.append(win._progress_dlg.value())
+        assert win._opening_document
+        assert win.viewport.updatesEnabled()
+    monkeypatch.setattr(win.viewport, 'repaint', repaint)
+    assert win.open_path(path)
+    assert events == sorted(events)
+    assert events[-1] == 100
+    assert all(value < 100 for value in events[:-1])
+    assert drawn == [95]
+    assert not win._progress_dlg.isVisible()
+    assert not win._opening_document
+    assert win.viewport.updatesEnabled()
