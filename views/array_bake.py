@@ -25,15 +25,9 @@ from core.mesh import DeferredMesh, Face, Vertex
 
 
 def can_bake(mesh) -> bool:
-    """Whether the array path can reproduce the object bake exactly.
-
-    Soft-edge fans currently need the object baker's corner normals. Keep
-    their shared prototype bake (and GPU instancing), rather than silently
-    rendering a deferred curved mesh flat.
-    """
+    """Whether ``mesh`` is deferred and this engine can bake it as is."""
     return (type(mesh) is DeferredMesh and _native.native is not None
-            and _native.qt_hypot() is not None
-            and not lazy_mesh.plan_of(mesh).soft.any())
+            and _native.qt_hypot() is not None)
 
 
 class DeferredFaces:
@@ -144,6 +138,17 @@ def fingerprint(mesh, plan, table, face_attr):
             soft, hid)
 
 
+def _qt_dot(a, b):
+    """Broadcast Qt float32 dot products, preserving the platform's FMA."""
+    a, b = np.broadcast_arrays(np.asarray(a, np.float32), np.asarray(b, np.float32))
+    if _native.qt_hypot() == "libc++-fma":
+        return _native.native.qt_dot_pairs(
+            np.ascontiguousarray(a.reshape(-1, 3)),
+            np.ascontiguousarray(b.reshape(-1, 3)),
+            _native.qt_hypot()).reshape(a.shape[:-1])
+    return (a[..., 0] * b[..., 0] + a[..., 1] * b[..., 1]) + a[..., 2] * b[..., 2]
+
+
 def shade_factors(vp, vecs):
     """``vp._shade_factor`` of each row of ``vecs`` (N,3) float32 — Qt's
     normalized() from the kernel, the float32 dot with the light, then the
@@ -153,8 +158,7 @@ def shade_factors(vp, vecs):
         return np.zeros(0)
     ln, unit, _u, _v = _native.native.qt_vector_probe(
         np.ascontiguousarray(vecs, dtype=np.float32), _native.qt_hypot())
-    lx, ly, lz = (np.float32(c) for c in vp._LIGHT.toTuple())
-    d = np.abs((unit[:, 0] * lx + unit[:, 1] * ly) + unit[:, 2] * lz)
+    d = np.abs(_qt_dot(unit, vp._LIGHT.toTuple()))
     f = np.rint((0.62 + 0.38 * d.astype(np.float64)) * 32.0) / 32.0
     return np.where(ln.astype(np.float64) < 1e-9, 0.84375, f)
 
@@ -234,6 +238,25 @@ class LazyFingerprint:
 
     def __repr__(self):
         return f"LazyFingerprint({self.value()!r})"
+
+
+def _smooth_stream(vp, plan, normal, unit, tfa, tva, col_a, f_rgb,
+                   bases, fk, plain):
+    """Native soft fans, retaining array geometry and shared prototypes."""
+    if not len(tfa) or not np.any(plan.soft & (np.diff(plan.ef_start) > 1)):
+        return None
+    normals, mask = _native.native.smooth_corner_normals(
+        np.ascontiguousarray(plan.pos, dtype=np.float32), normal, unit,
+        plan.corners, plan.ring_sizes, plan.ring_counts, plan.edges,
+        plan.soft, plan.ef_start, plan.ef_face, tva, tfa, _native.qt_hypot())
+    normals = normals.reshape(-1, 3, 3)
+    mask = mask.reshape(-1, 3) & plain[tfa, None]
+    if np.any(mask):
+        d = np.abs(_qt_dot(normals[mask], vp._LIGHT.toTuple())).astype(np.float64)
+        shade = 0.62 + 0.38 * d
+        base = np.broadcast_to(bases[fk[tfa], None, :], normals.shape)[mask]
+        col_a[:, :, 3:][mask] = np.minimum(1.0, base * shade[:, None])
+    return normals
 
 
 def bake(vp, mesh, paint, msig, vkey, uid):
@@ -350,11 +373,9 @@ def bake(vp, mesh, paint, msig, vkey, uid):
             mi = tm[rows]
             P = tpb[rows]
             g = gu[mi][:, None, :]
-            du = (P[:, :, 0] * g[:, :, 0] + P[:, :, 1] * g[:, :, 1]) \
-                + P[:, :, 2] * g[:, :, 2]
+            du = _qt_dot(P, g)
             g = gv[mi][:, None, :]
-            dv = (P[:, :, 0] * g[:, :, 0] + P[:, :, 1] * g[:, :, 1]) \
-                + P[:, :, 2] * g[:, :, 2]
+            dv = _qt_dot(P, g)
             uv[rows, :, 0] = (du.astype(np.float64)
                               + cu[mi][:, None]).astype(np.float32)
             uv[rows, :, 1] = (dv.astype(np.float64)
@@ -471,6 +492,11 @@ def bake(vp, mesh, paint, msig, vkey, uid):
     cnames_of = {c: n for n, c in cnames.items()}
     ct_code = ccode[tfa] if len(tfa) else np.zeros(0, dtype=np.int64)
     col_a = _corner_stream(tpa, np.repeat(f_rgb[tfa][:, None, :], 3, axis=1))
+    corner_normals = _smooth_stream(vp, plan, normal, unit, tfa, tva,
+                                    col_a, f_rgb, bases if len(pf) else [],
+                                    fk, plain)
+    smooth_vcol = (corner_normals[ct_code == 0].tobytes()
+                   if corner_normals is not None else b"")
     vcol = _rows(col_a, ct_code, 0)
     fcull_vcol = _rows(col_a, ct_code, 1)
     tcol = {}
@@ -554,7 +580,7 @@ def bake(vp, mesh, paint, msig, vkey, uid):
             "samples": samples, "coordsum": _coordsum(plan), "bbox": bbox,
             "obb": None,
             "edges": edges_data,
-            "smooth_vcol": b"",
+            "smooth_vcol": smooth_vcol,
             "vcol": vcol,
             "by_texture": by_texture_b,
             "tcol": tcol,

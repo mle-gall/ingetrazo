@@ -12,6 +12,7 @@ use pyo3::prelude::*;
 
 mod boxes;
 mod facegeom;
+mod smooth;
 mod gltape;
 mod hlr;
 mod instances;
@@ -29,6 +30,8 @@ fn ingetrazo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(occlusion_span, m)?)?;
     m.add_function(wrap_pyfunction!(face_geometry, m)?)?;
     m.add_function(wrap_pyfunction!(qt_vector_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(qt_dot_pairs, m)?)?;
+    m.add_function(wrap_pyfunction!(smooth_corner_normals, m)?)?;
     m.add_function(wrap_pyfunction!(weld_points, m)?)?;
     m.add_function(wrap_pyfunction!(boxes_near_px, m)?)?;
     m.add_function(wrap_pyfunction!(points_near_px, m)?)?;
@@ -205,6 +208,7 @@ fn hypot_of(name: &str) -> PyResult<facegeom::Hypot> {
     match name {
         "libstdc++" => Ok(facegeom::Hypot::LibStdCxx),
         "msvc" => Ok(facegeom::Hypot::Msvc),
+        "libc++-fma" => Ok(facegeom::Hypot::LibCxxFma),
         _ => Err(pyo3::exceptions::PyValueError::new_err("unknown hypot")),
     }
 }
@@ -426,6 +430,57 @@ fn segment_distances<'py>(py: Python<'py>, ax: PyReadonlyArray1<'py, f64>,
     };
     let out: Vec<f64> = py.detach(|| (0..m).into_par_iter().with_min_len(4096)
         .map(|k| one(w.as_ref().map_or(k, |w| w[k]))).collect());
+    Ok(PyArray1::from_vec(py, out))
+}
+
+/// Smooth normals and lighting mask in triangle-corner order.
+#[pyfunction]
+fn smooth_corner_normals<'py>(py: Python<'py>, pos: PyReadonlyArray2<'_, f32>,
+    normal: PyReadonlyArray2<'_, f32>, unit: PyReadonlyArray2<'_, f32>,
+    corners: PyReadonlyArray1<'_, i64>, sizes: PyReadonlyArray1<'_, i64>,
+    counts: PyReadonlyArray1<'_, i64>, edges: PyReadonlyArray2<'_, i64>,
+    soft: PyReadonlyArray1<'_, bool>, starts: PyReadonlyArray1<'_, i64>,
+    adjacent: PyReadonlyArray1<'_, i64>, tris: PyReadonlyArray2<'_, i64>,
+    faces: PyReadonlyArray1<'_, i64>, hypot: &str)
+    -> PyResult<(Bound<'py, PyArray2<f32>>, Bound<'py, PyArray1<bool>>)> {
+    let h = hypot_of(hypot)?;
+    let vectors = |a: PyReadonlyArray2<'_, f32>| -> Vec<facegeom::V3> {
+        a.as_array().outer_iter().map(|v| facegeom::V3(v[0],v[1],v[2])).collect()
+    };
+    let (p, n, u) = (vectors(pos), vectors(normal), vectors(unit));
+    let e: Vec<[i64;2]> = edges.as_array().outer_iter().map(|r| [r[0],r[1]]).collect();
+    let fans = smooth::corners(&p, &u, corners.as_slice()?, sizes.as_slice()?,
+        counts.as_slice()?, &e, soft.as_slice()?, starts.as_slice()?,
+        adjacent.as_slice()?, h);
+    let mut out = Vec::new();
+    let mut mask = Vec::new();
+    for (tri, &f) in tris.as_array().outer_iter().zip(faces.as_slice()?) {
+        let f = f as usize;
+        for &v in tri {
+            let got = fans.get(&(v as usize, f));
+            let value = got.copied().unwrap_or(n[f]);
+            out.push(vec![value.0,value.1,value.2]);
+            mask.push(got.map_or(false, |v| v.dot(u[f],h) as f64 <= 0.99999));
+        }
+    }
+    Ok((PyArray2::from_vec2(py, &out)?, PyArray1::from_vec(py, mask)))
+}
+
+/// Pairwise QVector3D dot products, including Apple's fused operations.
+#[pyfunction]
+fn qt_dot_pairs<'py>(py: Python<'py>, a: PyReadonlyArray2<'_, f32>,
+                     b: PyReadonlyArray2<'_, f32>, hypot: &str)
+    -> PyResult<Bound<'py, PyArray1<f32>>> {
+    let h = hypot_of(hypot)?;
+    let (a, b) = (a.as_array(), b.as_array());
+    if a.shape() != b.shape() || a.shape()[1] != 3 {
+        return Err(pyo3::exceptions::PyValueError::new_err("expected matching (N,3) arrays"));
+    }
+    let mut out = Vec::with_capacity(a.shape()[0]);
+    for i in 0..a.shape()[0] {
+        out.push(facegeom::V3(a[[i,0]], a[[i,1]], a[[i,2]])
+            .dot(facegeom::V3(b[[i,0]], b[[i,1]], b[[i,2]]), h));
+    }
     Ok(PyArray1::from_vec(py, out))
 }
 

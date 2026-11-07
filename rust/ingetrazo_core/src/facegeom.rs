@@ -15,6 +15,8 @@
 pub enum Hypot {
     /// libstdc++ (`std::__hypot3`): scale by the largest component.
     LibStdCxx,
+    /// Apple libc++ on arm64: power-of-two scaling and fused sum of squares.
+    LibCxxFma,
     /// MSVC's STL (`_Hypot3` in `special_math.cpp`, Qt on Windows): the
     /// largest component swapped to the front, the other two divided by it
     /// and added to 1 in that order.
@@ -26,7 +28,7 @@ pub struct V3(pub f32, pub f32, pub f32);
 
 impl V3 {
     #[inline]
-    fn sub(self, o: V3) -> V3 {
+    pub fn sub(self, o: V3) -> V3 {
         V3(self.0 - o.0, self.1 - o.1, self.2 - o.2)
     }
     #[inline]
@@ -38,11 +40,20 @@ impl V3 {
         V3(self.0 / s, self.1 / s, self.2 / s)
     }
     #[inline]
-    fn dot(self, o: V3) -> f32 {
-        self.0 * o.0 + self.1 * o.1 + self.2 * o.2
+    pub fn dot(self, o: V3, h: Hypot) -> f32 {
+        if h == Hypot::LibCxxFma {
+            self.2.mul_add(o.2, self.0.mul_add(o.0, self.1 * o.1))
+        } else {
+            self.0 * o.0 + self.1 * o.1 + self.2 * o.2
+        }
     }
     #[inline]
-    fn cross(self, o: V3) -> V3 {
+    pub fn cross(self, o: V3, h: Hypot) -> V3 {
+        if h == Hypot::LibCxxFma {
+            return V3(self.1.mul_add(o.2, -(self.2 * o.1)),
+                      self.2.mul_add(o.0, -(self.0 * o.2)),
+                      self.0.mul_add(o.1, -(self.1 * o.0)));
+        }
         V3(
             self.1 * o.2 - self.2 * o.1,
             self.2 * o.0 - self.0 * o.2,
@@ -75,6 +86,15 @@ pub fn hypot3(v: [f32; 3], h: Hypot) -> f32 {
             } else {
                 0.0
             }
+        }
+        Hypot::LibCxxFma => {
+            let largest = v[0].abs().max(v[1].abs()).max(v[2].abs());
+            let threshold = 2.0f32.powi(64);
+            let scale = if largest > threshold { 2.0f32.powi(-84) }
+                        else if largest < 1.0 / threshold { 2.0f32.powi(84) }
+                        else { 1.0 };
+            let (x, y, z) = (v[0] * scale, v[1] * scale, v[2] * scale);
+            z.mul_add(z, x.mul_add(x, y * y)).sqrt() / scale
         }
         Hypot::Msvc => {
             let (mut x, mut y, mut z) = (v[0].abs(), v[1].abs(), v[2].abs());
@@ -119,13 +139,13 @@ pub fn normalized(v: V3, h: Hypot) -> V3 {
 pub fn plane_axes(normal: V3, h: Hypot) -> (V3, V3) {
     let n = normalized(normal, h);
     let mut r = V3(1.0, 0.0, 0.0);
-    let mut u = r.sub(n.mul(r.dot(n)));
+    let mut u = r.sub(n.mul(r.dot(n, h)));
     if (length(u, h) as f64) < 0.1 {
         r = V3(0.0, 1.0, 0.0);
-        u = r.sub(n.mul(r.dot(n)));
+        u = r.sub(n.mul(r.dot(n, h)));
     }
     let u = normalized(u, h);
-    let v = normalized(n.cross(u), h);
+    let v = normalized(n.cross(u, h), h);
     (u, v)
 }
 
@@ -632,7 +652,7 @@ fn triangles(pos: &[V3], rings: &[&[u32]], normal: V3, h: Hypot) -> Vec<[u32; 3]
     let origin = pos[outer[0] as usize];
     let proj = |i: u32| {
         let rel = pos[i as usize].sub(origin);
-        (rel.dot(u) as f64, rel.dot(v) as f64)
+        (rel.dot(u, h) as f64, rel.dot(v, h) as f64)
     };
     let mut tris = Vec::new();
     if holes.is_empty() {

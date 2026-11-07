@@ -757,6 +757,8 @@ class MainWindow(QMainWindow):
         keep, and never under the user's hands (a 283k-face save takes real
         time; mid-drag it would read as a freeze)."""
         from PySide6.QtWidgets import QApplication
+        if getattr(self, "_opening_document", False):
+            return  # Progress pumps events; never autosave a partial load.
         # Housekeeping that rides the same slow tick: a clean collection
         # now and then — never mid-gesture (over a big model it is ~0.3 s).
         import sys
@@ -6832,6 +6834,7 @@ class MainWindow(QMainWindow):
         # half loaded built every drawing chunk in one go — 61 s without
         # answering the desktop on the model of #158.
         self.viewport.setUpdatesEnabled(False)
+        self._opening_document = True
         try:
             try:
                 igz_format.load_into(self.viewport.scene,
@@ -6851,6 +6854,7 @@ class MainWindow(QMainWindow):
             except Exception:  # noqa: BLE001 - the first paint builds it anyway
                 pass
         finally:
+            self._opening_document = False
             self.viewport.setUpdatesEnabled(True)
         dlg.close()
         # Painting was off while it loaded: turning it back on does not ask
