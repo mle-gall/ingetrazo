@@ -108,3 +108,25 @@ def test_smooth_gpu_cylinder_is_invariant_under_one_panel_rotation(viewport):
     vp.scene.version += 1
     b = pixels(vp.render_image(400, 300, overlays=False))
     assert np.percentile(np.abs(a-b), 99) <= 2
+
+
+def test_identical_prototype_batching_preserves_smooth_mirrored_render(viewport, monkeypatch):
+    vp = viewport
+    for i in range(6):
+        g = Group(_cylinder(Mesh()), f'independent tube {i}')
+        g.xform = QMatrix4x4()
+        g.xform.translate((i % 3) * 3 - 3, (i // 3) * 3, 0)
+        g.xform.rotate(20 * i, 1, 0, 0)
+        if i % 2:
+            g.xform.scale(-1, 1, 1)
+        vp.scene.groups.append(g)
+    vp.camera.target, vp.camera.distance = V(0, 1.5, 1), 16.
+    vp.scene.version += 1
+    combined = pixels(vp.render_image(600, 400, overlays=False))
+    assert len(vp._frame_instanced) == 2
+    monkeypatch.setattr(vp, '_inst_draw_codes', lambda p: (p[4], p[5], p[7]))
+    vp._inst_frame_memo = {}
+    vp.scene.version += 1
+    separate = pixels(vp.render_image(600, 400, overlays=False))
+    assert len(vp._frame_instanced) == 6
+    assert np.percentile(np.abs(combined - separate), 99.9) <= 2

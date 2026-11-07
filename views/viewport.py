@@ -4209,6 +4209,7 @@ class Viewport(QOpenGLWidget):
         if pool is None or pool[0] != key:
             pool = self._inst_pool = self._inst_pool_build(key)
         _k, groups, lo, hi, codes_a, protos, mats, by_code = pool
+        codes_a, protos, by_code = self._inst_draw_codes(pool)
         out: dict = {}
         if not groups:
             self._frame_instanced = out
@@ -4284,6 +4285,39 @@ class Viewport(QOpenGLWidget):
         memos[planes is None] = (pool, keep, out, pvkey)
         self._frame_instanced = out
         return out
+
+    def _inst_draw_codes(self, pool):
+        """Share draw batches between prototypes with identical GPU data.
+
+        Imported assemblies can contain separately named definitions of
+        the same part. Keep their editing/picking identities in the pool;
+        only the renderer uses a common representative. Compare the actual
+        bytes (including normals, backs and texture runs), not just a hash.
+        Recompute when the pool changes, never during an ordinary orbit.
+        """
+        memo = getattr(self, "_inst_draw_codes_memo", None)
+        if memo is not None and memo[0] is pool:
+            return memo[1]
+        import numpy as np
+        signatures, representatives, remap = {}, [], []
+        for mesh, paint, mirrored in pool[5]:
+            base = self._proto_base_chunk(mesh, paint)
+            signature = (mirrored,
+                         *(base.get(k, b"") or b"" for k in
+                           ("vcol", "edges", "dback", "smooth_vcol")),
+                         tuple(base["by_texture"].items()))
+            code = signatures.get(signature)
+            if code is None:
+                code = signatures[signature] = len(representatives)
+                representatives.append((mesh, paint, mirrored))
+            remap.append(code)
+        if len(representatives) == len(pool[5]):
+            result = (pool[4], pool[5], pool[7])
+        else:
+            codes = np.asarray(remap, dtype=np.int64)[pool[4]]
+            result = (codes, representatives, np.argsort(codes, kind="stable"))
+        self._inst_draw_codes_memo = (pool, result)
+        return result
 
     def _inst_pool_build(self, key, old=None):
         """The instanced pool for ``key``: every visible, eligible
@@ -4405,9 +4439,9 @@ class Viewport(QOpenGLWidget):
     #: How far past the view the instanced batches reach, as a fraction of
     #: its width and height, so an orbit keeps drawing the same ones
     #: (_gather_instanced).
-    _INST_VIEW_MARGIN = 0.25
+    _INST_VIEW_MARGIN = 0.10
     #: ... and while they hold at most this many times what is in view.
-    _INST_SUPERSET_MAX = 4
+    _INST_SUPERSET_MAX = 2
 
     @staticmethod
     def _widened_planes(planes, frac):
@@ -4700,6 +4734,10 @@ class Viewport(QOpenGLWidget):
             # the pool holds their matrices already.
             if entry.get("mat_batch") is groups:
                 return len(groups)          # this very batch is in
+            # Recorded passes depend on these bindings. One generation
+            # check replaces walking thousands of entries on every frame;
+            # shadow/preview batches invalidate the records here as well.
+            self._inst_matrix_serial = getattr(self, "_inst_matrix_serial", 0) + 1
             import numpy as np
             sig = (epoch_of(), id(groups.mats), len(groups.idx))
             old = entry["mat_sig"]
@@ -4719,6 +4757,7 @@ class Viewport(QOpenGLWidget):
         else:
             sig = tuple((id(g), tuple(g.xform.data())) for g in groups)
         if entry["mat_sig"] != sig:
+            self._inst_matrix_serial = getattr(self, "_inst_matrix_serial", 0) + 1
             import numpy as np
             raw = np.asarray([list(g.xform.data()) for g in groups],
                              dtype=np.float32).tobytes()
@@ -4775,11 +4814,10 @@ class Viewport(QOpenGLWidget):
                id(self._program), self.edit_rest_fade)
         rec = getattr(self, "_lean_faces_rec", None)
         if (rec is not None and rec[0] == key and rec[1] is by_proto
-                and all(e.get("mat_batch") is b for e, b in rec[2])):
+                and rec[2] == getattr(self, "_inst_matrix_serial", 0)):
             rec[3].replay(self._gl_replay())
             return
         tape = _GlTape()
-        pairs: list = []
         back_vec = QVector4D(back_rgb[0], back_rgb[1], back_rgb[2], 1.0)
         # What the general loop never relies on is unknown on entry (None:
         # the first use sets it); the cull and textures switches are off
@@ -4837,9 +4875,7 @@ class Viewport(QOpenGLWidget):
                 if not lote:
                     continue
                 n = self._update_inst_matrices(entry, lote)
-                if entry.get("mat_batch") is lote:
-                    pairs.append((entry, lote))
-                else:
+                if entry.get("mat_batch") is not lote:
                     cacheable = False          # an edit-context split
                 need("fade", fade, set_fade)
                 if entry["vcol_count"]:
@@ -4893,8 +4929,8 @@ class Viewport(QOpenGLWidget):
             need("shade", 1.0, set_shade)
         if state["front"] is not None:
             need("front", False, set_front)
-        self._lean_faces_rec = ((key, by_proto, pairs, tape) if cacheable
-                                else None)
+        serial = getattr(self, "_inst_matrix_serial", 0)
+        self._lean_faces_rec = (key, by_proto, serial, tape) if cacheable else None
 
     def _draw_instanced_faces(self, mode, style) -> None:
         by_proto = self._gather_instanced()
@@ -5068,11 +5104,10 @@ class Viewport(QOpenGLWidget):
         key = (id(self._program), self.edit_rest_fade)
         rec = getattr(self, "_lean_edges_rec", None)
         if (rec is not None and rec[0] == key and rec[1] is by_proto
-                and all(e.get("mat_batch") is b for e, b in rec[2])):
+                and rec[2] == getattr(self, "_inst_matrix_serial", 0)):
             rec[3].replay(self._gl_replay())
             return
         tape = _GlTape()
-        pairs: list = []
         cacheable = True
         fade_now = None
         bound = None
@@ -5086,9 +5121,7 @@ class Viewport(QOpenGLWidget):
                 if not lote:
                     continue
                 n = self._update_inst_matrices(entry, lote)
-                if entry.get("mat_batch") is lote:
-                    pairs.append((entry, lote))
-                else:
+                if entry.get("mat_batch") is not lote:
                     cacheable = False
                 if fade != fade_now:
                     tape.uniform_f(prog, self._loc_fade, fade)
@@ -5099,8 +5132,8 @@ class Viewport(QOpenGLWidget):
         if bound is not None:
             tape.release_vao(bound)
         tape.uniform_f(prog, self._loc_fade, 0.0)
-        self._lean_edges_rec = ((key, by_proto, pairs, tape) if cacheable
-                                else None)
+        serial = getattr(self, "_inst_matrix_serial", 0)
+        self._lean_edges_rec = (key, by_proto, serial, tape) if cacheable else None
 
     def _gl_replay(self):
         """core._native's GlReplay for this viewport's GL context (the
