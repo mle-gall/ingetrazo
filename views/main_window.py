@@ -1571,20 +1571,19 @@ class MainWindow(QMainWindow):
         self._act_xray_toggle.triggered.connect(self._toggle_xray)
         style_menu.addSeparator()
         style_menu.addAction(self._act_xray_toggle)
-        style_menu.addSeparator()
+        edge_menu = camera_menu.addMenu(tr("Edge Style"))
         self._act_style_edges = QAction(tr("Edges"), self)
         self._act_style_edges.setStatusTip(tr("Draw the edges of the model."))
         self._act_style_edges.setCheckable(True)
         self._act_style_edges.toggled.connect(
             lambda on: self._set_style_field("edges", on))
-        style_menu.addAction(self._act_style_edges)
+        edge_menu.addAction(self._act_style_edges)
         self._act_style_profiles = QAction(tr("Profiles"), self)
         self._act_style_profiles.setStatusTip(tr(
             "Draw the outline of each shape with a thicker line."))
         self._act_style_profiles.setCheckable(True)
         self._act_style_profiles.toggled.connect(
             lambda on: self._set_style_field("profiles", on))
-        style_menu.addAction(self._act_style_profiles)
         self._act_style_back_edges = QAction(tr("Back edges"), self)
         self._act_style_back_edges.setShortcut(QKeySequence("K"))
         self._act_style_back_edges.setStatusTip(tr(
@@ -1592,7 +1591,8 @@ class MainWindow(QMainWindow):
         self._act_style_back_edges.setCheckable(True)
         self._act_style_back_edges.toggled.connect(
             lambda on: self._set_style_field("back_edges", on))
-        style_menu.addAction(self._act_style_back_edges)
+        edge_menu.addAction(self._act_style_back_edges)
+        edge_menu.addAction(self._act_style_profiles)
         self._sync_style_menu()
 
         # How the model outside a group reads while you edit it (the usual
@@ -1701,7 +1701,8 @@ class MainWindow(QMainWindow):
         self._act_hidden_geometry.setCheckable(True)
         self._act_hidden_geometry.toggled.connect(
             lambda on: self._set_hidden_view("show_hidden_geometry", on))
-        camera_menu.addAction(self._act_hidden_geometry)
+        edge_menu.addSeparator()
+        edge_menu.addAction(self._act_hidden_geometry)
         # Camera ▸ Axes (Alt+A): the world's drawing axes on or off.
         self._act_show_axes = QAction(tr("Axes"), self)
         self._act_show_axes.setShortcut(QKeySequence("Alt+A"))
