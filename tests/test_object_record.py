@@ -81,6 +81,7 @@ def test_commands_preserve_geometry(kind):
     rev, version = scene.mesh.revision, scene.version
     history.execute(command)
     after = deepcopy(group.ifc)
+    assert history.changes_since(0)['changes']
     assert scene.version > version and scene.mesh.revision > rev
     history.undo()
     assert group.ifc == before
@@ -90,10 +91,16 @@ def test_commands_preserve_geometry(kind):
     assert [(m._mut_serial, getattr(m, '_winding_rev', 0)) for m in meshes] == serials
 
 
-def test_round_trip_and_copy(tmp_path):
+@pytest.mark.parametrize("component", [False, True])
+def test_round_trip_and_copy(tmp_path, component):
     scene = Scene(); group = Group(Mesh(), 'Object'); scene.groups.append(group)
+    group.component = component
+    if component:
+        from PySide6.QtGui import QMatrix4x4
+        group.xform = QMatrix4x4()
     group.ifc = full_record(); scene.plugin_data['bim_registry'] = registry()
     copied = copy_group(group)
+    assert (copied.mesh is group.mesh) == component
     ensure_guid(copied.ifc)
     assert copied.ifc['guid'] != group.ifc['guid']
     assert {k:v for k,v in copied.ifc.items() if k != 'guid'} == {k:v for k,v in group.ifc.items() if k != 'guid'}

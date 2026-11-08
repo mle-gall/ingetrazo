@@ -81,6 +81,11 @@ property-set XML. Sources are the buildingSMART lexical documentation for
 [IFC4 ADD2 TC1](https://standards.buildingsmart.org/IFC/RELEASE/IFC4/ADD2_TC1/HTML/)
 and [IFC4.3 ADD2](https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/).
 IFC4 is the default. Facility and FacilityPart require IFC4X3_ADD2; these base
-classes have no PredefinedType. Common property templates currently expose a
-curated subset. The table is not yet a complete IFC4X3 enum or pset catalogue;
-exporters requiring full schema conformance must use their own schema validation.
+classes have no PredefinedType. PredefinedType members are schema-specific and optionally checked against
+IfcOpenShell in tests. Common property templates describe IFC4; an empty template
+means no correspondingly named common pset exists. Other scalar measures use real
+(SI units); logical values use the enum TRUE/FALSE/UNKNOWN. IFC list-valued
+BendingParameters is flagged `scalar_only: false`: v1 can retain a textual note
+but cannot represent that IFC list without a future typed-value extension.
+Exporters must not export that note as an IFC list. IFC4X3-specific pset changes
+are outside this IFC4 template catalogue; exporters still need schema validation.

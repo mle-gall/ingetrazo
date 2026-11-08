@@ -3,7 +3,7 @@
 from copy import deepcopy
 import math
 import re
-from core.ifc_tables import TABLES, SCHEMAS, STATUS, common_pset, predefined_types
+from core.ifc_tables import TABLES, SCHEMAS, common_pset, predefined_types
 
 KINDS = ('text', 'boolean', 'integer', 'real', 'length', 'area', 'volume', 'enum', 'label')
 
@@ -98,8 +98,11 @@ def validate(record, registry, schema='IFC4'):
                 elif kind == 'integer': valid &= type(val) is int
                 else: valid &= type(val) in (int, float) and math.isfinite(val)
                 if not valid: errors.append(f'{pset}.{prop}: malformed typed value')
-                if pset == common_pset(cls if isinstance(cls, str) else '') and prop == 'Status' and val not in STATUS:
-                    errors.append('Invalid Status')
+                if isinstance(cls, str) and pset == common_pset(cls):
+                    template = TABLES.get(cls, {}).get('common', {}).get(prop, {})
+                    members = template.get('members')
+                    if members is not None and val not in members:
+                        errors.append(f'{pset}.{prop}: invalid enumeration member')
     quantities = r.get('quantities', {})
     if not isinstance(quantities, dict):
         errors.append('quantities must be an object')
