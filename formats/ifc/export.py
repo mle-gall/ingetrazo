@@ -378,6 +378,15 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
         cls = TABLES.get(data.get('ifc_class'), {}).get('type_class', {}).get(schema) or 'IfcBuildingElementProxyType'
         if cls.upper() not in SCHEMA_DATA[schema]['orders']:
             cls = 'IfcBuildingElementProxyType'
+        if schema == 'IFC4' and cls == 'IfcTransformerType':
+            # The published IFC4 ADD2 TC1 schema misspells the type in
+            # IfcTransformer's CorrectTypeAssigned rule ("IfcTranformerType"),
+            # so a typed transformer can never pass a schema check in IFC4.
+            # IFC4X3 fixed it; until then the occurrences stay untyped.
+            problems.append({'uid': '', 'name': key, 'messages': [
+                'IFC4 cannot type IfcTransformer (schema typo in its WHERE rule); '
+                'export with IFC4X3_ADD2 for the type relationship']})
+            continue
         attrs = dict(Name=_s(data.get('name', key)), Description=_s(data.get('description', '')),
                      ElementType=_s(data.get('object_type', '')))
         if 'PredefinedType' in w.attributes(cls):
