@@ -192,3 +192,19 @@ def test_result_selection_opens_the_placement_context(monkeypatch):
     assert scene.selection == {child}
     dock.close()
     window.close()
+
+
+def test_previous_view_does_not_revive_another_documents_colour():
+    from core.agent_facets import set_display, previous_display
+    from views.viewport import Viewport
+    vp = Viewport()
+    vp.scene = model()[0]
+    set_display(vp, color_by='kind:discipline')
+    assert vp.view_tint
+    vp.scene = model()[0]
+    vp.reset_document_caches()
+    set_display(vp, {'facet': 'name', 'eq': 'Pier 1'})
+    previous_display(vp)
+    assert vp.view_filter is None
+    assert vp.view_tint is None
+    vp.close()

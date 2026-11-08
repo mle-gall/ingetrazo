@@ -5940,6 +5940,9 @@ class Viewport(QOpenGLWidget):
         self.active_view_key = None
         self._previous_views = []
         self._view_expression = None
+        self._view_color = None
+        self._view_isolate = True
+        self._view_exact = False
         self.scene._navigator_allowed = None
         self.scene._navigator_view_key = None
         draws = dict(getattr(self, "_proto_draw", None) or {})
