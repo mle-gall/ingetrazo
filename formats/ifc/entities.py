@@ -10,8 +10,8 @@ from core.ifc_tables_data import SCHEMA_DATA
 ORDERS = SCHEMA_DATA['IFC4']['orders']
 
 class Builder(_Writer):
-    def __init__(self, schema):
-        super().__init__()
+    def __init__(self, schema, stream):
+        super().__init__(stream)
         self.schema = schema
 
     def attributes(self, entity):

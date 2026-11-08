@@ -36,14 +36,14 @@ def _f(v: float) -> str:
 
 
 class _Writer:
-    def __init__(self) -> None:
-        self.lines: list[str] = []
+    def __init__(self, stream) -> None:
+        self.stream = stream
         self._next = 1
 
     def add(self, entity: str, *attrs) -> int:
         eid = self._next
         self._next += 1
-        self.lines.append(f"#{eid}={entity}({','.join(attrs)});")
+        self.stream.write(f"#{eid}={entity}({','.join(attrs)});\n")
         return eid
 
 
