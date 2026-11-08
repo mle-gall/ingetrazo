@@ -362,7 +362,7 @@ def test_prototype_placement_quantities_match_world(scale):
     g.xform = QMatrix4x4()
     g.xform.scale(*scale)
     actual = placement_quantities(list(owned_placements(g)))
-    expected = quantities(merged(world_arrays(g)))
+    expected = quantities(world_arrays(g))
     assert actual[:3] == pytest.approx(expected[:3], rel=2e-6, abs=1e-25)
     assert actual[3:] == expected[3:]
 
