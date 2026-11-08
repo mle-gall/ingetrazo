@@ -4458,12 +4458,13 @@ class ScenesPanel(QWidget):
 
 
 #: Tagged groups above which the BIM panel stops measuring on every change.
-LIVE_TAKEOFF_LIMIT = 2000
+LIVE_TAKEOFF_LIMIT = 4000
 #: Placed faces above which it stops too: the takeoff's cost is the faces
 #: it measures, not the objects it lists. 1,482 records over 14 million
 #: placed faces slipped under the object cap and froze a document open for
-#: a quarter of an hour.
-LIVE_TAKEOFF_FACE_LIMIT = 300_000
+#: a quarter of an hour. P8: a 350k-face ride subset takes 4.88 s for
+#: collection plus class quantities; the full ride still requires opt-in.
+LIVE_TAKEOFF_FACE_LIMIT = 350_000
 
 
 def _takeoff_size(scene) -> tuple:
@@ -4799,6 +4800,8 @@ class BimPanel(QWidget):
                 and getattr(self, "_untagged_scene", None) == id(scene)
                 and hist.tags_cv == scene.content_version):
             return
+        from time import perf_counter
+        size_started = perf_counter()
         tagged, faces = _takeoff_size(scene)
         too_big = tagged > LIVE_TAKEOFF_LIMIT or (
             tagged and faces > LIVE_TAKEOFF_FACE_LIMIT)
@@ -4810,9 +4813,11 @@ class BimPanel(QWidget):
             self.too_many.setText(tr(
                 "{n} tagged objects over {faces} faces: the live takeoff is "
                 "switched off above {limit} objects or {flimit} faces. Export "
-                "IFC or the quantities CSV instead, or measure on request.",
+                "IFC or the quantities CSV instead, or measure on request. "
+                "Size check: {elapsed} s.",
                 n=tagged, faces=faces, limit=LIVE_TAKEOFF_LIMIT,
-                flimit=LIVE_TAKEOFF_FACE_LIMIT))
+                flimit=LIVE_TAKEOFF_FACE_LIMIT,
+                elapsed=f"{perf_counter() - size_started:.2f}"))
             self.too_many.show()
             self.measure_btn.show()
             return
