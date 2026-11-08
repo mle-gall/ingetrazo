@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout, QComboBox
     QLineEdit, QPlainTextEdit, QLabel, QPushButton, QFileDialog, QInputDialog,
     QTableWidget, QListWidget)
 from core import record, bim_registry
-from core.ifc_tables import IFC_CLASSES, STATUS, predefined_types, common_pset
+from core.ifc_tables import TABLES, IFC_CLASSES, STATUS, predefined_types, common_pset
 
 
 class ClassificationRows(QTableWidget):
@@ -109,6 +109,7 @@ class RecordDialog(QDialog):
         self.predefined.addItems([''] + predefined_types(self.cls.currentText(), self.schema.currentText()))
         self.predefined.setCurrentText(old)
         self.fields['object_type'].setVisible(self.predefined.currentText() == 'USERDEFINED')
+        self.status.setEnabled('Status' in TABLES[self.cls.currentText()]['common'])
 
     def add_classification(self):
         systems = self.registry.get('classification_systems', {})
@@ -147,7 +148,7 @@ class RecordDialog(QDialog):
             patch.update({key: json.loads(field.toPlainText()) for key, field in self.json_fields.items()})
             patch.update({'class': self.cls.currentText(), 'predefined_type': self.predefined.currentText() or None,
                           'type': self.type_box.currentText() or None})
-            if self.status.currentText():
+            if self.status.isEnabled() and self.status.currentText():
                 patch['psets'].setdefault(common_pset(patch['class']), {})['Status'] = {'kind': 'enum', 'value': self.status.currentText()}
             elif isinstance(patch['psets'], dict):
                 patch['psets'].get(common_pset(patch['class']), {}).pop('Status', None)
