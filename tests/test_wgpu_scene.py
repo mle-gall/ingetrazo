@@ -1,6 +1,7 @@
 """The resident-scene ABI is testable without a native window or GPU."""
 import numpy as np
 import pytest
+
 from PySide6.QtGui import QMatrix4x4, QVector3D
 from core.group import Group
 from core.mesh import Mesh
@@ -8,7 +9,12 @@ from core.scene import Scene
 from core import _native
 from views.wgpu_scene import pack_scene, VERTEX, INSTANCE, COMMAND
 
-pytestmark = pytest.mark.skipif(_native.available() is None, reason='native kernel required')
+# A venv whose ingetrazo_core predates the R1 bake functions skips with the
+# reason instead of failing on an AttributeError; the GL viewport does not
+# need them.
+pytestmark = pytest.mark.skipif(
+    _native.available() is None or not hasattr(_native.available(), 'bake_vertices'),
+    reason='ingetrazo_core with bake_vertices required (maturin develop --release)')
 
 
 def triangle():
