@@ -388,7 +388,8 @@ class AddEdgeCommand(Command):
     (never the pre-existing one it merged into)."""
 
     def __init__(self, a: QVector3D, b: QVector3D, merge: bool = True,
-                 soft: bool | None = None, curve: int | None = None) -> None:
+                 soft: bool | None = None, curve: int | None = None,
+                 layer: str | None = None) -> None:
         self.a = QVector3D(a)
         self.b = QVector3D(b)
         self.merge = merge  # kept for API parity; the mesh never duplicates
@@ -396,6 +397,8 @@ class AddEdgeCommand(Command):
         # replaces a curve/soft edge with sub-edges, so the pieces inherit.
         self.soft = soft
         self.curve = curve
+        # A pasted edge keeps its tag (None: the edge's own, untouched).
+        self.layer = layer
         self.edge: Optional[Edge] = None
         self._owned = False
 
@@ -404,6 +407,9 @@ class AddEdgeCommand(Command):
             edge.soft = self.soft
         if self.curve is not None:
             edge.curve = self.curve
+        if self.layer is not None:
+            from core.layers import assign_layer
+            assign_layer(edge, self.layer)
 
     def do(self, scene) -> None:
         m = scene.mesh
@@ -951,6 +957,29 @@ class FlipFacesCommand(Command):
 
     def undo(self, scene) -> None:
         self._flip(scene)
+
+
+class EnsureLayersCommand(Command):
+    """Give a document the tags (and tag folders) that pasted geometry
+    carries and it lacks — a step of the paste, undone with it. Tags the
+    document already has are left exactly as they are
+    (``core.layers.add_missing``)."""
+
+    def __init__(self, template) -> None:
+        self._template = template
+        self._added: tuple[list, list] = ([], [])
+
+    def do(self, scene) -> None:
+        from core.layers import add_missing
+        self._added = add_missing(scene, self._template)
+        if any(self._added):
+            scene.version += 1
+
+    def undo(self, scene) -> None:
+        from core.layers import remove_added
+        if any(self._added):
+            remove_added(scene, *self._added)
+            scene.version += 1
 
 
 class AssignLayerCommand(Command):

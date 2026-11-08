@@ -17300,7 +17300,18 @@ class Viewport(QOpenGLWidget):
         drop = getattr(self, "_drop_clip_protos", None)
         if old_clip and callable(drop):
             drop(old_clip)
+        # The tags travel with the copy — the loose edges' (parallel to
+        # ``edges``) and the definitions of every tag used, with their
+        # folders — so another document can give the pasted geometry its
+        # tags instead of names it does not know.
+        from core.insert import used_layers
+        from core.layers import layer_of, template_for
+        edge_layers = [layer_of(e) for e in edges]
+        names = used_layers([a for _l, _h, a in face_data], edge_layers,
+                            group_data)
         self.clipboard = {"faces": face_data, "edges": edge_data,
+                          "edge_layers": edge_layers,
+                          "layers": template_for(self.scene, names),
                           "groups": group_data, "ref": ref}
         # Also on the system clipboard, so another IngeTrazo window can
         # paste it (issue #76); encoded only if that window asks.

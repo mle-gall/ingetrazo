@@ -50,11 +50,18 @@ def encode(clip: dict) -> bytes:
         if attrs:
             face.attrs = dict(attrs)
     scene.groups.extend(clip.get("groups", ()))
+    # The copy's tags and folders ride in the document itself: the .igz
+    # writer keeps a scene's tag list and folders.
+    from core.layers import add_missing
+    add_missing(scene, clip.get("layers"))
     head = {
         "format": _FORMAT,
         "ref": _xyz(clip["ref"]),
         "edges": [[_xyz(a), _xyz(b), bool(soft), curve]
                   for a, b, soft, curve in clip.get("edges", ())],
+        # Apart from ``edges``, so a reader that predates it still reads
+        # four fields per edge.
+        "edge_layers": list(clip.get("edge_layers") or ()),
     }
     with tempfile.TemporaryDirectory(prefix="ingetrazo-clip-") as tmp:
         path = Path(tmp) / "scene.igz"
@@ -101,7 +108,10 @@ def decode(data: bytes) -> dict | None:
         if getattr(g, "xform", None) is None:
             g.xform = QMatrix4x4()
             g.component = False       # a group still (issue #90)
+    from core.layers import template_of
     return {"faces": faces, "edges": edges, "groups": list(scene.groups),
+            "edge_layers": list(head.get("edge_layers") or ()),
+            "layers": template_of(scene),
             "ref": QVector3D(*head["ref"])}
 
 

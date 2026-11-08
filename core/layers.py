@@ -609,6 +609,78 @@ def apply_template(scene, data) -> tuple[int, int]:
     return added, updated
 
 
+def template_for(scene, names) -> dict:
+    """:func:`template_of` narrowed to the tags called ``names`` and the
+    folders they sit in (their parents too): what a copy carries so the
+    document it is pasted into can give the pasted geometry its tags."""
+    wanted = {n for n in names if n and n != DEFAULT_LAYER}
+    layers = [ly for ly in scene.layers if ly.name in wanted]
+    folders: list = []
+    for ly in layers:
+        f = ly.folder
+        while f and f not in folders:
+            folders.append(f)
+            f = folder_parent(scene, f)
+    out = {TEMPLATE_KEY: 1,
+           "folders": [f for f in folders_of(scene) if f in folders],
+           "layers": [ly.to_dict() for ly in layers]}
+    parents = {f: folder_parent(scene, f) for f in out["folders"]
+               if folder_parent(scene, f)}
+    if parents:
+        out["folder_parents"] = parents
+    return out
+
+
+def add_missing(scene, data) -> tuple[list, list]:
+    """Bring a template's tags into ``scene`` without touching what is
+    there: only tags (and folders) the document lacks are added, with their
+    colour, line and folder, visible and unlocked — pasted geometry must
+    show. A tag the document already has keeps its own look, visibility and
+    folder. Returns ``(tag names added, folders added)`` for
+    :func:`remove_added`."""
+    if not isinstance(data, dict) or not isinstance(data.get("layers"), list):
+        return [], []
+    have_folders = set(folders_of(scene))
+    new_folders = [f for f in data.get("folders") or ()
+                   if isinstance(f, str) and f and f not in have_folders]
+    if new_folders:
+        scene.layer_folders = folders_of(scene) + new_folders
+    raw_parents = data.get("folder_parents")
+    if isinstance(raw_parents, dict):
+        for f in new_folders:
+            p = raw_parents.get(f)
+            if isinstance(p, str) and p:
+                move_folder(scene, f, p)
+    added: list = []
+    for raw in data["layers"]:
+        if not isinstance(raw, dict) or not isinstance(raw.get("name"), str) \
+                or not raw["name"] or raw["name"] == DEFAULT_LAYER:
+            continue
+        if scene.layer(raw["name"]) is not None:
+            continue
+        new = Layer.from_dict(raw)
+        new.visible = True
+        new.locked = False
+        scene.layers.append(new)
+        added.append(new.name)
+    return added, new_folders
+
+
+def remove_added(scene, layers, folders) -> None:
+    """Undo :func:`add_missing`: drop exactly the tags and folders it
+    added."""
+    gone = set(layers)
+    scene.layers[:] = [ly for ly in scene.layers if ly.name not in gone]
+    drop = set(folders)
+    if drop:
+        scene.layer_folders = [f for f in folders_of(scene) if f not in drop]
+        parents = getattr(scene, "folder_parents", None)
+        if isinstance(parents, dict):
+            for f in drop:
+                parents.pop(f, None)
+    _release_active(scene)
+
+
 def _release_active(scene) -> bool:
     name = getattr(scene, "active_layer", None)
     if name and active_layer(scene) == DEFAULT_LAYER:

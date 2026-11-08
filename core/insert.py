@@ -100,6 +100,30 @@ def merge_materials(src_materials: dict, dst_materials: dict, comp) -> dict:
     return renamed
 
 
+def used_layers(face_attrs, edge_layers, groups) -> list:
+    """Every tag name the copied faces (their attrs), loose edges and
+    groups — at any depth — carry, in first-seen order; the default tag
+    left out."""
+    seen: list = []
+
+    def want(n):
+        if n and n != DEFAULT_LAYER and n not in seen:
+            seen.append(n)
+
+    for a in face_attrs:
+        want((a or {}).get("layer"))
+    for n in edge_layers:
+        want(n)
+    for comp in groups:
+        for g, _m in iter_placements(comp):
+            want(layer_of(g))
+            for f in g.mesh.faces:
+                want(layer_of(f))
+            for e in g.mesh.edges:
+                want(layer_of(e))
+    return seen
+
+
 def ensure_layers(dst_scene, comp) -> list:
     """Create, visible, every layer the component's entities carry that
     the document does not have yet. Returns the names added."""

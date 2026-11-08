@@ -164,6 +164,13 @@ class PasteTool(Tool):
         False when there was nothing to stamp. ``select_all`` leaves the
         loose faces and edges selected too (groups always are)."""
         commands: list = [_PruneOnUndo()]
+        # The tags the copy carries that this document lacks (with their
+        # folders) come first, undone with the paste; tags it already has
+        # keep their own look and visibility.
+        if self._clip.get("layers"):
+            from core.history import EnsureLayersCommand
+            commands.append(EnsureLayersCommand(self._clip["layers"]))
+        guards = len(commands)
         # A face's boundary edges are created BY the face; undoing the face
         # alone leaves them behind as loose edges (inside a group they read
         # as debris). Adding them first, as commands of their own, makes the
@@ -197,19 +204,21 @@ class PasteTool(Tool):
         # (never entangled with the original's).
         from core.mesh import Mesh
         id_map: dict[int, int] = {}
-        for a, b, soft, curve in self._clip["edges"]:
+        edge_layers = list(self._clip.get("edge_layers") or ())
+        for i, (a, b, soft, curve) in enumerate(self._clip["edges"]):
             if curve is not None and curve not in id_map:
                 id_map[curve] = Mesh.next_curve_id()
             commands.append(AddEdgeCommand(
                 a + off, b + off, soft=soft or None,
-                curve=id_map.get(curve)))
+                curve=id_map.get(curve),
+                layer=edge_layers[i] if i < len(edge_layers) else None))
         # Each stamp builds FRESH group copies from the clipboard templates
         # (instances stay siblings of the same prototype).
         pasted_groups = [copy_group(g, off)
                          for g in self._clip.get("groups", ())]
         commands.extend(InsertGroupCommand(g) for g in pasted_groups)
-        if len(commands) == 1:
-            return False        # only the prune guard: nothing to stamp
+        if len(commands) == guards:
+            return False        # only the guards: nothing to stamp
         # The scratch preview ends BEFORE the stamp: the pasted groups enter
         # the consolidated VBOs on the version bump like any other insert.
         self._end_preview(viewport)
