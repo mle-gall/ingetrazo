@@ -724,6 +724,9 @@ def _paint_of(vp, group):
         return effective_material(group)       # a sheet's technical look
     style = (getattr(vp, "style_override", None)
              or getattr(scene, "display_style", None))
+    tint = (getattr(vp, 'view_tint', None) or {}).get(getattr(group, 'uid', None))
+    if tint is not None and getattr(style, 'face_mode', None) in _BY_LAYER_MODES:
+        return {'by_layer': {}, 'color': tint}
     by_layer = bool(getattr(style, "color_by_layer", False)
                     and style.face_mode in _BY_LAYER_MODES)
     from core.layers import layer_fx, layer_look, layer_paint, object_layer
@@ -3771,7 +3774,7 @@ class Viewport(QOpenGLWidget):
         # version. Orbiting a model of 21 406 placements walked them all on
         # every frame, ~55 ms (issue #158). The CONTENT version: a click
         # (a view-only bump) changes none of what the walk reads either.
-        cheap = (getattr(sc, "content_version", sc.version),
+        cheap = (getattr(self, "_navigator_revision", 0), getattr(sc, "content_version", sc.version),
                  id(sc.edit_group), id(sc.mesh),
                  getattr(self, "_preview_epoch", 0),
                  bool(getattr(self, "_preview_groups", None)),
@@ -3805,7 +3808,8 @@ class Viewport(QOpenGLWidget):
                        tuple((ly.name, ly.visible, ly.locked) for ly in sc.layers),
                        # Colour by layer and each layer's colour and
                        # transparency change the paint a placement draws in.
-                       _layer_look_sig(sc)]
+                       _layer_look_sig(sc),
+                       getattr(self, "_navigator_revision", 0)]
 
         loose = sc.mesh
 
@@ -4119,6 +4123,7 @@ class Viewport(QOpenGLWidget):
                     seen.add(id(child))
                 tops[id(proxy)] = id(group)
                 proxy.mesh = child.mesh
+                proxy.uid = child.uid
                 # A nested entity with no tag of its own inherits the
                 # nearest tag above it (the .skp convention); and when a tag
                 # above is hidden or locked the whole instance goes with it,
@@ -5927,6 +5932,13 @@ class Viewport(QOpenGLWidget):
         document also slowed down reopen after reopen (the garbage collector
         walking the dead ones). And a CPython id() reused by a new group
         could meet an old entry — the composer's lesson with frames."""
+        self.view_filter = None
+        self.view_tint = None
+        self.active_view_key = None
+        self._previous_views = []
+        self._view_expression = None
+        self.scene._navigator_allowed = None
+        self.scene._navigator_view_key = None
         draws = dict(getattr(self, "_proto_draw", None) or {})
         draws.update({("hidden", k): v for k, v in
                       getattr(self, "_hidden_edge_draws", {}).items()})
