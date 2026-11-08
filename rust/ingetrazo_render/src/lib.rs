@@ -33,6 +33,8 @@ struct Scene {
     edge_draw: wgpu::BindGroup,
     xray_draw: wgpu::BindGroup,
     xray_edge_draw: wgpu::BindGroup,
+    msaa_draw: wgpu::BindGroup,
+    msaa_edge_draw: wgpu::BindGroup,
     n: u32,
     p: u32,
 }
@@ -53,6 +55,11 @@ struct Renderer {
     edge: wgpu::RenderPipeline,
     xray: wgpu::RenderPipeline,
     xray_edge: wgpu::RenderPipeline,
+    msaa_draw: wgpu::RenderPipeline,
+    msaa_edge: wgpu::RenderPipeline,
+    msaa_color: wgpu::Texture,
+    msaa_depth: wgpu::Texture,
+    msaa: bool,
     scene: Option<Scene>,
     multi: bool,
     style: u32,
@@ -82,6 +89,22 @@ fn texture(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgp
         dimension: wgpu::TextureDimension::D2,
         format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    })
+}
+fn multisampled(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
+    d.create_texture(&wgpu::TextureDescriptor {
+        label: Some("4x color resolve"),
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 4,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     })
 }
@@ -189,7 +212,7 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("draw.wgsl").into()),
         });
         let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
-        let pipeline = |topology, fragment, compare, write, bias| {
+        let pipeline = |topology, fragment, compare, write, bias, samples| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: None,
                 layout: None,
@@ -213,7 +236,7 @@ impl Renderer {
                             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                             write_mask: wgpu::ColorWrites::ALL,
                         }),
-                        Some(wgpu::ColorTargetState {
+                        (samples == 1).then_some(wgpu::ColorTargetState {
                             format: wgpu::TextureFormat::R32Uint,
                             blend: None,
                             write_mask: wgpu::ColorWrites::ALL,
@@ -231,7 +254,10 @@ impl Renderer {
                     stencil: Default::default(),
                     bias,
                 }),
-                multisample: Default::default(),
+                multisample: wgpu::MultisampleState {
+                    count: samples,
+                    ..Default::default()
+                },
                 multiview: None,
                 cache: None,
             })
@@ -242,6 +268,7 @@ impl Renderer {
             wgpu::CompareFunction::Less,
             true,
             Default::default(),
+            1,
         );
         let xray = pipeline(
             wgpu::PrimitiveTopology::TriangleList,
@@ -249,6 +276,7 @@ impl Renderer {
             wgpu::CompareFunction::Less,
             false,
             Default::default(),
+            1,
         );
         let bias = wgpu::DepthBiasState {
             constant: -2,
@@ -261,6 +289,7 @@ impl Renderer {
             wgpu::CompareFunction::LessEqual,
             false,
             bias,
+            1,
         );
         let xray_edge = pipeline(
             wgpu::PrimitiveTopology::LineList,
@@ -268,6 +297,23 @@ impl Renderer {
             wgpu::CompareFunction::Always,
             false,
             bias,
+            1,
+        );
+        let msaa_draw = pipeline(
+            wgpu::PrimitiveTopology::TriangleList,
+            "fs",
+            wgpu::CompareFunction::Less,
+            true,
+            Default::default(),
+            4,
+        );
+        let msaa_edge = pipeline(
+            wgpu::PrimitiveTopology::LineList,
+            "edge_fs",
+            wgpu::CompareFunction::LessEqual,
+            false,
+            bias,
+            4,
         );
         let queries = features.contains(wgpu::Features::TIMESTAMP_QUERY).then(|| {
             device.create_query_set(&wgpu::QuerySetDescriptor {
@@ -287,6 +333,11 @@ impl Renderer {
             wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         );
         Ok(Self {
+            msaa: false,
+            msaa_color: multisampled(&device, w, h, format),
+            msaa_depth: multisampled(&device, w, h, wgpu::TextureFormat::Depth32Float),
+            msaa_draw,
+            msaa_edge,
             capture_next: false,
             captured: None,
             overlay: overlay::Overlay::new(&device, format),
@@ -437,6 +488,16 @@ impl Renderer {
             &self.xray_edge.get_bind_group_layout(0),
             &[&self.camera, &inst, &survivors],
         );
+        let msaa_draw = bind(
+            &self.device,
+            &self.msaa_draw.get_bind_group_layout(0),
+            &[&self.camera, &inst, &survivors],
+        );
+        let msaa_edge_draw = bind(
+            &self.device,
+            &self.msaa_edge.get_bind_group_layout(0),
+            &[&self.camera, &inst, &survivors],
+        );
         self.gpu_memory =
             (v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 416)
                 as u64;
@@ -455,6 +516,8 @@ impl Renderer {
             edge_draw,
             xray_draw,
             xray_edge_draw,
+            msaa_draw,
+            msaa_edge_draw,
             n: n as u32,
             p: count as u32,
         });
@@ -537,10 +600,26 @@ impl Renderer {
             .write_buffer(&self.camera, 0, bytemuck::cast_slice(&data));
         Ok(())
     }
+    /// Opt-in comparison path: IDs remain single-sampled. X-ray uses its original pass.
+    fn set_msaa(&mut self, enabled: bool) {
+        self.msaa = enabled;
+    }
     fn resize(&mut self, w: u32, h: u32, scale: f64) {
         self.config.width = ((w as f64 * scale) as u32).max(1);
         self.config.height = ((h as f64 * scale) as u32).max(1);
         self.surface.configure(&self.device, &self.config);
+        self.msaa_color = multisampled(
+            &self.device,
+            self.config.width,
+            self.config.height,
+            self.config.format,
+        );
+        self.msaa_depth = multisampled(
+            &self.device,
+            self.config.width,
+            self.config.height,
+            wgpu::TextureFormat::Depth32Float,
+        );
         self.depth = texture(
             &self.device,
             self.config.width,
@@ -647,7 +726,11 @@ impl Renderer {
                     .map(|q| wgpu::RenderPassTimestampWrites {
                         query_set: q,
                         beginning_of_pass_write_index: Some(2),
-                        end_of_pass_write_index: Some(3),
+                        end_of_pass_write_index: if self.msaa && self.style != 1 {
+                            None
+                        } else {
+                            Some(3)
+                        },
                     }),
                 occlusion_query_set: None,
             });
@@ -692,6 +775,70 @@ impl Renderer {
                     },
                     &[],
                 );
+                if self.multi {
+                    pass.multi_draw_indexed_indirect(&s.commands, s.p as u64 * 20, s.p);
+                } else {
+                    for k in s.p..s.p * 2 {
+                        pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
+                    }
+                }
+            }
+        }
+        if self.msaa && self.style != 1 {
+            let color_msaa = self.msaa_color.create_view(&Default::default());
+            let depth_msaa = self.msaa_depth.create_view(&Default::default());
+            let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("4x color; independent single-sample IDs"),
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &color_msaa,
+                        resolve_target: Some(&color),
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.12,
+                                g: 0.15,
+                                b: 0.2,
+                                a: 1.,
+                            }),
+                            store: wgpu::StoreOp::Discard,
+                        },
+                    }),
+                    None,
+                ],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_msaa,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: self
+                    .queries
+                    .as_ref()
+                    .map(|q| wgpu::RenderPassTimestampWrites {
+                        query_set: q,
+                        beginning_of_pass_write_index: None,
+                        end_of_pass_write_index: Some(3),
+                    }),
+                occlusion_query_set: None,
+            });
+            pass.set_vertex_buffer(0, s.vertex.slice(..));
+            pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
+            if self.style != 4 {
+                pass.set_pipeline(&self.msaa_draw);
+                pass.set_bind_group(0, &s.msaa_draw, &[]);
+                if self.multi {
+                    pass.multi_draw_indexed_indirect(&s.commands, 0, s.p);
+                } else {
+                    for k in 0..s.p {
+                        pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
+                    }
+                }
+            }
+            if self.edges || self.style == 4 {
+                pass.set_pipeline(&self.msaa_edge);
+                pass.set_bind_group(0, &s.msaa_edge_draw, &[]);
                 if self.multi {
                     pass.multi_draw_indexed_indirect(&s.commands, s.p as u64 * 20, s.p);
                 } else {

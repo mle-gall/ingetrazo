@@ -200,3 +200,14 @@ capture readback. The surface requires COPY_SRC support for this diagnostic.
 Run the externally bounded ride proof using `scripts/wgpu_r2_overlay.py MODEL`.
 See the dated R2 section of the performance plan for the captured image and
 CPU raster/upload measurements; GPU overlay duration is not yet isolated.
+
+## R2a interaction comparison (2026-11-08)
+
+The opt-in view now owns ID-local hover, shared scene selection and camera
+input. Native inference preparation runs on a worker and is retained across
+camera changes. See the R2a performance-plan section for measured gates and
+remaining integration limits. `Renderer.set_msaa(True)` enables a 4× color
+resolve experiment while IDs remain single-sampled; X-ray stays single-sample.
+It costs a second scene raster pass and stays off by default after exceeding
+the ride's 60 Hz GPU budget. `scripts/wgpu_r2a_measure.py MODEL [--msaa]`
+records the comparison; externally bound each run to less than five minutes.
