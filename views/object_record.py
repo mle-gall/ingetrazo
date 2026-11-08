@@ -56,6 +56,11 @@ class RecordDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('Object record')
         self.registry = registry
+        # A fresh record must at least carry its class; an existing one only
+        # receives the fields the user changed, so that one dialog applied
+        # to a multi-selection never copies the first object's name onto
+        # the others.
+        self._fresh = not initial
         self.initial = deepcopy(initial or {'class': 'IfcWall'})
         self.patch = None
         form = QFormLayout(self)
@@ -156,8 +161,24 @@ class RecordDialog(QDialog):
             if errors: raise ValueError('\n'.join(errors))
         except (ValueError, TypeError, AttributeError) as exc:
             self.error.setText(str(exc)); return
-        self.patch = patch
+        self.patch = self._changed(patch)
         self.accept()
+
+    _DEFAULTS = {'object_type': '', 'name': '', 'tag': '', 'description': '',
+                 'predefined_type': None, 'type': None, 'classifications': [],
+                 'systems': [], 'psets': {}, 'quantities': {}}
+
+    def _changed(self, full):
+        """The part of ``full`` that differs from the record the dialog
+        opened on; unchanged fields stay out so other selected groups keep
+        theirs. A fresh record always carries its class."""
+        before = record.normalize(self.initial)
+        after = record.normalize(full)
+        patch = {key: value for key, value in after.items()
+                 if before.get(key, self._DEFAULTS.get(key)) != value}
+        if self._fresh:
+            patch['class'] = full['class']
+        return patch
 
 
 class RegistryDialog(QDialog):

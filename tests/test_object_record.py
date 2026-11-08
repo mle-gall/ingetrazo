@@ -193,3 +193,26 @@ def test_legacy_record_round_trip(tmp_path):
     loaded = Scene(); igz.load_into(loaded, path)
     assert record.normalize(loaded.groups[0].ifc) == group.ifc
     assert not record.validate(loaded.groups[0].ifc, registry())
+
+
+def test_dialog_patch_carries_only_what_changed():
+    """One dialog over a multi-selection: the first object's name must not
+    land on the others, only the edited fields travel."""
+    from views.object_record import RecordDialog
+    app = QApplication.instance() or QApplication([])
+    scene = Scene(); groups = [Group(Mesh(), name) for name in ('Pier 1', 'Pier 2')]
+    scene.groups.extend(groups)
+    history = History(scene)
+    history.execute(TagGroupsCommand(groups, 'IfcColumn', ''))
+    history.execute(SetRecordCommand([groups[0]], {'name': 'Pier 1', 'tag': 'P1'}))
+    history.execute(SetRecordCommand([groups[1]], {'name': 'Pier 2', 'tag': 'P2'}))
+    dialog = RecordDialog(None, groups[0].ifc, registry())
+    dialog.predefined.setCurrentText('PILASTER'); dialog.submit()
+    assert dialog.patch == {'predefined_type': 'PILASTER'}
+    history.execute(SetRecordCommand(groups, dialog.patch))
+    assert [g.ifc['name'] for g in groups] == ['Pier 1', 'Pier 2']
+    assert [g.ifc['tag'] for g in groups] == ['P1', 'P2']
+    assert all(g.ifc['predefined_type'] == 'PILASTER' for g in groups)
+    # A fresh record keeps its class even when the default was not touched.
+    fresh = RecordDialog(None, None, registry()); fresh.submit()
+    assert fresh.patch == {'class': 'IfcWall'}

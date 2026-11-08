@@ -71,8 +71,10 @@ geometry serials or winding counters. Loose-face changes use SetFaceTagsCommand.
 The BIM panel offers object and registry dialogs. The object dialog edits scalar
 fields, picks class/PredefinedType/type, and provides classification code and typed
 property entry helpers. Classifications have editable rows and removal; systems have membership
-checkboxes. Advanced pset and quantity maps are editable JSON. A multi-selection receives the visible fields of the
-first selected object's edited record; per-object GUIDs and unknown fields remain.
+checkboxes. Advanced pset and quantity maps are editable JSON. The dialog opens
+on the first selected object and its patch carries only the fields the user
+changed, so a multi-selection shares the edit while every object keeps its own
+name, tag, GUID and unknown fields.
 
 ## Schema table scope
 
