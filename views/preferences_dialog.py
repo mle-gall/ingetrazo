@@ -310,6 +310,14 @@ class PreferencesDialog(QDialog):
                 "different, and report it with the label rust-engine. "
                 "Takes effect at the next start."))
         form.addRow("", self._rust)
+        from core import renderer_settings
+        self._renderer = QComboBox()
+        self._renderer.addItem(tr("OpenGL (default)"), "opengl")
+        self._renderer.addItem(tr("Metal via wgpu (experimental)"), "wgpu")
+        self._renderer.setCurrentIndex(max(0, self._renderer.findData(
+            _gs.value(renderer_settings.SETTING, renderer_settings.DEFAULT, st))))
+        self._renderer.setToolTip(tr("Applies to documents opened after this change."))
+        form.addRow(tr("Viewport renderer:"), self._renderer)
         tabs.addTab(general, tr("General"))
 
         # ---- 3D mouse (issue #108) -------------------------------------------
@@ -924,6 +932,7 @@ class PreferencesDialog(QDialog):
         pick(self._icon_px, default_toolbar_icon_px())
         pick(self._ext_menus, "auto")
         pick(self._platform, AUTO)
+        self._renderer.setCurrentIndex(0)
         if self._rust.isEnabled():
             self._rust.setChecked(_native.DEFAULT == "1")
 
@@ -1041,6 +1050,8 @@ class PreferencesDialog(QDialog):
         if history is not None:
             history.max_steps = int(self._undo_steps.value())
         _gs.set_value("platform", self._platform.currentData(), st)
+        from core import renderer_settings
+        _gs.set_value(renderer_settings.SETTING, self._renderer.currentData(), st)
         rust = "1" if self._rust.isChecked() else "0"
         if self._rust.isEnabled() and rust != str(
                 _gs.value(_native.SETTING, _native.DEFAULT, st)):
