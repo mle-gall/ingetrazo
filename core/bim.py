@@ -551,8 +551,8 @@ def class_quantities(ifc_class: str, faces):
 def class_quantities_arrays(ifc_class, arrays):
     """Class quantities from placed rings; no Python geometry is constructed."""
     import numpy as np
-    from core.geometry_arrays import Arrays, merged, measurements
-    a = arrays if isinstance(arrays, Arrays) else merged(arrays)
+    from core.geometry_arrays import Arrays, assembled, measurements
+    a = arrays if isinstance(arrays, Arrays) else assembled(arrays)
     unit = METRADO_UNIT.get(ifc_class, "m2")
     data = measurements(a)
     if data is None:
