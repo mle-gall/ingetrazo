@@ -273,3 +273,29 @@ def test_live_takeoff_switches_off_above_the_limit(monkeypatch):
     panel._on_measure_anyway()
     assert measured == [1] and len(panel._objects) == 3 and panel.too_many.isHidden()
     panel.close()
+
+
+def test_live_takeoff_switches_off_above_the_face_limit(monkeypatch):
+    """Few objects over many faces must not measure either: the cost is the
+    faces, and a saved ride model froze its own opening."""
+    from views import tray as tray_module
+    from views.tray import BimPanel
+    from PySide6.QtGui import QVector3D
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(tray_module, 'LIVE_TAKEOFF_FACE_LIMIT', 5)
+    scene = Scene(); group = Group(Mesh(), 'Big')
+    for i in range(8):
+        group.mesh.add_face([QVector3D(i, 0, 0), QVector3D(i + 1, 0, 0),
+                             QVector3D(i + 1, 1, 0), QVector3D(i, 1, 0)])
+    scene.groups.append(group)
+    history = History(scene)
+    vp = SimpleNamespace(scene=scene, history=history, update=lambda: None)
+    panel = BimPanel(SimpleNamespace(viewport=vp))
+    history.execute(TagGroupsCommand([group], 'IfcSlab'))
+    panel._takeoff_key = None
+    panel.refresh()
+    assert not panel.too_many.isHidden() and panel._objects == []
+    assert '8 faces' in panel.too_many.text()
+    panel._on_measure_anyway()
+    assert len(panel._objects) == 1 and panel.too_many.isHidden()
+    panel.close()

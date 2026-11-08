@@ -4459,13 +4459,31 @@ class ScenesPanel(QWidget):
 
 #: Tagged groups above which the BIM panel stops measuring on every change.
 LIVE_TAKEOFF_LIMIT = 2000
+#: Placed faces above which it stops too: the takeoff's cost is the faces
+#: it measures, not the objects it lists. 1,482 records over 14 million
+#: placed faces slipped under the object cap and froze a document open for
+#: a quarter of an hour.
+LIVE_TAKEOFF_FACE_LIMIT = 300_000
+
+
+def _takeoff_size(scene) -> tuple:
+    """``(tagged groups, placed faces)`` in one walk, with no measuring and
+    no mesh built: a lazy mesh answers from its plan."""
+    from core.bim import _placed_groups
+    from core.lazy_mesh import plan_of
+    tagged = 0
+    faces = 0
+    for g, _base in _placed_groups(scene.groups):
+        if getattr(g, "ifc", None):
+            tagged += 1
+        plan = plan_of(g.mesh)
+        faces += plan.nfaces if plan is not None else len(g.mesh.faces)
+    return tagged, faces
 
 
 def _tagged_group_count(scene) -> int:
     """How many placed groups carry a record: one walk, no measuring."""
-    from core.bim import _placed_groups
-    return sum(1 for g, _base in _placed_groups(scene.groups)
-               if getattr(g, "ifc", None))
+    return _takeoff_size(scene)[0]
 
 
 class BimPanel(QWidget):
@@ -4781,16 +4799,20 @@ class BimPanel(QWidget):
                 and getattr(self, "_untagged_scene", None) == id(scene)
                 and hist.tags_cv == scene.content_version):
             return
-        tagged = _tagged_group_count(scene)
-        if tagged > LIVE_TAKEOFF_LIMIT and not self._measure_all:
+        tagged, faces = _takeoff_size(scene)
+        too_big = tagged > LIVE_TAKEOFF_LIMIT or (
+            tagged and faces > LIVE_TAKEOFF_FACE_LIMIT)
+        if too_big and not self._measure_all:
             self._objects = []
             self._containers = []
             self._untagged_scene = None
             self.tree.clear()
             self.too_many.setText(tr(
-                "{n} tagged objects: the live takeoff is switched off above "
-                "{limit}. Export IFC or the quantities CSV instead, or "
-                "measure on request.", n=tagged, limit=LIVE_TAKEOFF_LIMIT))
+                "{n} tagged objects over {faces} faces: the live takeoff is "
+                "switched off above {limit} objects or {flimit} faces. Export "
+                "IFC or the quantities CSV instead, or measure on request.",
+                n=tagged, faces=faces, limit=LIVE_TAKEOFF_LIMIT,
+                flimit=LIVE_TAKEOFF_FACE_LIMIT))
             self.too_many.show()
             self.measure_btn.show()
             return
