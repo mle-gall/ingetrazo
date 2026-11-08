@@ -8882,14 +8882,41 @@ class MainWindow(QMainWindow):
             tr("IFC4 (*.ifc);;All files (*)"))
         if not path_str:
             return
+        from core.bim_registry import get as get_registry
+        from PySide6.QtWidgets import QInputDialog
+        profiles = list(get_registry(self.viewport.scene).get("export_profiles", {}))
+        profile = profiles[0] if profiles else None
+        if len(profiles) > 1:
+            profile, accepted = QInputDialog.getItem(
+                self, tr("Export IFC"), tr("Export profile"), profiles, 0, False)
+            if not accepted:
+                return
         try:
-            count = ifc_format.save_ifc(self.viewport.scene, path_str)
+            count = ifc_format.save_ifc(
+                self.viewport.scene, path_str, profile=profile,
+                project_directory=Path(self._current_path).parent if self._current_path else None)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, tr("Export IFC failed"), str(exc))
             return
         self.statusBar().showMessage(
             tr("{n} IFC elements exported to {path}",
                n=count, path=path_str), 5000)
+        if count.problems or count.ids:
+            import json
+            details = [
+                f"{problem['name']}: " + "; ".join(problem["messages"])
+                for problem in count.problems]
+            if count.ids:
+                details.append(json.dumps(count.ids, indent=2))
+            self.statusBar().showMessage(
+                tr("{n} IFC elements exported to {path}", n=count, path=path_str)
+                + f" — {len(count.problems)} object problems", 10000)
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle(tr("IFC export report"))
+            dialog.setText("\n".join(details))
+            dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            dialog.setModal(False)
+            dialog.show()
 
     def _on_export_stl(self) -> None:
         # An STL records no unit and slicers read it as millimetres, so the
