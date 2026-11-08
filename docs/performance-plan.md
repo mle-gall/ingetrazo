@@ -1069,3 +1069,50 @@ Logs: `.venv-work/bounded.log`, `.venv-work/final-focused.log`,
 `.venv-work/final-arrays.log`, `.venv-work/tiny.log`, `.venv-work/tray-tests.log`,
 `.venv-work/bench-off.log`, `.venv-work/bench-on.log`,
 `.venv-work/caps-350k.log`, and `.venv-work/object-cap.log`.
+
+## R-look — 2026-11-09: background, smooth fans and MSAA (partial)
+
+The renderer now accepts a display-style dictionary, renders the GL sky/ground
+corner gradient, uses the GL fixed light direction, and reuses the soft-edge
+normal kernel in the resident bake. A separate 4× color/depth pass resolves
+over the original single-sample ID render, preserving picking wiring. It
+replays geometry and therefore has a material frame cost. GL default code is
+unchanged. New modules isolate rendering work from navigation/selection.
+
+| Ride at 2000×1400 | CPU median ms | GPU median ms | Wall median ms |
+|---|---:|---:|---:|
+| msaa=False,edges=False | 9.07 | 6.89 | 9.24 |
+| msaa=False,edges=True | 9.24 | 11.55 | 9.49 |
+| msaa=True,edges=False | 13.21 | 13.63 | 13.43 |
+| msaa=True,edges=True | 19.54 | 19.62 | 19.76 |
+| AO / profiles | Not implemented | Not measured | Not measured |
+
+These are unpaced whole-frame medians at 2× HiDPI (35 retained frames after
+10 warm-ups), not isolated pass timings. The asynchronous GPU timestamp ring
+can return older frames; CPU medians include surface acquisition. Background
+and smoothing were not separately timed. MSAA adds 89.6 MB of attachments at
+this size, beyond the existing buffer-only `gpu_memory` counter.
+
+Side-by-side captures (GL left, Metal right):
+
+- [Pusher car](benchmarks/wgpu-look-2026-11-09/pusher_car_rust-comparison.png)
+- [Marquee](benchmarks/wgpu-look-2026-11-09/marquee-comparison.png)
+- [Ride overview](benchmarks/wgpu-look-2026-11-09/space_asbuilt_ride-comparison.png)
+
+**R-look is incomplete.** The backgrounds match closely, but textures, back
+materials, warm unpainted color, wide/profile/hidden edges, AO and full display
+mode / selection parity remain unfinished. The ride has a conspicuous extra
+plane in Metal; full resident visibility/section parity is also outstanding.
+No claim of visual equivalence or bit-exact GL shading is made. The ride camera
+frames the full model rather than the requested curated section.
+
+[Reproduction, raw measurements, build workaround and detailed limitations](benchmarks/wgpu-look-2026-11-09/README.md).
+
+Additional [display-mode and horizon comparisons](benchmarks/wgpu-look-2026-11-09/README.md#display-mode-and-horizon-captures) cover hidden-line, monochrome, wireframe, X-ray, and a 5-degree camera pitch.
+
+Validation: both release builds succeeded (render import required
+`CARGO_PROFILE_RELEASE_STRIP=none`); Rust core 5 passed, renderer 5 passed,
+offscreen scene/style Python tests 21 passed. The one bounded full-suite run
+completed five batches with 6,136 passed and the 19 known baseline failures;
+batch six reached the extended approximately 30-minute bound. Full-suite
+regression status is therefore **unverified**, not a clean-suite claim.

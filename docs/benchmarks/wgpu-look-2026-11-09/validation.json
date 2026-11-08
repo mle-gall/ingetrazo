@@ -1,0 +1,21 @@
+{
+  "status": "incomplete: final batch reached the extended approximately 30-minute bound",
+  "completed_batches": [
+    "batch 1/6: 3 failed, 1049 passed, 24 skipped, 35 warnings in 193.05s (0:03:13)",
+    "batch 2/6: 1090 passed, 39 skipped, 1 deselected, 2 xfailed in 168.49s (0:02:48)",
+    "batch 3/6: 14 failed, 1497 passed, 10 skipped, 802 deselected, 2 warnings in 186.90s (0:03:06)",
+    "batch 4/6: 2 failed, 1253 passed, 20 skipped, 1 deselected, 3 warnings in 339.15s (0:05:39)",
+    "batch 5/6: 1247 passed, 22 skipped, 12 warnings in 479.41s (0:07:59)"
+  ],
+  "passed_in_completed_batches": 6136,
+  "failed_in_completed_batches": 19,
+  "skipped_in_completed_batches": 115,
+  "xfailed_in_completed_batches": 2,
+  "deselected_in_completed_batches": 804,
+  "baseline_failures": 19,
+  "additional_observed_failures": 0,
+  "full_suite_regression_status": "unverified because batch 6 did not finish",
+  "core_rust_passed": 5,
+  "renderer_rust_passed": 5,
+  "focused_python_passed": 21
+}
