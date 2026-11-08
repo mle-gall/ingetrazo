@@ -6993,6 +6993,10 @@ class MainWindow(QMainWindow):
                 dlg.close()
                 QMessageBox.critical(self, tr("Open failed"), str(exc))
                 return False
+            # Keep the existing steady-state allocation threshold before the
+            # resident pack allocates. Only the full heap walk is deferred.
+            import gc
+            gc.set_threshold(self.GC_THRESHOLD0, 10, 10)
             self.viewport.history.clear()
             self.viewport.reset_texture_cache()
             self._forget_coordinate()
