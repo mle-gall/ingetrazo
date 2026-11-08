@@ -855,3 +855,42 @@ See [tests.json](benchmarks/wgpu-r2-2026-11-08/tests.json) and
 [full output](benchmarks/wgpu-r2-2026-11-08/validation.txt).
 Rust output is retained alongside them. No push, PR, issue or external comment
 was made. Branch: `renderer/r2-tools`, based on `af3959af`.
+
+
+## R-look — 2026-11-09: background, smooth fans and MSAA (partial)
+
+The renderer now accepts a display-style dictionary, renders the GL sky/ground
+corner gradient, uses the GL fixed light direction, and reuses the soft-edge
+normal kernel in the resident bake. A separate 4× color/depth pass resolves
+over the original single-sample ID render, preserving picking wiring. It
+replays geometry and therefore has a material frame cost. GL default code is
+unchanged. New modules isolate rendering work from navigation/selection.
+
+| Ride at 2000×1400 | CPU median ms | GPU median ms | Wall median ms |
+|---|---:|---:|---:|
+| msaa=False,edges=False | 9.07 | 6.89 | 9.24 |
+| msaa=False,edges=True | 9.24 | 11.55 | 9.49 |
+| msaa=True,edges=False | 13.21 | 13.63 | 13.43 |
+| msaa=True,edges=True | 19.54 | 19.62 | 19.76 |
+| AO / profiles | Not implemented | Not measured | Not measured |
+
+These are unpaced whole-frame medians at 2× HiDPI (35 retained frames after
+10 warm-ups), not isolated pass timings. The asynchronous GPU timestamp ring
+can return older frames; CPU medians include surface acquisition. Background
+and smoothing were not separately timed. MSAA adds 89.6 MB of attachments at
+this size, beyond the existing buffer-only `gpu_memory` counter.
+
+Side-by-side captures (GL left, Metal right):
+
+- [Pusher car](benchmarks/wgpu-look-2026-11-09/pusher_car_rust-comparison.png)
+- [Marquee](benchmarks/wgpu-look-2026-11-09/marquee-comparison.png)
+- [Ride overview](benchmarks/wgpu-look-2026-11-09/space_asbuilt_ride-comparison.png)
+
+**R-look is incomplete.** The backgrounds match closely, but textures, back
+materials, warm unpainted color, wide/profile/hidden edges, AO and full display
+mode / selection parity remain unfinished. The ride has a conspicuous extra
+plane in Metal; full resident visibility/section parity is also outstanding.
+No claim of visual equivalence or bit-exact GL shading is made. The ride camera
+frames the full model rather than the requested curated section.
+
+[Reproduction, raw measurements, build workaround and detailed limitations](benchmarks/wgpu-look-2026-11-09/README.md).

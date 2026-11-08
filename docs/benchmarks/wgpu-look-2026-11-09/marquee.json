@@ -1,0 +1,30 @@
+{
+  "scale": 2.0,
+  "size": [
+    2000,
+    1400
+  ],
+  "rgb_mae": 1.0175815476190475,
+  "frames": {
+    "msaa=False,edges=False": {
+      "cpu_median_ms": 8.889958,
+      "gpu_median_ms": 0.543834,
+      "wall_median_ms": 8.983958046883345
+    },
+    "msaa=False,edges=True": {
+      "cpu_median_ms": 0.31837499999999996,
+      "gpu_median_ms": 0.6445,
+      "wall_median_ms": 0.5079580005258322
+    },
+    "msaa=True,edges=False": {
+      "cpu_median_ms": 8.927334,
+      "gpu_median_ms": 0.973958,
+      "wall_median_ms": 9.10062505863607
+    },
+    "msaa=True,edges=True": {
+      "cpu_median_ms": 0.40875,
+      "gpu_median_ms": 1.203125,
+      "wall_median_ms": 0.6533750565722585
+    }
+  }
+}
