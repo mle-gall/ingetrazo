@@ -222,3 +222,18 @@ def test_the_tool_cursor_is_chosen_in_preferences(settings_file):
     assert _fresh(settings_file).value("General/cursor_style") == "crosshair"
     assert applied == [True]
     assert PreferencesDialog(win)._cursor_style.currentData() == "crosshair"
+
+
+def test_renderer_choice_round_trips_in_general(settings_file):
+    from core import general_settings, renderer_settings
+    win = _Win()
+    dlg = PreferencesDialog(win)
+    assert dlg._renderer.currentData() == 'opengl'
+    dlg._renderer.setCurrentIndex(dlg._renderer.findData('wgpu'))
+    dlg.accept()
+    assert general_settings.value(renderer_settings.SETTING, None,
+                                  _fresh(settings_file)) == 'wgpu'
+    reopened = PreferencesDialog(win)
+    assert reopened._renderer.currentData() == 'wgpu'
+    reopened.close()
+    win.close()
