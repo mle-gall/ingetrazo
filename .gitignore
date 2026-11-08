@@ -84,3 +84,6 @@ benchmarks/models/
 /.venv-work/
 /.cargo-work/
 /.spike-results/
+
+# Worktree-local renderer validation scratch
+/.r2-tmp/
