@@ -627,13 +627,10 @@ def test_open_progress_is_one_monotonic_lifecycle(win, tmp_path, monkeypatch):
             events.append(dlg.value())
         return dlg, record
     monkeypatch.setattr(win, '_import_progress', dialog)
-    # Some preparation backends restart their own local counters. The
-    # overall opening bar must never move backwards or finish early.
+    # The loading bar finishes monotonically; drawing now happens in the
+    # next event-loop turn, without an eager preparation or forced repaint.
     def prepare(progress):
-        assert win._opening_document
-        assert not win.viewport.updatesEnabled()
-        for f in (0.0, 0.6, 0.1, 1.0):
-            progress(f, 'Preparing the drawing…')
+        pytest.fail("Opening must not eagerly prepare the drawing")
     monkeypatch.setattr(win.viewport, 'prepare_drawing', prepare)
     drawn = []
     def repaint():
@@ -645,7 +642,7 @@ def test_open_progress_is_one_monotonic_lifecycle(win, tmp_path, monkeypatch):
     assert events == sorted(events)
     assert events[-1] == 100
     assert all(value < 100 for value in events[:-1])
-    assert drawn == [95]
+    assert drawn == []
     assert not win._progress_dlg.isVisible()
     assert not win._opening_document
     assert win.viewport.updatesEnabled()

@@ -6288,12 +6288,12 @@ class MainWindow(QMainWindow):
         """Connect a project's viewport to the window's panels and status
         bar. Every viewport gets the same connections; each answers only
         while its project is the one in front."""
-        def live(fn):
+        def live(fn, *, after_picture=False):
             def dispatch(*args):
                 if vp is not self.viewport:
                     return
                 doc = self._doc
-                if getattr(doc, "_awaiting_picture", False):
+                if after_picture and getattr(doc, "_awaiting_picture", False):
                     doc._after_picture.append(lambda: fn(*args))
                 else:
                     fn(*args)
@@ -6306,9 +6306,11 @@ class MainWindow(QMainWindow):
             panel = getattr(self, name, None)
             if panel is not None:
                 vp.sceneVersionChanged.connect(
-                    live(lambda _v, p=panel: p.on_scene_changed()))
+                    live(lambda _v, p=panel: p.on_scene_changed(),
+                         after_picture=True))
         vp.sceneVersionChanged.connect(
-            live(lambda _v: self._on_surfaces_scene_changed()))
+            live(lambda _v: self._on_surfaces_scene_changed(),
+                 after_picture=True))
         vp.tilesChanged.connect(live(lambda: self._build_terrain()))
         vp.valueBufferChanged.connect(live(self._on_value_buffer))
         vp.measurementChanged.connect(
@@ -7054,6 +7056,7 @@ class MainWindow(QMainWindow):
             self.viewport.notify_scene_changed()
             self._update_title()
             self._doc._after_picture.append(self.settle_heap)
+            cb(1.0, "Document loaded")
             # Returning to Qt lets the selected renderer present before any
             # optional panel/cache work. A timer alone is not a frame barrier.
             self._opening_document = False
