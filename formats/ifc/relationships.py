@@ -59,7 +59,8 @@ class Appearance:
                 rgb = w.entity('IfcColourRgb', Red=_f(color[0]), Green=_f(color[1]), Blue=_f(color[2]))
                 render = w.entity('IfcSurfaceStyleRendering', SurfaceColour=ref(rgb), Transparency=_f(1-alpha), ReflectanceMethod='.NOTDEFINED.')
                 self.styles[key] = w.entity('IfcSurfaceStyle', Name=_s(name or 'Colour'), Side='.BOTH.', Styles=refs([render]))
-            w.entity('IfcStyledItem', Item=ref(item), Styles=refs([self.styles[key]]))
+            for occurrence in item if isinstance(item, list) else [item]:
+                w.entity('IfcStyledItem', Item=ref(occurrence), Styles=refs([self.styles[key]]))
         if representation is not None:
             from core.layers import DEFAULT_LAYER
             names = {a.get('layer') or getattr(group, 'layer', None) or DEFAULT_LAYER for a in attributes}

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Measure placed geometry without allocating Python vertices or faces.
 
-Rings retain their winding and holes. Closure is checked after welding all
-placements, because an object can be assembled from individually open shells.
+Rings retain their winding and holes. Independently closed placements retain their topology. Open placements weld
+together because an object can be assembled from individually open shells.
 """
 from dataclasses import dataclass, field
 import numpy as np
@@ -65,7 +65,8 @@ def world_arrays(group, base=None, excluded=()):
         if matrix is not None:
             rot, trans = np_affine(matrix)
             arrays = Arrays((arrays.pos @ rot.T + trans).astype(np.float32).astype(float),
-                            arrays.corners, arrays.ring_sizes, arrays.ring_counts)
+                            arrays.corners, arrays.ring_sizes, arrays.ring_counts,
+                            arrays.edge_face_counts)
         yield arrays
     for child in getattr(group, 'children', None) or ():
         if not child.ifc and child.uid not in excluded:
@@ -83,6 +84,24 @@ def merged(arrays):
     corners = np.concatenate([a.corners + offset for a, offset in zip(parts, offsets)])
     return Arrays(pos, inverse[corners], np.concatenate([a.ring_sizes for a in parts]),
                   np.concatenate([a.ring_counts for a in parts]))
+
+
+def assembled(arrays):
+    """Avoid a position weld when placement topology already answers closure."""
+    parts = list(arrays)
+    if not parts:
+        return faces_arrays([])
+    if len(parts) == 1:
+        return parts[0]
+    if not all(a.edge_face_counts is not None and
+               np.all((a.edge_face_counts == 0) | (a.edge_face_counts == 2)) for a in parts):
+        return merged(parts)
+    offsets = np.cumsum([0] + [len(a.pos) for a in parts[:-1]])
+    return Arrays(np.concatenate([a.pos for a in parts]),
+                  np.concatenate([a.corners + off for a, off in zip(parts, offsets)]),
+                  np.concatenate([a.ring_sizes for a in parts]),
+                  np.concatenate([a.ring_counts for a in parts]),
+                  np.concatenate([a.edge_face_counts for a in parts]))
 
 
 def ring_data(a):
@@ -110,11 +129,12 @@ def measurements(a):
     ring_areas = np.linalg.norm(vectors, axis=1)
     gross = ring_areas[outer]
     net = np.maximum(2 * gross - np.add.reduceat(ring_areas, outer), 0)
-    edges = np.sort(np.column_stack((a.corners, a.corners[nxt])), axis=1)
-    # Integer keys avoid the structured-array sort of unique(axis=0).
-    keys = edges[:, 0] * np.int64(len(a.pos)) + edges[:, 1]
-    _, counts = np.unique(keys, return_counts=True)
-    closed = bool(np.all(counts == 2))
+    counts = a.edge_face_counts
+    if counts is None:
+        edges = np.sort(np.column_stack((a.corners, a.corners[nxt])), axis=1)
+        keys = edges[:, 0] * np.int64(len(a.pos)) + edges[:, 1]
+        _, counts = np.unique(keys, return_counts=True)
+    closed = bool(np.any(counts) and np.all((counts == 0) | (counts == 2)))
     # Triangulation subtracts holes regardless of their stored winding.
     owners = np.repeat(np.arange(len(outer)), a.ring_counts)
     same = np.einsum('ij,ij->i', vectors, vectors[outer][owners]) > 0
@@ -128,7 +148,7 @@ def measurements(a):
 
 
 def quantities(arrays):
-    a = arrays if isinstance(arrays, Arrays) else merged(arrays)
+    a = arrays if isinstance(arrays, Arrays) else assembled(arrays)
     data = measurements(a)
     if data is None:
         return 0., 0., None, False, 0

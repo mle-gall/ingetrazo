@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""World-space faceted geometry, shared by both export schemas."""
+"""Faceted bodies and local prototype maps without allocating Python faces."""
 from core.bim import face_set_volume
 from .step import _f
 
@@ -61,7 +61,7 @@ def array_body(w, arrays, context_id, geometry='brep'):
     else:
         ids = np.arange(w._next, w._next + len(pos))
         lines = np.char.add(np.char.add(np.char.add('#', ids.astype(str)), '=IFCCARTESIANPOINT(('), rows)
-        w.lines.extend(np.char.add(lines, '));').tolist())
+        w.stream.writelines(line + '));\n' for line in lines)
         w._next += len(pos)
         refs = np.char.add('#', ids[inverse].astype(str))
     rings, offset = [], 0
@@ -97,3 +97,60 @@ def array_body(w, arrays, context_id, geometry='brep'):
         rep_type = "'SurfaceModel'"
     w.last_shape_item = item
     return w.add('IFCSHAPEREPRESENTATION', f'#{context_id}', "'Body'", rep_type, f'(#{item})')
+
+
+def mapped_body(w, group, base, excluded, context_id, geometry, cache, axis):
+    """Reuse local mesh bodies; prune ownership before mapping each occurrence.
+
+    Element placements remain identity. Positive uniform orthogonal transforms
+    map local prototypes into world metres; other transforms bake that occurrence.
+    """
+    import numpy as np
+    from core.bim import _compose
+    from core.group import np_affine
+    from core.geometry_arrays import Arrays, arrays_of
+
+    items = []
+
+    def walk(placed, parent):
+        matrix = _compose(parent, placed.xform)
+        a = arrays_of(placed.mesh)
+        if len(a.ring_counts):
+            rot, trans = np_affine(matrix) if matrix is not None else (np.eye(3), np.zeros(3))
+            scale = float(np.linalg.norm(rot[:, 0]))
+            uniform = (scale > 1e-12 and np.linalg.det(rot) > 0 and
+                       np.allclose((rot / scale).T @ (rot / scale), np.eye(3),
+                                   rtol=1e-6, atol=1e-6))
+            if uniform:
+                key = id(placed.mesh)
+                if key not in cache:
+                    rep = array_body(w, a, context_id, geometry)
+                    cache[key] = w.add('IFCREPRESENTATIONMAP', f'#{axis}', f'#{rep}')
+                directions = [w.add('IFCDIRECTION', '(' + ','.join(_f(v) for v in col) + ')')
+                              for col in (rot / scale).T]
+                origin = w.add('IFCCARTESIANPOINT', '(' + ','.join(_f(v) for v in trans) + ')')
+                transform = w.add('IFCCARTESIANTRANSFORMATIONOPERATOR3D',
+                                  f'#{directions[0]}', f'#{directions[1]}',
+                                  f'#{origin}', _f(scale) if scale >= 1e-6 else format(scale, '.15E'),
+                                  f'#{directions[2]}')
+                item = w.add('IFCMAPPEDITEM', f'#{cache[key]}', f'#{transform}')
+            else:
+                baked = Arrays((a.pos @ rot.T + trans).astype(np.float32).astype(float),
+                               a.corners, a.ring_sizes, a.ring_counts, a.edge_face_counts)
+                rep = array_body(w, baked, context_id, geometry)
+                # A mapped identity wrapper permits mixed baked and shared bodies
+                # in one MappedRepresentation, including open surface models.
+                mapping = w.add('IFCREPRESENTATIONMAP', f'#{axis}', f'#{rep}')
+                origin = w.add('IFCCARTESIANPOINT', '(0.,0.,0.)')
+                transform = w.add('IFCCARTESIANTRANSFORMATIONOPERATOR3D', '$', '$', f'#{origin}', '1.', '$')
+                item = w.add('IFCMAPPEDITEM', f'#{mapping}', f'#{transform}')
+            items.append(item)
+        for child in placed.children or ():
+            if not child.ifc and child.uid not in excluded:
+                walk(child, matrix)
+
+    walk(group, base)
+    # Style each occurrence, never the shared prototype.
+    w.last_shape_item = items
+    return w.add('IFCSHAPEREPRESENTATION', f'#{context_id}', "'Body'",
+                 "'MappedRepresentation'", '(' + ','.join(f'#{i}' for i in items) + ')')

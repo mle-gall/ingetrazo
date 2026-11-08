@@ -958,3 +958,114 @@ in batch 6; the process group was terminated. Completed batches 1–5:
 panels, swatch tooltip, and toolbar bold. Batch 6 has no completed summary;
 this is **not a complete full-suite pass or a complete regression comparison**.
 The suite was not rerun. The focused native tests completed separately.
+## P8 — conditional welding, streaming STEP and mapped occurrences (2026-11-09)
+
+Takeoff preserves each placement's edge incidence through world transforms.
+Single placements bypass cross-placement welding; multiple independently closed
+placements concatenate without welding. Loose edges do not affect face closure.
+Other assemblies still weld, including the regression fixture whose two open
+placements complete one closed box. Memo signatures and invalidation are unchanged.
+
+STEP entities stream through a buffered ASCII sink, including batched point
+coordinates. The header is first, footer last, and IDS validation starts after
+closing the completed stream. Entity order and literals match the pre-change
+exporter on the split-box fixture for both body profiles, modulo timestamp.
+The writer retains current-body formatting buffers, not the whole STEP document.
+
+Opt-in `instancing` maps each owned local mesh prototype into world coordinates.
+Tagged descendants and referenced opening children are pruned per record before
+traversal; sharing therefore cannot restore excluded geometry. Positive uniform
+orthogonal transforms map directly. Mirrored, nonuniform, sheared and singular
+occurrences bake their own bodies and use identity mapping wrappers. Element
+ObjectPlacement remains identity. Styling targets occurrences, including every
+mapped item of a multipart object, rather than shared prototype geometry.
+
+Live caps increase from 2,000 objects / 300,000 faces to 4,000 / 350,000. A ride
+subset of 141 objects / 350,000 faces took **4.88 s** for collection plus class
+quantities; a 202-object / 599,998-face subset took **12.09 s**, ruling out the
+larger proposed face cap. A separate 4,000-box / 24,000-face fixture took **1.20 s**.
+These measure computation, not Qt tree construction. The full ride stays opt-in.
+The skipped notice reports elapsed size-check time; measure-on-request remains.
+
+Validation uses an isolated `.venv-work` (Python 3.13, NumPy 2.5.4,
+IfcOpenShell and IfcTester), without the Rust wheel. The input ride was read only;
+all outputs and logs are under `.venv-work`. Benchmarks overlapped test workloads
+on this Mac, so wall times include contention. The cold takeoff gate of 20 s
+was **not met**; retained cross-placement welding and cold lazy planning remain
+expensive. No speedup beyond the measurements below is claimed.
+
+Focused command:
+
+```sh
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest \
+  tests/test_geometry_arrays.py tests/test_bim.py \
+  tests/test_bim_grouped_tags.py tests/test_bim_reinforcing_bar.py \
+  tests/test_ifc_export.py tests/test_ifc_records_export.py \
+  tests/test_ifc_vocabulary_relationships.py -q
+```
+
+Result: **79 passed**. Additional loose-edge and tray tests: **4 passed**.
+Mapped tests validate schema and EXPRESS rules for both body formats and iterate
+IfcOpenShell geometry to verify all four elements' world bounds, including
+mirroring and nonuniform-scale fallbacks. Further regressions cover ownership
+pruning, streaming entity order, separately closed placements without welding,
+open sheets, split closed shells, holes, and deferred geometry preservation.
+
+Ride measurements (1,482 exported elements, zero reported problems in all four
+exports; GB below is decimal):
+
+| Operation | P6 baseline | P8 measured |
+| --- | ---: | ---: |
+| Cold takeoff | 46–86 s | 65.77 s (second process 79.79 s) |
+| Warm takeoff without memo | 32.93–54.82 s | 51.34 s |
+| Unchanged memo takeoff | 0.30–0.54 s | 0.44 s |
+| B-rep, instancing off: time | 110–154 s | 239.99 s |
+| B-rep, instancing off: size | 1,367,097,328 B | 1,367,097,328 B |
+| B-rep, instancing off: peak RSS | 11.78 GB | 3.18 GB |
+| Polygonal, instancing off: time | 110 s | 183.99 s |
+| Polygonal, instancing off: size | 654,530,304 B | 654,530,304 B |
+| Polygonal, instancing off: peak RSS | 5.33 GB (isolated P6 run) | 3.18 GB* |
+| B-rep, instancing on: time / size / peak RSS | unavailable | 227.55 s / 1,171,267,204 B / 2.62 GB |
+| Polygonal, instancing on: time / size / peak RSS | unavailable | 204.35 s / 541,461,305 B / 2.62 GB* |
+
+*Polygonal follows B-rep in each process, so these RSS values include the earlier
+stages, not an isolated polygonal peak. Exact process peaks were 3,181,559,808 B
+without instancing and 2,616,197,120 B with instancing. The streaming B-rep memory
+gate is met. Size reductions with instancing are 14.3% and 17.3%; no general
+export-time improvement is claimed. The measurements precede the final tiny-scale
+numerical guard, which was validated separately (one passing regression test).
+
+The original `scripts/benchmark_array_geometry.py` produced the off run; a
+worktree-local copy setting the profile's `instancing` key produced the on run.
+For independent future profile measurements, use:
+
+```sh
+QT_QPA_PLATFORM=offscreen INGETRAZO_RUST=1 .venv-work/bin/python \
+  tests/benchmark_export_pipeline.py \
+  /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz \
+  --output .venv-work/isolated-brep.ifc --geometry brep --instancing
+```
+
+Omit `--instancing` for the default profile; select `--geometry polygonal` for
+indexed faces. Input and output paths must be different. The final array module
+run passed **23 tests**, followed by **1 passing tiny-scale regression**.
+
+Required bounded suite, invoked once:
+
+```sh
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'
+```
+
+Result: **6,939 passed, 19 failed, 316 skipped, 2 xfailed, 805 deselected,
+56 warnings in 1,722 s (six batches)**. The failing test IDs match the supplied
+19-failure baseline: 14 translations (including Arabic), cached cursor picking,
+extension preview wrapping, hidden-panel retention, swatch tooltip colours, and
+extension toolbar bold names. No new failing test IDs. Optional dependencies and
+the absent Rust wheel affect pass/skip totals. The tiny-scale regression was
+added after the geometry batch had collected and passed separately; the final
+numerical guard also received the focused array checks noted above.
+
+Logs: `.venv-work/bounded.log`, `.venv-work/final-focused.log`,
+`.venv-work/final-arrays.log`, `.venv-work/tiny.log`, `.venv-work/tray-tests.log`,
+`.venv-work/bench-off.log`, `.venv-work/bench-on.log`,
+`.venv-work/caps-350k.log`, and `.venv-work/object-cap.log`.

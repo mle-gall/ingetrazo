@@ -69,8 +69,8 @@ type classes become IfcBuildingElementProxyType. General flow segment, fitting a
 terminal type bases are abstract, so use a concrete registry class such as
 IfcPipeSegment for precise type semantics.
 
-Georeferencing and mapped geometry instancing are not implemented. Geometry stays
-as faceted B-reps or open shell surface models. The view header identifies the
+Georeferencing is not implemented. Geometry uses faceted B-reps, open shell
+surface models, or indexed polygonal face sets. The view header identifies the
 selected view; it does not claim full model-view-definition certification.
 
 ## Linked files
@@ -125,3 +125,27 @@ reported and skipped. Their names remain available in the vocabulary, but full
 specialization export is unfinished. Group registry type references do not emit
 an invalid proxy type relationship. Referenced child void geometry is excluded from the host representation;
 callers must supply a host already representing the void (no Boolean cut is made). Non-scalar PSD property values need further support.
+
+## Streaming and prototype instancing
+
+Entity lines are written to a buffered ASCII file in increasing id order. The
+header precedes DATA and the footer is written last. The stream is closed before
+IDS checks open the completed file. Writing no longer retains the complete STEP
+text; geometry arrays and the current body's formatting buffers remain in memory.
+A failed export can leave a partial file at the requested path.
+
+An export profile may set `"instancing": true` (default `false`) with either
+`"geometry": "brep"` or `"geometry": "polygonal"`. Each owned mesh prototype
+gets a local-frame shape representation and representation map. Occurrences use
+mapped items whose positive uniform scale, rotation and translation come from
+the composed world matrix. Element ObjectPlacement remains identity, as in the
+baked exporter: the mapping itself takes local prototype coordinates to world
+metres. Mirroring, non-uniform scale, shear and singular transforms instead bake
+that occurrence's coordinates, using an identity mapping wrapper.
+
+Traversal prunes tagged descendants and opening references before emitting
+occurrences. Sharing is at mesh identity, not whole-assembly identity: records
+with different excluded descendants cannot accidentally reuse each other's
+assembly body. Materials and styles remain occurrence-specific. Face-tagged
+subsets and explicit opening bodies retain their existing baked path. Shared
+prototype geometry does not imply shared records, element GUIDs or quantities.

@@ -232,3 +232,123 @@ def test_deferred_face_tags_inside_group_and_identity(tmp_path, monkeypatch):
     save_ifc(reloaded, out)
     assert ifcopenshell.open(str(out)).by_type('IfcWall')[0].GlobalId == guid
     assert '_deferred' in reloaded.groups[0].mesh.__dict__
+
+
+def test_separately_closed_placements_skip_weld(monkeypatch):
+    import core.geometry_arrays as ga
+    root = Group()
+    root.children = [cube(), cube()]
+    for i, child in enumerate(root.children):
+        child.ifc = None
+        child.xform = QMatrix4x4()
+        child.xform.translate(i * 3, 0, 0)
+    def fail(*args):
+        raise AssertionError('closed placements must not weld')
+    monkeypatch.setattr(ga, 'merged', fail)
+    assert ga.quantities(ga.world_arrays(root))[2:4] == (2., True)
+
+
+@pytest.mark.parametrize('geometry', ['brep', 'polygonal'])
+def test_mapped_instances_world_readback(tmp_path, geometry):
+    ifcopenshell = pytest.importorskip('ifcopenshell')
+    import ifcopenshell.geom
+    import ifcopenshell.validate
+    from formats.ifc import save_ifc
+    scene = Scene()
+    first = cube()
+    for i in range(4):
+        g = Group()
+        g.mesh = first.mesh
+        g.ifc = {'class': 'IfcWall'}
+        g.xform = QMatrix4x4()
+        g.xform.translate(i * 10, 2, 3)
+        if i == 2:
+            g.xform.scale(-1, 1, 1)
+        elif i == 3:
+            g.xform.scale(2, 1, 1)
+        scene.groups.append(g)
+    scene.plugin_data['bim_registry'] = {'export_profiles': {'test': {
+        'geometry': geometry, 'instancing': True}}}
+    path = tmp_path / 'mapped.ifc'
+    assert save_ifc(scene, path, profile='test') == 4
+    model = ifcopenshell.open(str(path))
+    assert len(model.by_type('IfcRepresentationMap')) == 3
+    assert len(model.by_type('IfcMappedItem')) == 4
+    logger = ifcopenshell.validate.json_logger()
+    ifcopenshell.validate.validate(model, logger, express_rules=True)
+    assert not logger.statements
+    settings = ifcopenshell.geom.settings()
+    settings.set(settings.USE_WORLD_COORDS, True)
+    iterator = ifcopenshell.geom.iterator(settings, model)
+    bounds = []
+    assert iterator.initialize()
+    while True:
+        shape = iterator.get()
+        points = np.asarray(shape.geometry.verts).reshape(-1, 3)
+        bounds.append((points.min(axis=0), points.max(axis=0)))
+        if not iterator.next():
+            break
+    bounds.sort(key=lambda b: b[0][0])
+    assert len(bounds) == 4
+    assert np.asarray([b[0] for b in bounds]) == pytest.approx(
+        np.array([[0,2,3],[10,2,3],[19,2,3],[30,2,3]]))
+    assert np.asarray([b[1] for b in bounds]) == pytest.approx(
+        np.array([[1,3,4],[11,3,4],[20,3,4],[32,3,4]]))
+
+
+def test_step_writer_streams_in_order():
+    from io import StringIO
+    from formats.ifc.step import _Writer
+    sink = StringIO()
+    writer = _Writer(sink)
+    assert writer.add('IFCCARTESIANPOINT', '(0.,0.,0.)') == 1
+    assert sink.getvalue() == '#1=IFCCARTESIANPOINT((0.,0.,0.));\n'
+    assert writer.add('IFCAXIS2PLACEMENT3D', '#1', '$', '$') == 2
+    assert sink.getvalue().endswith('#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n')
+    assert not hasattr(writer, 'lines')
+
+
+def test_mapped_ownership_excludes_tagged_and_opening_children(tmp_path):
+    ifcopenshell = pytest.importorskip('ifcopenshell')
+    from formats.ifc import save_ifc
+    scene = Scene()
+    host = cube()
+    opening = cube()
+    opening.ifc = None
+    tagged = cube()
+    host.children = [opening, tagged]
+    host.ifc['openings'] = [{'group_uid': opening.uid}]
+    scene.groups = [host]
+    scene.plugin_data['bim_registry'] = {'export_profiles': {'test': {'instancing': True}}}
+    path = tmp_path / 'ownership.ifc'
+    assert save_ifc(scene, path, profile='test') == 2
+    model = ifcopenshell.open(str(path))
+    assert len(model.by_type('IfcMappedItem')) == 2
+    assert len(model.by_type('IfcOpeningElement')) == 1
+
+
+def test_loose_edges_do_not_open_closed_solid():
+    g = cube()
+    g.mesh.add_edge(V(5,0,0), V(6,0,0))
+    assert quantities(world_arrays(g))[2:4] == (1., True)
+
+
+def test_mapping_tiny_scales_preserve_uniformity_and_scale(tmp_path):
+    ifcopenshell = pytest.importorskip('ifcopenshell')
+    from formats.ifc import save_ifc
+    scene = Scene()
+    prototype = cube()
+    for scale in ((1e-8, 1e-8, 1e-8), (1e-6, 2e-6, 1e-6)):
+        g = Group(prototype.mesh)
+        g.ifc = {'class': 'IfcWall'}
+        g.xform = QMatrix4x4()
+        g.xform.scale(*scale)
+        scene.groups.append(g)
+    scene.plugin_data['bim_registry'] = {'export_profiles': {'test': {'instancing': True}}}
+    path = tmp_path / 'tiny.ifc'
+    save_ifc(scene, path, profile='test')
+    model = ifcopenshell.open(str(path))
+    maps = model.by_type('IfcRepresentationMap')
+    assert len(maps) == 2
+    scales = [m.MappingTarget.Scale for m in model.by_type('IfcMappedItem')]
+    assert scales == pytest.approx([1e-8, 1.])

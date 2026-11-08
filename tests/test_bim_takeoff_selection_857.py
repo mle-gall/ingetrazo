@@ -93,3 +93,23 @@ def test_an_edit_remeasures_only_the_object_it_touched():
     assert len(memo) == 2
     # Without a memo every call measures afresh, as the IFC export wants.
     assert collect_objects(scene)[0] is not collect_objects(scene)[0]
+
+
+def test_skipped_takeoff_reports_elapsed_and_measure_anyway(monkeypatch):
+    from views.main_window import MainWindow
+    import views.tray as tray
+    win = MainWindow()
+    try:
+        scene = win.viewport.scene
+        scene.groups.append(_bar(0))
+        scene.version += 1
+        panel = win.bim_tray.bim
+        monkeypatch.setattr(tray, 'LIVE_TAKEOFF_FACE_LIMIT', 1)
+        panel.refresh()
+        assert 'Size check:' in panel.too_many.text()
+        assert panel.measure_btn.isHidden() is False
+        panel.measure_btn.click()
+        assert panel.tree.topLevelItemCount() == 1
+    finally:
+        win._saved_version = win.viewport.scene.version
+        win.close()
