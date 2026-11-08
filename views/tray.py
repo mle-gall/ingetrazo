@@ -4775,7 +4775,7 @@ class BimPanel(QWidget):
     def refresh(self) -> None:
         from PySide6.QtWidgets import QTreeWidgetItem
         from core.bim import collect_objects
-        from core.bim import class_quantities
+        from core.bim import object_quantities
         from core.bim_registry import get
         self.class_box.set_registry(get(self._scene()))
         # File ▸ New (scene.clear) drops the active class — mirror it in the UI.
@@ -4865,14 +4865,7 @@ class BimPanel(QWidget):
 
         for idx, obj in enumerate(self._objects):
             if "metrado" not in obj:
-                faces = obj.get("faces")
-                if faces is None:
-                    faces = list(obj["group"].mesh.faces)
-                # The takeoff column shows the class's budget measure (wall
-                # face m², column m³, pile m, door und) — the number the
-                # IFC/CSV export carries to IngePresupuestos, not the shell
-                # area. Kept on the object, so a memoised one reuses it.
-                obj["metrado"] = class_quantities(obj["class"], faces)[2]
+                obj["metrado"] = object_quantities(obj)[2]
             metrado, unit = obj["metrado"]
             pretty = {"m2": "m²", "m3": "m³"}.get(unit, unit)
             if metrado is None:

@@ -95,7 +95,8 @@ def test_tagged_faces_in_a_moved_component_measure_in_world_space():
     _moved(comp, 3.0)
     (obj,) = collect_objects(scene)
     assert abs(obj["volume"] - 6.0) < 1e-6
-    xs = [v.x() for f in obj["faces"] for v in f.vertices]
+    arrays = obj["arrays"]()
+    xs = arrays.pos[arrays.corners, 0]
     assert min(xs) >= 3.0 - 1e-6                  # where the copy stands
 
 

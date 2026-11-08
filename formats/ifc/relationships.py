@@ -23,12 +23,16 @@ class Appearance:
             self.materials[name] = self.w.entity('IfcMaterial', Name=_s(name))
         return self.materials[name]
 
-    def apply(self, record, group, faces, node, guid, representation, item):
+    def apply(self, record, group, faces, node, guid, representation, item,
+              attributes=None, face_areas=None):
         w = self.w
         areas = defaultdict(float)
-        for face in faces:
-            if face.attrs.get('mat'):
-                areas[face.attrs['mat']] += face.area()
+        if attributes is None:
+            attributes = [face.attrs for face in faces]
+            face_areas = [face.area() for face in faces]
+        for attrs, area in zip(attributes, face_areas):
+            if attrs.get('mat'):
+                areas[attrs['mat']] += area
         paint = getattr(group, 'material', None) or {}
         material = record.get('material') or (max(areas, key=areas.get) if areas else None) or paint.get('mat')
         name = material.get('name', '') if isinstance(material, dict) else material
@@ -46,7 +50,7 @@ class Appearance:
         color = getattr(recipe, 'color', None)
         opacity = getattr(recipe, 'opacity', None)
         if color is None:
-            source = next((f.attrs for f in faces if f.attrs.get('mat') == name and f.attrs.get('color')), paint)
+            source = next((a for a in attributes if a.get('mat') == name and a.get('color')), paint)
             color, opacity = source.get('color'), source.get('opacity')
         if color is not None and item is not None:
             alpha = opacity if opacity is not None else color[3] if len(color) > 3 else 1.
@@ -58,7 +62,7 @@ class Appearance:
             w.entity('IfcStyledItem', Item=ref(item), Styles=refs([self.styles[key]]))
         if representation is not None:
             from core.layers import DEFAULT_LAYER
-            names = {f.attrs.get('layer') or getattr(group, 'layer', None) or DEFAULT_LAYER for f in faces}
+            names = {a.get('layer') or getattr(group, 'layer', None) or DEFAULT_LAYER for a in attributes}
             if group is not None:
                 names.add(group.layer or DEFAULT_LAYER)
             for layer in self.scene.layers:
