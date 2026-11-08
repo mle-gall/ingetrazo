@@ -82,13 +82,14 @@ def apply() -> bool:
         return False
     _applied = True
     layers = _keep_layer_table()
+    folders = _keep_tag_folders()
     texts = _fix_anchored_texts(L)
     lists = _fix_definition_list_end(L)
     groups = _note_legacy_groups(L)
     kinds = _note_definition_kinds()
     tails = _fix_layer_tail_2019(L)
     return _fix_legacy_dimensions(L) or layers or texts or lists \
-        or groups or kinds or tails
+        or groups or kinds or tails or folders
 
 
 def _note_legacy_groups(L) -> bool:
@@ -200,6 +201,168 @@ def _keep_layer_table() -> bool:
     full_parse._keeps_layers = True
     _core.full_parse = full_parse
     return True
+
+
+# ---- tag folders (SketchUp 2021+) ----------------------------------------
+# openskp reads the tag list (993A) but not its sibling, the folder manager
+# (9B3A), so folders never reached IngeTrazo. Decoded from Maxence's
+# production files (2026-11-07), whose Tags panel nests them three deep:
+#
+#   9B3A  folder manager — one root folder, unnamed
+#     803E  folder: DC05 its id (the tags' id format), 813E its name
+#           (UTF-8), 833E its subfolders (803E records), 843E the ids of
+#           the tags in it (each: one length byte, then the var-int),
+#           823E hidden (one byte: 1 = hidden), 853E a flag left unread.
+#
+# A tag's own record (8C3C) does not name its folder (its 903C reads 0
+# throughout): membership is the folder's list.
+
+#: Folder records' children, by tag.
+_F_FOLDER, _F_NAME, _F_SUBS, _F_TAGS, _F_HIDDEN = (
+    "803E", "813E", "833E", "843E", "823E")
+
+
+def _records(data: bytes, start: int = 0, end: int | None = None):
+    """``(tag, payload)`` for each TLV record in ``data[start:end]``: a
+    two-byte tag (written as openskp spells it, e.g. ``'803E'``) and a
+    little-endian u32 length."""
+    end = len(data) if end is None else end
+    i = start
+    while i + 6 <= end:
+        tag = data[i:i + 2].hex().upper()
+        n = struct.unpack_from("<I", data, i + 2)[0]
+        if i + 6 + n > end:
+            return
+        yield tag, data[i + 6:i + 6 + n]
+        i += 6 + n
+
+
+def _id_list(payload: bytes) -> list:
+    """843E: tag ids, each a length byte then a var-int."""
+    from openskp._core import parse_var_int
+    out, i = [], 0
+    while i < len(payload):
+        n = payload[i]
+        if n == 0 or i + 1 + n > len(payload):
+            break
+        out.append(parse_var_int(payload, i + 1, n))
+        i += 1 + n
+    return out
+
+
+def _entity_key(payload: bytes):
+    from openskp._core import parse_var_int, read_u32
+    if payload.startswith(bytes([0xDE, 0x05])):
+        return parse_var_int(payload, 6, read_u32(payload, 2))
+    return parse_var_int(payload, 0, len(payload))
+
+
+def parse_tag_folders(payload: bytes) -> list:
+    """The folders a 9B3A payload holds, depth first, as dicts
+    ``{"key", "name", "parent", "hidden", "tags"}`` — ``parent`` the key of
+    the enclosing folder (None at the top), ``tags`` the tag ids filed
+    directly in it. The unnamed root is not one of them."""
+    out: list = []
+
+    def folder(body: bytes, parent, is_root: bool) -> None:
+        rec = {"key": None, "name": "", "parent": parent, "hidden": False,
+               "tags": []}
+        subs = []
+        for tag, pay in _records(body):
+            if tag == "DC05":
+                try:
+                    rec["key"] = _entity_key(pay)
+                except Exception:  # noqa: BLE001
+                    pass
+            elif tag == _F_NAME:
+                rec["name"] = pay.decode("utf-8", errors="replace")
+            elif tag == _F_SUBS:
+                subs = [p for t, p in _records(pay) if t == _F_FOLDER]
+            elif tag == _F_TAGS:
+                rec["tags"] = _id_list(pay)
+            elif tag == _F_HIDDEN:
+                rec["hidden"] = bool(pay[:1] == b"\x01")
+        me = None
+        if not is_root:
+            if rec["key"] is None:
+                rec["key"] = ("anon", len(out))
+            out.append(rec)
+            me = rec["key"]
+        for sub in subs:
+            folder(sub, me, False)
+
+    for tag, pay in _records(payload):
+        if tag == _F_FOLDER:
+            folder(pay, None, True)
+    return out
+
+
+def _find_node(node, tag):
+    if node.tag == tag:
+        return node
+    for kid in getattr(node, "children", None) or ():
+        hit = _find_node(kid, tag)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _keep_tag_folders() -> bool:
+    """Watch the parse go by for the folder manager: openskp hands it over
+    as an opaque record inside the model's ``F801`` section (with the tag
+    list), so the folders are decoded here and kept for the importer
+    (:func:`tag_folder_records`)."""
+    try:
+        from openskp import _core
+    except Exception:  # noqa: BLE001
+        return False
+    iterate = getattr(_core, "iter_top_level_lazy", None)
+    parse = getattr(_core, "full_parse", None)
+    if iterate is None or parse is None \
+            or getattr(iterate, "_keeps_folders", False):
+        return False
+
+    def iter_top_level_lazy(*args, **kwargs):
+        for item in iterate(*args, **kwargs):
+            el = item[-1]
+            if getattr(el, "tag", None) == "F801":
+                node = _find_node(el, "9B3A")
+                payload = getattr(node, "payload", None) if node else None
+                if payload:
+                    try:
+                        _parse_tables.folders = parse_tag_folders(
+                            bytes(payload))
+                    except Exception:  # noqa: BLE001 — never fail the open
+                        _parse_tables.folders = []
+            yield item
+
+    def full_parse(*args, **kwargs):
+        _parse_tables.folders = []          # this parse's, not the last one's
+        return parse(*args, **kwargs)
+
+    iter_top_level_lazy._keeps_folders = True
+    full_parse._keeps_layers = getattr(parse, "_keeps_layers", False)
+    _core.iter_top_level_lazy = iter_top_level_lazy
+    _core.full_parse = full_parse
+    return True
+
+
+def tag_folder_records() -> list:
+    """The last parse's tag folders for the importer: ``[{"key", "name",
+    "parent", "hidden", "tags"}]`` with ``key``/``parent`` as strings and
+    ``tags`` as tag NAMES (through the parse's id → name table); an id the
+    table does not know is dropped. Empty for a file without folders."""
+    table = getattr(_parse_tables, "layers", None) or {}
+    out = []
+    for f in getattr(_parse_tables, "folders", None) or ():
+        out.append({
+            "key": str(f["key"]),
+            "name": f["name"] or "Folder",
+            "parent": None if f["parent"] is None else str(f["parent"]),
+            "hidden": bool(f["hidden"]),
+            "tags": [table[i] for i in f["tags"] if i in table],
+        })
+    return out
 
 
 #: Spellings of SketchUp's default tag: a face on it is on no layer.

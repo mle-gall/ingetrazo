@@ -350,12 +350,20 @@ def _apply_payload_inner(scene, payload, progress=None) -> str:
     # must not flip what the user toggled).
     if payload.get("layers"):
         from core.layers import Layer
+        folder_of, folder_hidden = _import_tag_folders(
+            scene, payload.get("layer_folders") or ())
         known = {ly.name for ly in scene.layers}
         for raw in payload["layers"]:
-            if raw.get("name") and raw["name"] not in known:
-                scene.layers.append(Layer(raw["name"],
-                                          visible=raw.get("visible", True)))
-                known.add(raw["name"])
+            name = raw.get("name")
+            if name and name not in known:
+                # A tag in a hidden SketchUp folder is hidden there, its own
+                # switch notwithstanding; IngeTrazo's folders only file.
+                scene.layers.append(Layer(
+                    name,
+                    visible=raw.get("visible", True)
+                    and not folder_hidden.get(name, False),
+                    folder=folder_of.get(name)))
+                known.add(name)
 
     # The file's saved scenes become saved views (camera + hidden layers);
     # a view whose name already exists is left alone (re-import).
@@ -485,6 +493,42 @@ def _apply_payload_inner(scene, payload, progress=None) -> str:
             dim.bind(scene)
     scene.version += 1
     return payload.get("backend", "?")
+
+
+def _import_tag_folders(scene, records) -> tuple[dict, dict]:
+    """Rebuild a .skp's tag folders (``formats.openskp_compat`` records,
+    parents before children) as the scene's tag folders. A folder of the
+    same name already in the same place is reused — a re-import does not
+    duplicate the tree — and a name taken elsewhere gets a suffix.
+    Returns ``(tag → folder name, tag → hidden by a folder)``."""
+    from core.layers import add_folder, folder_parent, folders_of, move_folder
+    names: dict = {}        # file folder key → scene folder name
+    hidden: dict = {}       # file folder key → hidden, with its ancestors
+    folder_of: dict = {}
+    tag_hidden: dict = {}
+    for rec in records:
+        key = rec.get("key")
+        name = (rec.get("name") or "").strip() or "Folder"
+        parent = names.get(rec.get("parent"))
+        taken = folders_of(scene)
+        if name in taken and folder_parent(scene, name) == parent:
+            here = name
+        elif name not in taken:
+            # The file's own name — add_folder numbers every name it
+            # makes («New folder 1»), right for a new folder, not here.
+            here = name
+            scene.layer_folders = taken + [name]
+            if parent:
+                move_folder(scene, name, parent)
+        else:
+            here = add_folder(scene, name, parent)
+        names[key] = here
+        hidden[key] = bool(rec.get("hidden")) \
+            or hidden.get(rec.get("parent"), False)
+        for tag in rec.get("tags") or ():
+            folder_of[tag] = here
+            tag_hidden[tag] = hidden[key]
+    return folder_of, tag_hidden
 
 
 def load_skp(scene, path, progress=None) -> str:

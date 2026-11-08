@@ -1513,6 +1513,15 @@ def _adapt(model, name: str, skp_path=None):
     file_layers = file_layer_records(model)
     if file_layers:
         payload["layers"] = file_layers
+    # SketchUp 2021+ tag folders (openskp_compat decodes them): the
+    # importer rebuilds them as tag folders, nested as in the file.
+    try:
+        from formats.openskp_compat import tag_folder_records
+        folders = tag_folder_records()
+    except Exception:  # noqa: BLE001 — folders are a nicety, never fatal
+        folders = []
+    if folders:
+        payload["layer_folders"] = folders
     # The file's saved scenes (camera + hidden layers), inches → metres.
     scenes = []
     for pg in getattr(model, "pages", []) or []:
