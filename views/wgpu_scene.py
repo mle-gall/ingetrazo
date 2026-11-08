@@ -54,17 +54,19 @@ def bake_mesh(mesh):
         table = [f.attrs for f in mesh.faces]
         attr = np.arange(len(table))
     normal, _ln, _cen, triangles, faces, _unit, _tu, _fu = geom
-    colors = np.full((len(attr), 4), 255, np.uint8)
-    colors[:, :3] = 210
-    colors[:, 3] = 0
-    hidden = np.zeros(len(attr), bool)
-    for k in np.unique(attr):
-        own = table[k] if k >= 0 else {}
-        mask = attr == k
-        hidden[mask] = bool(own.get('hidden'))
+    # Gather once through the attribute table; masking every face for each
+    # distinct colour is quadratic on large, per-face-painted prototypes.
+    palette = np.full((len(table)+1, 4), 255, np.uint8)
+    palette[:, :3] = 210
+    palette[:, 3] = 0
+    hidden_table = np.zeros(len(table)+1, bool)
+    for k, own in enumerate(table):
+        hidden_table[k+1] = bool(own.get('hidden'))
         if own.get('color') is not None:
-            colors[mask, :3] = np.clip(np.array(own['color'][:3])*255, 0, 255)
-            colors[mask, 3] = 255
+            palette[k+1, :3] = np.clip(np.array(own['color'][:3])*255, 0, 255)
+            palette[k+1, 3] = 255
+    colors = palette[attr+1]
+    hidden = hidden_table[attr+1]
     keep = ~hidden[faces]
     triangles, faces = triangles[keep], faces[keep]
     out = np.empty(len(triangles)*3, VERTEX)

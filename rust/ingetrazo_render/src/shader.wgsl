@@ -20,8 +20,8 @@ fn cull(@builtin(global_invocation_id) gid: vec3u) {
  for (var k = 0u; k < 8u; k++) {
   let v = select(p.lo.xyz, p.hi.xyz, vec3<bool>((k&1u)!=0u,(k&2u)!=0u,(k&4u)!=0u));
   let q = m * vec4f(v, 1);
-  outside += vec3u(q.x < -q.w, q.y < -q.w, q.z < 0);
-  outside2 += vec3u(q.x > q.w, q.y > q.w, q.z > q.w);
+  outside += vec3u(vec3<bool>(q.x < -q.w, q.y < -q.w, q.z < 0));
+  outside2 += vec3u(vec3<bool>(q.x > q.w, q.y > q.w, q.z > q.w));
   if q.w <= 0 { crosses = true; } else {
    low = min(low, q.xy/q.w); high = max(high, q.xy/q.w);
   }

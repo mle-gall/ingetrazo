@@ -8,6 +8,7 @@ import sys
 import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ['INGETRAZO_RUST'] = '1'
+os.environ.setdefault('INGETRAZO_TEXTURE_CACHE', str(Path('.spike-results/textures').resolve()))
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QMainWindow, QLabel
 from core.scene import Scene
@@ -20,6 +21,8 @@ def main():
     parser.add_argument('model', type=Path)
     parser.add_argument('--measure', action='store_true')
     args = parser.parse_args()
+    import faulthandler
+    faulthandler.dump_traceback_later(60, repeat=True)
     app = QApplication([])
     window = QMainWindow()
     view = WgpuView()

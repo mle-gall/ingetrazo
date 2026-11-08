@@ -54,3 +54,21 @@ def test_prototype_offsets():
     assert packed.commands['base'].tolist() == [0, 3]
     assert packed.commands['start'].tolist() == [0, 1]
     assert packed.indices.tolist() == [0, 1, 2, 0, 1, 2]
+
+
+def test_lazy_arrays_stay_deferred(tmp_path, monkeypatch):
+    from formats import igz
+    from core.mesh import DeferredMesh
+    monkeypatch.setattr(_native, 'wanted', lambda: True)
+    monkeypatch.setattr(_native, 'native', _native.available())
+    monkeypatch.setattr(igz, '_LARGE_DOCUMENT', 0)
+    path = tmp_path / 'lazy.igz'
+    igz.save_scene(Scene(groups=[Group(triangle())]), path)
+    scene = Scene()
+    igz.load_into(scene, path)
+    mesh = scene.groups[0].mesh
+    assert type(mesh) is DeferredMesh
+    packed = pack_scene(scene)
+    assert type(mesh) is DeferredMesh
+    assert len(packed.indices) == 3
+    np.testing.assert_array_equal(packed.bounds[0, :, :3], [[0, 0, 0], [2, 3, 0]])
