@@ -4053,10 +4053,12 @@ class Viewport(QOpenGLWidget):
         memo = getattr(self, "_placements_memo", None)
         if key is not None and memo is not None and memo[0] == key:
             return memo[1]
+        allowed = getattr(self.scene, "_navigator_allowed", None)
         anidado = ctx is not None and getattr(ctx, "children", None)
         if not anidado and not any(getattr(g, "children", None) for g in groups):
-            self._placements_memo = (key, groups)
-            return groups                      # unchanged for flat scenes
+            shown = groups if allowed is None else [g for g in groups if g.uid in allowed]
+            self._placements_memo = (key, shown)
+            return shown                       # unchanged for unfiltered flat scenes
         cache = getattr(self, "_placement_proxies", None)
         if cache is None:
             cache = self._placement_proxies = {}
@@ -4074,6 +4076,11 @@ class Viewport(QOpenGLWidget):
                 gone = cache.pop(k, None)
                 if gone is not None:
                     tops.pop(id(gone), None)
+        # Filter after expansion: a matching child can remain visible without
+        # its ancestor. Ghost passes also consume this list, so hidden-object
+        # display cannot bring excluded placements back into the viewport.
+        if allowed is not None:
+            out = [g for g in out if g.uid in allowed]
         self._placements_memo = (key, out)
         return out
 

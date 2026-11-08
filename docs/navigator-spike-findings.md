@@ -75,6 +75,8 @@ checkbox. Both meanings remain visible rather than being conflated.
   the Outliner’s single-context opening and sibling-selection policy. Select all
   results can still span contexts; subsequent geometry tools need that policy
   reconciled. Result-set record edits do not have this containment restriction.
+  Applying a filter exits excluded edit contexts and drops excluded selections;
+  Previous view restores display state, not the former editing context.
 * BIM takeoff remains document-wide. Pass evaluated UIDs to quantity aggregation;
   never derive quantities from rendered pixels or a partially loaded Qt tree.
 * Definition identity is session-local; persistent views should use object facts,

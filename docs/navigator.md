@@ -73,7 +73,11 @@ Display changes use `bump_view`, not document history. They clear at New/Open.
 own value. SHA-256-derived categorical colours are stable across sessions.
 The by-layer material path overrides face materials in textures/shaded/xray;
 wireframe and technical flat modes retain their own appearance. Layer hiding
-and locking still apply. Selection/picking consult the same allowed-UID set.
+and locking still apply. Selection/picking consult the same allowed-UID set. Excluded group selections
+are dropped. A filter exits an excluded editing context so its working mesh
+cannot remain visible through the loose-geometry pass; pending component edits
+use the normal edit-exit share-back behavior. The shared placement list is
+filtered after expansion, so hidden-object ghosts obey the same scope.
 
 Saved scenes have an optional `navigator_view` registry key. ScenesPanel recalls
 it after the camera/layers. Missing keys and older scenes leave the Navigator

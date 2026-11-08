@@ -208,3 +208,42 @@ def test_previous_view_does_not_revive_another_documents_colour():
     assert vp.view_filter is None
     assert vp.view_tint is None
     vp.close()
+
+
+def test_filtered_placements_cannot_reach_hidden_object_ghost_pass():
+    from core.agent_facets import set_display
+    from views.viewport import Viewport
+    vp = Viewport()
+    scene, parent, child, other = model()
+    vp.scene = scene
+    parent.hidden = True
+    scene.show_hidden_objects = True
+    set_display(vp, {'facet': 'name', 'eq': 'Track'})
+    assert [g.uid for g in vp._placements()] == [other.uid]
+    assert not scene.entity_selectable(parent)
+    set_display(vp)
+    assert [g.uid for g in vp._placements()] == [parent.uid, child.uid, other.uid]
+    vp.close()
+
+
+def test_filter_leaves_excluded_working_mesh_and_drops_hidden_selection():
+    from PySide6.QtGui import QVector3D
+    from core.agent_facets import set_display
+    from views.viewport import Viewport
+    vp = Viewport()
+    scene, parent, child, other = model()
+    parent.mesh.add_face([QVector3D(0, 0, 0), QVector3D(1, 0, 0), QVector3D(0, 1, 0)])
+    vp.scene = scene
+    vp.history = History(scene)
+    vp.flash_status = lambda *args, **kwargs: None
+    vp.begin_group_edit(parent)
+    assert scene.edit_group is parent
+    assert len(scene.mesh.faces) == 1
+    scene.selection.add(child)
+    before = len(vp.history.undo_stack)
+    set_display(vp, {'facet': 'name', 'eq': 'Track'})
+    assert scene.edit_group is None
+    assert not scene.mesh.faces
+    assert child not in scene.selection
+    assert len(vp.history.undo_stack) == before
+    vp.close()
