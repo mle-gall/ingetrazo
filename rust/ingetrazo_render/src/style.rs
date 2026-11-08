@@ -11,7 +11,7 @@ impl Style {
         let data = [
             [1., 1., 1., 0.],
             [0.62, 0.70, 0.78, 0.],
-            [0.13, 0.17, 0.23, 0.],
+            [0.13, 0.17, 0.23, 1.],
             [0.9, 0.91, 0.92, 1.],
             [0.925, 0.935, 0.945, 2.],
             [0.815, 0.820, 0.815, 0.],
@@ -54,6 +54,13 @@ impl Style {
                     }
                     next[i][..3].copy_from_slice(&rgb);
                 }
+            }
+            if let Some(v) = d.get_item("edge_width")? {
+                let width: f32 = v.extract()?;
+                if !width.is_finite() || !(0.0..=64.0).contains(&width) {
+                    return Err(PyValueError::new_err("edge width must be in [0,64] physical pixels"));
+                }
+                next[2][3] = width;
             }
             if let Some(v) = d.get_item("sky")? {
                 next[3][3] = if v.extract::<bool>()? { 1. } else { 0. };
