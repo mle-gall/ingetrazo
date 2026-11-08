@@ -158,16 +158,19 @@ struct Node {
     prev: usize,
     next: usize,
     steiner: bool,
+    removed: bool,
 }
 
 struct Ring {
     n: Vec<Node>,
+    spatial: bool,
+    sorted_x: Vec<usize>,
 }
 
 impl Ring {
     fn node(&mut self, i: usize, x: f64, y: f64) -> usize {
         let k = self.n.len();
-        self.n.push(Node { i, x, y, prev: k, next: k, steiner: false });
+        self.n.push(Node { i, x, y, prev: k, next: k, steiner: false, removed: false });
         k
     }
     fn insert(&mut self, i: usize, x: f64, y: f64, last: Option<usize>) -> usize {
@@ -182,6 +185,7 @@ impl Ring {
         k
     }
     fn remove(&mut self, k: usize) {
+        self.n[k].removed = true;
         let (p, nx) = (self.n[k].prev, self.n[k].next);
         self.n[nx].prev = p;
         self.n[p].next = nx;
@@ -256,6 +260,24 @@ impl Ring {
         let y0 = py_min3(ay, by, cy);
         let x1 = py_max3(ax, bx, cx);
         let y1 = py_max3(ay, by, cy);
+        if !self.sorted_x.is_empty() {
+            let start = self.sorted_x.partition_point(|&i| self.n[i].x < x0);
+            for &p in &self.sorted_x[start..] {
+                let node = &self.n[p];
+                if node.x > x1 {
+                    break;
+                }
+                if node.removed || p == a || p == b || p == c {
+                    continue;
+                }
+                if y0 <= node.y && node.y <= y1
+                    && point_in_triangle(ax, ay, bx, by, cx, cy, node.x, node.y)
+                    && self.area(node.prev, p, node.next) >= 0.0 {
+                    return false;
+                }
+            }
+            return true;
+        }
         let mut p = self.n[c].next;
         while p != a {
             let (px, py) = (self.n[p].x, self.n[p].y);
@@ -271,6 +293,24 @@ impl Ring {
     }
     fn earcut_linked(&mut self, ear: Option<usize>, tris: &mut Vec<[usize; 3]>, pass: u8) {
         let Some(mut ear) = ear else { return };
+        // The candidate set is rebuilt for each split ring; removals are
+        // filtered in place. Candidate order cannot change the boolean test.
+        self.sorted_x.clear();
+        if self.spatial {
+            let mut p = ear;
+            loop {
+                self.sorted_x.push(p);
+                p = self.n[p].next;
+                if p == ear {
+                    break;
+                }
+            }
+            if self.sorted_x.len() > 80 {
+                self.sorted_x.sort_unstable_by(|&a, &b| self.n[a].x.total_cmp(&self.n[b].x));
+            } else {
+                self.sorted_x.clear();
+            }
+        }
         let mut stop = ear;
         while self.n[ear].prev != self.n[ear].next {
             let prev = self.n[ear].prev;
@@ -566,7 +606,11 @@ fn point_in_triangle(ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64, px: f
 
 /// `core.triangulate.earcut`.
 pub fn earcut(pts: &[(f64, f64)], holes: &[usize]) -> Vec<[usize; 3]> {
-    let mut r = Ring { n: Vec::with_capacity(pts.len() * 2) };
+    earcut_impl(pts, holes, false)
+}
+
+fn earcut_impl(pts: &[(f64, f64)], holes: &[usize], spatial: bool) -> Vec<[usize; 3]> {
+    let mut r = Ring { n: Vec::with_capacity(pts.len() * 2), spatial, sorted_x: Vec::new() };
     let outer_len = if holes.is_empty() { pts.len() } else { holes[0] };
     let idxs: Vec<usize> = (0..outer_len).collect();
     let mut tris = Vec::new();
@@ -645,6 +689,10 @@ pub struct FaceGeom {
 }
 
 fn triangles(pos: &[V3], rings: &[&[u32]], normal: V3, h: Hypot) -> Vec<[u32; 3]> {
+    triangles_impl(pos, rings, normal, h, false)
+}
+
+fn triangles_impl(pos: &[V3], rings: &[&[u32]], normal: V3, h: Hypot, spatial: bool) -> Vec<[u32; 3]> {
     let outer = rings[0];
     let m = outer.len();
     let holes: Vec<&[u32]> = rings[1..].iter().copied().filter(|r| r.len() >= 3).collect();
@@ -672,7 +720,8 @@ fn triangles(pos: &[V3], rings: &[&[u32]], normal: V3, h: Hypot) -> Vec<[u32; 3]
         master.extend_from_slice(hr);
         pts.extend(hr.iter().map(|&i| proj(i)));
     }
-    for t in earcut(&pts, &hole_idx) {
+    let cut = if spatial { earcut_impl(&pts, &hole_idx, true) } else { earcut(&pts, &hole_idx) };
+    for t in cut {
         tris.push([master[t[0]], master[t[1]], master[t[2]]]);
     }
     tris
@@ -714,4 +763,52 @@ pub fn face_geometry(pos: &[V3], rings: &[&[u32]], h: Hypot, compensated: bool) 
         && unit.2.to_bits() == normal.2.to_bits();
     let tris_unit = if same { None } else { Some(triangles(pos, rings, unit, h)) };
     FaceGeom { normal, ln, centroid: Some(centroid), tris, unit, tris_unit }
+}
+
+/// Resident faces need the primary triangulation and its normal, not centroid
+/// or a second triangulation for the legacy textured/unit-normal path.
+pub fn resident_geometry(pos: &[V3], rings: &[&[u32]], h: Hypot) -> (Vec<[u32; 3]>, V3) {
+    let outer = rings[0];
+    let (mut nx, mut ny, mut nz) = (0.0f64, 0.0f64, 0.0f64);
+    for k in 0..outer.len() {
+        let c = pos[outer[k] as usize];
+        let n = pos[outer[(k + 1) % outer.len()] as usize];
+        let (x0, y0, z0) = (c.0 as f64, c.1 as f64, c.2 as f64);
+        let (x1, y1, z1) = (n.0 as f64, n.1 as f64, n.2 as f64);
+        nx += (y0 - y1) * (z0 + z1);
+        ny += (z0 - z1) * (x0 + x1);
+        nz += (x0 - x1) * (y0 + y1);
+    }
+    let raw = V3(nx as f32, ny as f32, nz as f32);
+    let len = length(raw, h);
+    let normal = if len as f64 > 1e-9 { raw.div(len) } else { V3(0., 0., 1.) };
+    let tris = if outer.len() == 3 && rings.len() == 1 {
+        vec![[outer[0], outer[1], outer[2]]]
+    } else {
+        triangles_impl(pos, rings, normal, h, true)
+    };
+    (tris, normalized(normal, h))
+}
+
+#[cfg(test)]
+mod resident_tests {
+    use super::*;
+
+    #[test]
+    fn indexed_ears_preserve_triangle_order_with_concavity_and_holes() {
+        for count in [81, 200, 1000] {
+            let mut points: Vec<_> = (0..count).map(|i| {
+                let angle = i as f64 * std::f64::consts::TAU / count as f64;
+                let radius = if i % 2 == 0 { 10. } else { 7. };
+                (angle.cos()*radius, angle.sin()*radius)
+            }).collect();
+            assert_eq!(earcut_impl(&points, &[], true), earcut(&points, &[]));
+            let mut holes = Vec::new();
+            for x in [-3., 0., 3.] {
+                holes.push(points.len());
+                points.extend([(x-0.5,-0.5),(x-0.5,0.5),(x+0.5,0.5),(x+0.5,-0.5)]);
+            }
+            assert_eq!(earcut_impl(&points, &holes, true), earcut(&points, &holes));
+        }
+    }
 }

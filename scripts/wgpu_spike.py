@@ -82,7 +82,8 @@ def main():
                 return dict(min=min(values), avg=sum(values)/len(values), max=max(values)) if values else None
             print(json.dumps(dict(model=str(args.model), adapter=view.renderer.adapter,
                 load_s=loaded-start, build_s=view.build_seconds, upload_s=view.upload_seconds,
-                first_picture_s=first, gpu_buffer_bytes=view.renderer.gpu_memory,
+                first_picture_s=first, after_load_s=first-(loaded-start),
+                pack_breakdown=getattr(view.packed, 'timings', None), gpu_buffer_bytes=view.renderer.gpu_memory,
                 attachment_bytes=view.width()*view.height()*view.devicePixelRatioF()**2*8,
                 placements=len(view.packed.instances), prototypes=len(view.packed.bounds),
                 visible_placements=int((view.packed.instances["info"][:, 2] == 0).sum()),

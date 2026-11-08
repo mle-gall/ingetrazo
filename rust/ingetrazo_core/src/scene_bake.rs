@@ -77,9 +77,8 @@ fn prepare(
             r += 1;
         }
         if !hidden[f] {
-            let g = facegeom::face_geometry(p, &rings, h, true);
-            let normal = facegeom::normalized(g.normal, h);
-            triangles.extend(g.tris.into_iter().map(|t| (t, normal, colors[f])));
+            let (tris, normal) = facegeom::resident_geometry(p, &rings, h);
+            triangles.extend(tris.into_iter().map(|t| (t, normal, colors[f])));
         }
     }
     let edges = edge_list
@@ -133,6 +132,7 @@ pub fn bake_scene<'py>(
     edges: PyReadonlyArray2<'_, i64>,
     flags: PyReadonlyArray1<'_, u8>,
     offsets: PyReadonlyArray2<'_, i64>,
+    attributes: PyReadonlyArray1<'_, i64>,
     hypot: &str,
 ) -> PyResult<(
     Bound<'py, PyArray1<u8>>,
@@ -152,7 +152,8 @@ pub fn bake_scene<'py>(
     let flags = flags.as_slice()?;
     if p.shape()[1] != 3
         || e.shape()[1] != 2
-        || col.shape() != [f.len(), 4]
+        || col.shape()[1] != 4
+        || attributes.len()? != f.len()
         || hidden.len() != f.len()
         || flags.len() != e.shape()[0]
         || off.shape()[1] != 5
@@ -193,10 +194,19 @@ pub fn bake_scene<'py>(
         .into_iter()
         .map(|r| [r[0] as u32, r[1] as u32])
         .collect();
-    let colors: Vec<_> = col
-        .rows()
-        .into_iter()
-        .map(|r| [r[0], r[1], r[2], r[3]])
+    let attributes = attributes.as_slice()?;
+    if attributes
+        .iter()
+        .any(|&a| a < 0 || a as usize >= col.shape()[0])
+    {
+        return Err(invalid());
+    }
+    let colors: Vec<_> = attributes
+        .iter()
+        .map(|&a| {
+            let r = col.row(a as usize);
+            [r[0], r[1], r[2], r[3]]
+        })
         .collect();
     let h = crate::hypot_of(hypot)?;
     // Borrowed read-only NumPy slices stay alive throughout this synchronous call.
@@ -205,7 +215,7 @@ pub fn bake_scene<'py>(
             .par_windows(2)
             .map(|pair| {
                 let (a, b) = (pair[0], pair[1]);
-                prepare(
+                let result = prepare(
                     &pts[a[0]..b[0]],
                     &corners[a[1]..b[1]],
                     &s[a[2]..b[2]],
@@ -215,7 +225,8 @@ pub fn bake_scene<'py>(
                     &edges[a[4]..b[4]],
                     &flags[a[4]..b[4]],
                     h,
-                )
+                );
+                result
             })
             .collect();
         let total: usize = prepared
