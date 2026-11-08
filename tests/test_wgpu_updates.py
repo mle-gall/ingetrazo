@@ -56,6 +56,7 @@ def test_move_one_row_without_bake(monkeypatch):
 def test_add_shared_instance_and_remove_preserve_ids():
     scene, updates = fixture_scene()
     added = Group(scene.groups[0].mesh)
+    added.xform = QMatrix4x4()
     scene.groups.append(added)
     ids, rows = updates.diff(scene)
     assert ids.tolist() == [2]

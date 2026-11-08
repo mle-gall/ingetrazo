@@ -69,6 +69,7 @@ result['record_update_ms'] = (time.perf_counter()-start)*1000
 result['record_calls'] = dict(renderer.calls)
 renderer.calls.clear()
 added = Group(next(group.mesh for group in view.packed.groups if group is not None))
+added.xform = QMatrix4x4()
 scene.groups.append(added)
 scene.version += 1
 start = time.perf_counter()
