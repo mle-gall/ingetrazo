@@ -39,6 +39,7 @@ register('Project', OBJECT + ' LongName Phase RepresentationContexts UnitsInCont
 for cls in list(ORDERS):
     if cls.startswith('IFC') and 'Tag' in ORDERS[cls]:
         ORDERS[cls + 'TYPE'] = (TYPE + ' PredefinedType').split()
+register('SpaceType SpatialZoneType', TYPE + ' PredefinedType LongName')
 register('DoorType', TYPE + ' PredefinedType OperationType ParameterTakesPrecedence UserDefinedOperationType')
 register('WindowType', TYPE + ' PredefinedType PartitioningType ParameterTakesPrecedence UserDefinedPartitioningType')
 register('ReinforcingBarType', TYPE + ' PredefinedType NominalDiameter CrossSectionArea BarLength BarSurface BendingShapeCode BendingParameters')

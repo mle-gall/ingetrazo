@@ -162,7 +162,7 @@ def test_curated_types_validate(tmp_path, schema):
     scene = Scene()
     types = {}
     for cls in IFC_CLASSES:
-        if role({'class': cls}) == 'spatial':
+        if role({'class': cls}) == 'spatial' and cls not in ('IfcSpace', 'IfcSpatialZone'):
             continue
         group = Group(name=cls)
         group.ifc = {'class': cls, 'type': cls}
