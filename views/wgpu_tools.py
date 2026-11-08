@@ -1,0 +1,155 @@
+"""Native tool dispatch shares measurement and History semantics with GL.
+
+Live placement moves alter resident matrices only; the document is touched
+once, by the same commands used by MoveTool, after the user commits.
+"""
+import numpy as np
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QVector3D
+from core.group import Group, iter_placements
+from core.history import MoveGroupCommand, CompoundCommand
+from tools.base import ToolContext
+from tools.tape import TapeMeasureTool
+from views.wgpu_overlay import Primitive
+
+TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move'}
+
+
+def move_command(groups, delta):
+    commands = [MoveGroupCommand(group, delta) for group in groups]
+    return commands[0] if len(commands) == 1 else CompoundCommand(commands)
+
+
+class NativeTools:
+    def __init__(self, view):
+        self.view = view
+        self.tool = None
+        self.mode = 'select'
+        self.start_point = None
+        self.hover_point = None
+        self.ids = np.empty(0, np.int64)
+        self.original = None
+        self.groups = []
+
+    def sync(self):
+        source = self.view.source_viewport
+        tool = getattr(source, 'active_tool', None)
+        if tool is self.tool:
+            return self.mode
+        self.cancel()
+        self.tool = tool
+        self.mode = TOOL_DISPATCH.get(type(tool).__name__, 'select' if tool is None else 'inert')
+        if self.mode == 'inert':
+            source.flash_status('not yet available on the Metal renderer')
+        return self.mode
+
+    def context(self, event):
+        view = self.view
+        point = (view.last_snap.point if getattr(view, 'last_snap', None) is not None
+                 else view._world_under_cursor(event.position().x(), event.position().y()))
+        if point is None:
+            return None
+        return ToolContext(self, point, event.position(), event.modifiers(), view.last_snap)
+
+    def click(self, event):
+        mode = self.sync()
+        ctx = self.context(event)
+        if ctx is None:
+            return
+        if mode == 'tape':
+            self.tool.on_click(ctx)
+            self.start_point = self.tool.start_point
+            self.measurements()
+        elif mode == 'move':
+            if self.start_point is None:
+                self.groups = [g for g in self.view.scene.selection if isinstance(g, Group)]
+                # A selected parent carries descendants; never move them twice.
+                children = {id(child) for g in self.groups for child, _ in list(iter_placements(g))[1:]}
+                self.groups = [g for g in self.groups if id(g) not in children]
+                if not self.groups:
+                    self.flash_status('Select whole placements to move')
+                    return
+                selected = {g.uid for root in self.groups for g, _ in iter_placements(root)}
+                self.ids = np.asarray([row for uid in selected for row in self.view.uid_rows.get(uid, ())], np.int64)
+                self.original = self.view.packed.instances[self.ids].copy()
+                self.start_point = QVector3D(ctx.world)
+            else:
+                delta = ctx.world - self.start_point
+                self.restore()
+                if delta.lengthSquared() > 1e-18:
+                    self.view.source_viewport.history.execute(move_command(self.groups, delta))
+                    self.view.source_viewport.notify_scene_changed()
+                    self.view.set_scene(self.view.scene)
+                self.start_point = None
+                self.original = None
+        self.view.update()
+
+    def hover(self, event):
+        mode = self.sync()
+        ctx = self.context(event)
+        if ctx is None:
+            return
+        self.hover_point = ctx.world
+        if mode == 'tape':
+            self.tool.on_hover(ctx)
+            self.measurements()
+            lines = self.tool.rubber_band_lines()
+            label = self.tool.value_label()
+        elif mode == 'move' and self.start_point is not None:
+            rows = self.original.copy()
+            rows['world'][:, 3, :3] += np.asarray((ctx.world-self.start_point).toTuple(), np.float32)
+            self.write_rows(rows)
+            lines = [(self.start_point, ctx.world)]
+            from core.units import fmt_len
+            label = (fmt_len((ctx.world-self.start_point).length()), (ctx.world+self.start_point)*.5)
+        else:
+            return
+        for a, b in lines:
+            pa, pb = self.view._world_to_pixel(a), self.view._world_to_pixel(b)
+            if pa is not None and pb is not None:
+                self.view.overlay_primitives.append(Primitive('polyline', (pa, pb)))
+        if label is not None:
+            text, point = label
+            pixel = self.view._world_to_pixel(point)
+            if pixel is not None:
+                self.view.overlay_primitives.append(Primitive('text', (pixel,), text=text))
+
+    def write_rows(self, rows):
+        if self.view.renderer is not None:
+            self.view.renderer.update_instances(self.ids.tolist(), rows.view(np.uint8).reshape(-1))
+        self.view.packed.instances[self.ids] = rows
+
+    def restore(self):
+        if self.original is not None:
+            self.write_rows(self.original)
+
+    def cancel(self):
+        self.restore()
+        if isinstance(self.tool, TapeMeasureTool):
+            self.tool.on_cancel(self)
+        self.original = None
+        self.start_point = None
+        self.view.overlay_primitives = []
+
+    def measurements(self):
+        source = self.view.source_viewport
+        source.measurementChanged.emit(source._measurement_text())
+
+    def flash_status(self, *args):
+        self.view.source_viewport.flash_status(*args)
+
+    def update(self):
+        self.view.update()
+
+    # R2b measures points, not guide creation from GL edge picking.
+    def pick_edge_any(self, x, y):
+        return None
+
+    def pick_guide(self, x, y):
+        return None
+
+    def pick_axis(self, x, y):
+        return None
+
+    def __getattr__(self, name):
+        return getattr(self.view.source_viewport, name)
