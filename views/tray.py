@@ -4368,6 +4368,14 @@ class ScenesPanel(QWidget):
         from core.saved_views import shown_state
         before = shown_state(scene)
         view.apply(scene, self._window.viewport.camera)
+        if getattr(view, 'navigator_view', None) is not None:
+            from core import bim_registry
+            from core.agent_facets import set_display
+            saved = bim_registry.get(scene).get('views', {}).get(view.navigator_view)
+            if saved is not None:
+                set_display(self._window.viewport, saved['filter'], saved.get('color_by'),
+                            isolate=saved.get('isolate', False), key=view.navigator_view)
+
         # A scene that only moves the camera changes nothing the caches
         # keyed on ``scene.version`` hold: bumping it re-synced every edge
         # and profile of the model (120 ms on a 1 M-face building) and

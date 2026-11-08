@@ -23,7 +23,8 @@ class SavedView:
                  fov_deg: float = 45.0, perspective: bool = True,
                  two_point: bool = False, hidden_layers=None, style=None, section=None,
                  georef=None, shadows=None, hidden_objects=None,
-                 hidden_shown=None) -> None:
+                 hidden_shown=None, navigator_view=None) -> None:
+        self.navigator_view = navigator_view
         self.name = name
         self.target = tuple(target)
         self.distance = float(distance)
@@ -80,7 +81,7 @@ class SavedView:
     def capture(cls, name: str, scene, camera) -> "SavedView":
         """Snapshot the live camera and the current layer visibility."""
         t = camera.target
-        return cls(name, target=(t.x(), t.y(), t.z()),
+        return cls(name, navigator_view=getattr(scene, '_navigator_view_key', None), target=(t.x(), t.y(), t.z()),
                    distance=camera.distance, yaw=camera.yaw,
                    pitch=camera.pitch, fov_deg=camera.fov_deg,
                    perspective=camera.perspective,
@@ -186,6 +187,8 @@ class SavedView:
             entry["hidden_objects"] = list(self.hidden_objects)
         if self.hidden_shown is not None:
             entry["hidden_shown"] = dict(self.hidden_shown)
+        if self.navigator_view is not None:
+            entry['navigator_view'] = self.navigator_view
         return entry
 
     @classmethod
@@ -205,7 +208,7 @@ class SavedView:
                    georef=raw.get("georef"),
                    shadows=raw.get("shadows"),
                    hidden_objects=raw.get("hidden_objects"),
-                   hidden_shown=raw.get("hidden_shown"))
+                   hidden_shown=raw.get("hidden_shown"), navigator_view=raw.get("navigator_view"))
 
 
 def apply_shadow_state(scene, raw: dict) -> None:

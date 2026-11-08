@@ -274,6 +274,10 @@ class Scene:
         return self._object_hidden(entity) or self._face_hidden(entity)
 
     def entity_visible(self, entity) -> bool:
+        from core.group import Group
+        allowed = getattr(self, '_navigator_allowed', None)
+        if allowed is not None and isinstance(entity, Group) and entity.uid not in allowed:
+            return False
         # A hidden thing is gone from every consumer that asks this —
         # render, pick, snap, bounds, export — whatever its layer says.
         # The hidden-things view does NOT change that: it draws them as a
@@ -332,6 +336,10 @@ class Scene:
         return False
 
     def entity_selectable(self, entity) -> bool:
+        from core.group import Group
+        allowed = getattr(self, '_navigator_allowed', None)
+        if allowed is not None and isinstance(entity, Group) and entity.uid not in allowed:
+            return False
         if self.similar_hidden(entity):
             return False
         if self._object_hidden(entity) and not self.show_hidden_objects:
