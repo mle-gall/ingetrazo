@@ -324,13 +324,16 @@ def collect_objects(scene, memo: dict | None = None) -> list[dict]:
                 continue
         # Quantities are world-space, and a component's nested placements
         # are part of the object being measured.
-        faces = _tagged_group_faces(g, base)
+        from core.geometry_arrays import world_arrays, quantities
+        geometry = lambda g=g, base=base: world_arrays(g, base)
+        area, _, volume, _, _ = quantities(geometry())
         obj = {
             "key": ("group", id(g)),
             "class": tag.get("class", ""),
             "name": tag.get("name", ""),
-            "area": face_set_area(faces),
-            "volume": face_set_volume(faces),
+            "area": area,
+            "volume": volume,
+            "arrays": geometry,
             "group": g,
         }
         if memo is not None:
@@ -539,6 +542,132 @@ def class_quantities(ifc_class: str, faces):
     return QSET_NAMES.get(ifc_class, "BaseQuantities"), entries, (metrado, unit)
 
 
+def class_quantities_arrays(ifc_class, arrays):
+    """Class quantities from placed rings; no Python geometry is constructed."""
+    import numpy as np
+    from core.geometry_arrays import Arrays, merged, measurements
+    a = arrays if isinstance(arrays, Arrays) else merged(arrays)
+    unit = METRADO_UNIT.get(ifc_class, "m2")
+    data = measurements(a)
+    if data is None:
+        return QSET_NAMES.get(ifc_class, "BaseQuantities"), [], (None, unit)
+    gross, net, normals, volume, closed, starts = data
+    total = float(gross.sum())
+    dx, dy, dz = np.ptp(a.pos[a.corners], axis=0)
+    big = int(np.argmax(gross))
+    ring = int(np.r_[0, np.cumsum(a.ring_counts)[:-1]][big])
+    points = a.pos[a.corners[starts[big]:starts[big] + a.ring_sizes[ring]]]
+    perim = float(np.linalg.norm(points - np.roll(points, -1, axis=0), axis=1).sum())
+    u = np.cross([0., 0., 1.], normals[big])
+    length = np.linalg.norm(u)
+    width_height = (float(np.ptp(points @ (u / length))), float(np.ptp(points[:, 2]))) if length >= 1e-6 else (float(np.ptp(points, axis=0)[:2].max()), float(np.ptp(points[:, 2])))
+    entries: list[tuple[str, str, float]] = []
+
+    def add(kind, name, value):
+        if value is not None and value > 1e-9:
+            entries.append((kind, name, float(value)))
+
+    metrado = None
+    if ifc_class == "IfcWall":
+        side_gross = float(gross[big])
+        side_net = float(net[big])
+        add("length", "Height", dz)
+        if dz > 1e-9:
+            add("length", "Length", side_gross / dz)
+        if side_net > 1e-9 and closed:
+            add("length", "Width", volume / side_net)
+        add("area", "GrossSideArea", side_gross)
+        add("area", "NetSideArea", side_net)
+        add("volume", "GrossVolume", volume)
+        metrado = side_net
+    elif ifc_class == "IfcSlab":
+        gross = float(gross[big])
+        net = float(net[big])
+        add("length", "Perimeter", perim)
+        if net > 1e-9 and closed:
+            add("length", "Width", volume / net)
+        add("area", "GrossArea", gross)
+        add("area", "NetArea", net)
+        add("volume", "GrossVolume", volume)
+        metrado = net
+    elif ifc_class in ("IfcRoof", "IfcStair", "IfcRamp"):
+        up = float(net[(normals[:, 2] if closed else abs(normals[:, 2])) > .2].sum())
+        add("length", "Length", max(dx, dy))
+        add("area", "GrossArea", up)
+        add("volume", "GrossVolume", volume)
+        metrado = up
+    elif ifc_class == "IfcColumn":
+        add("length", "Length", dz)
+        if dz > 1e-9 and closed:
+            add("area", "CrossSectionArea", volume / dz)
+        add("volume", "GrossVolume", volume)
+        metrado = volume
+    elif ifc_class == "IfcBeam":
+        length = max(dx, dy, dz)
+        add("length", "Length", length)
+        if length > 1e-9 and closed:
+            add("area", "CrossSectionArea", volume / length)
+        add("volume", "GrossVolume", volume)
+        metrado = volume
+    elif ifc_class == "IfcFooting":
+        add("length", "Height", dz)
+        add("area", "GrossSurfaceArea", total)
+        add("volume", "GrossVolume", volume)
+        metrado = volume
+    elif ifc_class == "IfcPile":
+        add("length", "Length", dz)
+        add("volume", "GrossVolume", volume)
+        metrado = dz
+    elif ifc_class in ("IfcMember", "IfcRailing"):
+        length = max(dx, dy) if ifc_class == "IfcRailing" else max(dx, dy, dz)
+        add("length", "Length", length)
+        add("volume", "GrossVolume", volume)
+        metrado = length
+    elif ifc_class == "IfcReinforcingBar":
+        # A straight bar (#495): its length is the longest extent, its
+        # diameter the round section that holds its volume, its weight the
+        # steel in it -- reinforcement is billed by the kilo.
+        length = max(dx, dy, dz)
+        add("length", "Length", length)
+        if closed and length > 1e-9:
+            add("length", "NominalDiameter",
+                2.0 * (volume / (math.pi * length)) ** 0.5)
+            add("weight", "Weight", volume * STEEL_DENSITY)
+            metrado = volume * STEEL_DENSITY
+    elif ifc_class == "IfcCovering":
+        net = float(net.sum())
+        add("area", "GrossArea", total)
+        add("area", "NetArea", net)
+        metrado = net
+    elif ifc_class in ("IfcDoor", "IfcWindow"):
+        width, height = width_height
+        add("length", "Width", width)
+        add("length", "Height", height)
+        add("area", "Area", float(net[big]))
+        metrado = 1.0
+    elif ifc_class == "IfcSpace":
+        floor = float(np.max(net[abs(normals[:, 2]) > .7], initial=0))
+        add("length", "Height", dz)
+        add("area", "NetFloorArea", floor)
+        add("volume", "GrossVolume", volume)
+        metrado = floor
+    else:
+        add("area", "GrossArea", total)
+        add("volume", "GrossVolume", volume)
+        metrado = total
+    if metrado is not None and metrado <= 1e-9:
+        metrado = None
+    return QSET_NAMES.get(ifc_class, "BaseQuantities"), entries, (metrado, unit)
+
+
+
+def object_quantities(obj):
+    """Dispatch legacy loose-face objects and array-backed groups."""
+    if "arrays" in obj:
+        return class_quantities_arrays(obj["class"], obj["arrays"]())
+    return class_quantities(obj["class"], obj["faces"])
+
+
 def quantities_csv(scene) -> str:
     """The takeoff table (metrado) as CSV — the pre-IFC bridge to
     IngePresupuestos: model → budget quantities in one export. ``metrado``
@@ -546,10 +675,7 @@ def quantities_csv(scene) -> str:
     door und); area/volume stay as the raw shell numbers."""
     lines = ["class,name,metrado,unit,area_m2,volume_m3"]
     for obj in collect_objects(scene):
-        faces = obj.get("faces")
-        if faces is None:
-            faces = list(obj["group"].mesh.faces)
-        _, _, (metrado, unit) = class_quantities(obj["class"], faces)
+        _, _, (metrado, unit) = object_quantities(obj)
         met = "" if metrado is None else f"{metrado:.4f}"
         vol = "" if obj["volume"] is None else f"{obj['volume']:.4f}"
         name = (obj["name"] or "").replace('"', "'")
