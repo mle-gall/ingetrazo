@@ -407,3 +407,59 @@ Wilson's Windowizer 3 by Bane Andreev, an architect, written with AI help.
 - Plugin manager UI (install, enable, disable, update) — **done**; it uses
   the community catalog without imposing a package format on the extension
   API.
+
+### Command notifications and mutation revisions (API 2)
+
+A document history supports
+`unsubscribe = history.add_listener(before=fn, after=fn)`. Either callback
+is optional. Both receive `fn(command, phase, ran)`: phase is `"execute"`,
+`"undo"` or `"redo"`; before receives `ran=False`, after receives
+`ran=True` on success and False on rejection or failure. Empty undo/redo
+stacks emit nothing. After runs after stack maintenance and dimension
+rebinding, including on failure. Listener exceptions are logged and isolated.
+Callbacks run synchronously, in registration order, on the editing thread.
+A dispatch uses a subscription snapshot; changes to subscriptions take
+effect on the next operation. The returned unsubscribe function is idempotent.
+Callbacks should inspect or invalidate derived data, not recursively execute
+the same command. They do not make their own edits transactional.
+
+From `setup(app)`, use
+`app.add_command_listener(before=fn, after=fn)`. This binds to the current
+document's history. Keep the returned unsubscribe function and rebind when
+`on_document_changed` reveals a different history; unsubscribe on document
+close/unload. Unlike overlays, this subscription does not follow future tabs.
+No universal affected-entity list is promised: commands retain different
+targets, sometimes resolved only while executing. The command object is
+available for domain-specific inspection.
+
+`mesh.revision` is an O(1), monotonically increasing session token. Geometry
+primitives, snapshot restoration, winding commands and attribute dirty
+notifications advance it, including undo/redo. Clearing renderer dirty flags
+does not advance it. Reading a `DeferredMesh.revision` never materializes it.
+Tokens are meaningful only for the same mesh object; replacing a mesh also
+invalidates a cached result. Exact increments are unspecified and can be
+conservative (existing material commands invalidate several group meshes).
+
+For direct writes to element fields, lists or attribute dictionaries, call
+`mesh.mark_modified()` once after the batch. These plain containers do not
+observe individual writes. This applies to winding, vertex positions, edge
+flags and nested attribute values. Prefer mesh methods for topology so their
+connectivity invariants remain intact. Bulk import methods publish at their
+existing batch boundaries, without new work per vertex or face.
+
+`scene.revision` is a monotonic observed document token. It combines the
+existing content version with mesh tokens, tree membership/order, group
+placement/metadata and layer values. Reading it walks placements and metadata,
+never mesh elements, and never builds lazy geometry. Selection-only changes
+do not advance it. Direct group edits are detected on the next read; multiple
+edits between reads may coalesce. Commands must still bump `scene.version`
+so an edit and its undo between observations cannot disappear. Revision
+tokens and the command journal are runtime data, not document file fields.
+
+For example, an extension owning a parametric or intent record can remember
+`(group.mesh, group.mesh.revision)` after its own rebuild. In an after callback
+with `ran=True`, compare that pair to the current mesh and mark the record
+stale if it changed outside the extension's rebuild. Use a rebuild guard and
+update the remembered pair when the rebuild finishes; compare
+`scene.revision` too if placement, tags or child membership are inputs.
+Do not save these tokens as the intent's persistent identity.

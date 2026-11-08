@@ -21,7 +21,8 @@ from __future__ import annotations
 import os as _os
 import time as _time_mod
 from abc import ABC, abstractmethod
-from collections import Counter
+from collections import Counter, deque
+import logging
 from pathlib import Path as _Path
 from typing import Iterable, Optional
 
@@ -174,6 +175,9 @@ class History:
 
     def __init__(self, scene) -> None:
         self.scene = scene
+        self._listeners = []
+        self.revision = 0
+        self._changes = deque(maxlen=256)
         self.undo_stack: list[Command] = []
         self.redo_stack: list[Command] = []
         #: Message describing the last rolled-back failure (UI may flash it).
@@ -200,6 +204,69 @@ class History:
         #: takeoff that found nothing tagged still finds nothing — a Move
         #: on the plant of #158 need not walk its 21 406 groups for tags.
         self.tags_cv = None
+
+    def add_listener(self, *, before=None, after=None):
+        """Subscribe callback(command, phase, ran); return an unsubscribe function.
+
+        Phase is execute, undo or redo. Before receives ran=False; after
+        receives True only on success. Callbacks run in registration order.
+        """
+        entry = (before, after)
+        self._listeners.append(entry)
+
+        def unsubscribe():
+            for i, item in enumerate(self._listeners):
+                if item is entry:
+                    del self._listeners[i]
+                    break
+        return unsubscribe
+
+    def _notify(self, listeners, index, cmd, phase, ran):
+        for entry in listeners:
+            fn = entry[index]
+            if fn is not None:
+                try:
+                    fn(cmd, phase, ran)
+                except Exception:
+                    logging.getLogger("ingetrazo.history").exception(
+                        "Command listener failed (%s)", phase)
+
+    def changes_since(self, revision=0):
+        """Bounded command journal; not a geometric diff or a persisted log."""
+        if type(revision) is not int or revision < 0 or revision > self.revision:
+            raise ValueError("revision must be between zero and the current revision")
+        floor = self._changes[0]["revision"] - 1 if self._changes else self.revision
+        return {"revision": self.revision, "complete": revision >= floor,
+                "changes": [dict(c) for c in self._changes if c["revision"] > revision]}
+
+    def _run(self, cmd, phase, operation):
+        listeners = tuple(self._listeners)
+        self._notify(listeners, 0, cmd, phase, False)
+        ran = False
+        try:
+            result = operation()
+            ran = (not self.last_error and not self.last_rejected
+                   if phase == "execute" else bool(result))
+            if ran:
+                self.revision += 1
+                self._changes.append({"revision": self.revision, "phase": phase,
+                                      "command": type(cmd).__name__})
+            return result
+        finally:
+            self._notify(listeners, 1, cmd, phase, ran)
+
+    def execute(self, cmd: Command) -> None:
+        return self._run(cmd, "execute", lambda: self._execute(cmd))
+
+    def undo(self) -> bool:
+        if not self.undo_stack:
+            return False
+        return self._run(self.undo_stack[-1], "undo", self._undo)
+
+    def redo(self) -> bool:
+        if not self.redo_stack:
+            return False
+        return self._run(self.redo_stack[-1], "redo", self._redo)
 
     def _keep_paint_cv(self, cmd, before) -> None:
         if before is None:
@@ -236,7 +303,7 @@ class History:
             if self.groups_cv.get(k) == before:
                 self.groups_cv[k] = cv
 
-    def execute(self, cmd: Command) -> None:
+    def _execute(self, cmd: Command) -> None:
         _t0 = _time_mod.perf_counter() if _PERF else 0.0
         snapshot = self.scene.mesh.capture_state()
         if _PERF:
@@ -312,7 +379,7 @@ class History:
         except OSError:
             pass
 
-    def undo(self) -> bool:
+    def _undo(self) -> bool:
         if not self.undo_stack:
             return False
         cmd = self.undo_stack.pop()
@@ -323,7 +390,7 @@ class History:
         self._rebind_dimensions()
         return True
 
-    def redo(self) -> bool:
+    def _redo(self) -> bool:
         if not self.redo_stack:
             return False
         cmd = self.redo_stack.pop()
@@ -425,6 +492,8 @@ class AddEdgeCommand(Command):
             # The mesh already has this edge — merged no-op. Own nothing, so
             # ``self.edge`` stays None and undo leaves the pre-existing edge.
             self._stamp(pre)
+            if self.soft is not None or self.curve is not None or self.layer is not None:
+                m.mark_modified()
             scene.version += 1
             return
         self.edge = m.add_edge(self.a, self.b)
@@ -909,6 +978,7 @@ def _dirty_group_chunks(scene) -> None:
     parent, and walking scene.groups as a flat list never reached them.
     """
     from core.group import iter_placements
+    scene.mesh.mark_modified()
     for g in getattr(scene, "groups", []):
         for pg, _m in iter_placements(g):
             pg.mesh._chunk_dirty = True
@@ -2371,10 +2441,14 @@ class AutoTagDrawnFacesCommand(Command):
         tag = dict(self._tag)
         tag["id"] = next_object_id(scene)
         live = scene.mesh.faces
+        changed = False
         for fc in self._face_cmds:
             f = getattr(fc, "face", None)
             if f is not None and f in live and not f.attrs.get("ifc"):
                 f.attrs["ifc"] = dict(tag)
+                changed = True
+        if changed:
+            scene.mesh.mark_modified()
 
     def undo(self, scene) -> None:
         pass

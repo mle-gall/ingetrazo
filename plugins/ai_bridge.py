@@ -304,6 +304,10 @@ class _Bridge(QObject):
             matched += 1
         return {"groups": rows, "next_offset": None, "version": scene.version}
 
+    def _tool_query_changes(self, since_revision: int = 0) -> dict:
+        """Read the current document's bounded command journal."""
+        return self._viewport.history.changes_since(since_revision)
+
     def _tool_query_status(self, name: str) -> dict:
         """Read JSON status published in run_python's persistent scope.
 

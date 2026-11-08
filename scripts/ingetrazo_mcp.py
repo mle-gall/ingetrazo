@@ -102,6 +102,14 @@ TOOLS = [
             "limit": {"type": "integer", "minimum": 1, "maximum": 1000}}},
     },
     {
+        "name": "query_changes",
+        "description": ("Read commands since a history revision, including undo/redo. "
+                        "complete=false means older entries expired. Tokens are "
+                        "per document history, not mesh or scene revisions."),
+        "inputSchema": {"type": "object", "properties": {
+            "since_revision": {"type": "integer", "minimum": 0, "default": 0}}},
+    },
+    {
         "name": "query_status",
         "description": ("Read a JSON status variable published in run_python's "
                         "persistent scope. No Python execution, undo snapshot "

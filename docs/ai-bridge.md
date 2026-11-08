@@ -163,3 +163,28 @@ alto total 2,30") — una foto no trae dimensiones, y lo que el asistente
 estime del ojo lo declara como supuesto para que lo corrijas. La foto se
 reescala a 1280 px y viaja como JPEG solo en ese mensaje. Necesita un
 proveedor con visión (Anthropic, OpenAI, Gemini, OpenRouter).
+
+### Command changes since a revision
+
+`query_changes(since_revision=0)` is read-only. It returns:
+
+```json
+{"revision": 12, "complete": true,
+ "changes": [{"revision": 12, "phase": "undo", "command": "FlipFacesCommand"}]}
+```
+
+The token belongs to the current document's **History**, independently of
+`scene.version`, `scene.revision` and `mesh.revision`. Start from zero after
+New/Open or switching documents; pass the last returned revision to poll.
+The last 256 successful execute/undo/redo operations are retained. If older
+entries expired, `complete=false` means a full model refresh is required.
+Clearing undo stacks does not rewind this token. Invalid/future revisions are
+rejected. Failures, rejected commands, and writes outside History are not
+journal entries. Entries name command classes, not geometric diffs or a
+complete affected-entity set. No snapshots, redraws or geometry builds occur.
+
+An agent maintaining a parametric or intent record can use this journal to
+decide when to recheck its inputs, then compare a group's mesh identity and
+`mesh.revision` to mark the record stale after external edits. Its own rebuild
+should update the remembered token. Direct element edits must call
+`mesh.mark_modified()` once per batch (see the plugin documentation).

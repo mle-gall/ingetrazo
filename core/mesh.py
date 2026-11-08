@@ -335,6 +335,36 @@ class Mesh:
         self.edges: list[Edge] = []
         self.faces: list[Face] = []
 
+    @property
+    def revision(self) -> int:
+        """Session-local change token; reading never builds a deferred mesh."""
+        return self.__dict__.get("_revision", 0) + self._mut_serial
+
+    @property
+    def _chunk_dirty(self):
+        return self.__dict__.get("_chunk_dirty_value", True)
+
+    @_chunk_dirty.setter
+    def _chunk_dirty(self, value):
+        self.__dict__["_chunk_dirty_value"] = value
+        if value:
+            self.__dict__["_revision"] = self.__dict__.get("_revision", 0) + 1
+
+    @property
+    def _attrs_dirty(self):
+        return self.__dict__.get("_attrs_dirty_value", False)
+
+    @_attrs_dirty.setter
+    def _attrs_dirty(self, value):
+        self.__dict__["_attrs_dirty_value"] = value
+        if value:
+            self.__dict__["_revision"] = self.__dict__.get("_revision", 0) + 1
+
+    def mark_modified(self) -> None:
+        """Publish a batch of direct element edits, including attributes."""
+        self._chunk_dirty = True
+        self._attrs_dirty = True
+
     # ---- Vertices -----------------------------------------------------------
     def _lookup(self, position: QVector3D) -> Optional[Vertex]:
         """The registered vertex within weld tolerance of ``position``, or

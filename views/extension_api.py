@@ -112,6 +112,14 @@ class ExtensionApp:
         return restored
 
     # ---- Document data -----------------------------------------------------
+    def add_command_listener(self, *, before=None, after=None):
+        """Listen to the current document's History; returns unsubscribe.
+
+        The subscription belongs to this history, not whichever tab is active
+        later. Subscribe separately when handling a document switch.
+        """
+        return self.viewport.history.add_listener(before=before, after=after)
+
     def document_data(self, default=None):
         """This extension's value in the open document (a copy: change it
         with :meth:`set_document_data`, never in place)."""
