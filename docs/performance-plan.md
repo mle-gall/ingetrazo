@@ -668,3 +668,121 @@ Final bounded suite (one invocation): **22 failed, 7099 passed, 138 skipped, 2 x
 The 19 baseline failures are unchanged; the three additional socket
 failures and their 4/4 passing focused recheck are described above.
 Exact test IDs and counts: [tests.json](benchmarks/wgpu-r1-2026-11-08/tests.json).
+
+## R1b — 2026-11-08: whole-scene resident geometry
+
+The ride build now meets both requested targets on the Apple M1 Max (Metal,
+10 CPU cores). The supplied pre-change cProfile measured 50 s packing;
+the final-code native-window measurement is 1.790 s packing
+and 2.126 s from load completion to first picture. Including the 7.946 s file
+load, the first picture was 10.072 s. These are single-run wall measurements,
+not statistical distributions. Input files were read only.
+
+| Ride phase | Before (supplied profile) | R1b native-window run |
+|---|---:|---:|
+| Full scene packing | 50 s | 1.790 s |
+| Native face baking | 28.7 s / 19,014 calls | 0.999 s / one whole-scene call |
+| Plan construction | 7.8 s | 0; never requested |
+| Python handoff, including placement traversal | included above | 0.685 s |
+| Instance/bounds finishing | included above | 0.041 s |
+| Device setup and upload | 0.3 s | 0.215 s |
+| First picture after load | not supplied | 2.126 s |
+| Peak process RSS including upload/orbit | not supplied | 4,629,561,344 bytes |
+
+The native-call timing includes input validation/conversion, parallel
+triangulation and final-buffer filling. Handoff and finishing do not include
+Python local-array teardown (about 0.065 s in this run). The packed inventory
+is 76,029 placements, 15,906 prototypes and 8,484,592 triangles.
+
+Implementation:
+
+- One native call consumes concatenated source arrays, per-mesh offsets,
+  face attribute indices and a palette. Built meshes use `arrays_of` once.
+- No deferred materialisation or Plan construction. Source edge flags and
+  missing face-boundary edges are handled in Rust without position welding.
+- Rayon schedules prototypes; the count pass retains triangle indices and
+  normals. Final packed buffers are filled through disjoint slices, without
+  concatenation, and transferred to NumPy through `PyArray1::from_vec`.
+- Paint caches use layer and material value signatures; visibility caches use
+  layer/hidden state. Edit and navigator filters retain identity-aware checks.
+- Profiling revealed a further bottleneck: large concave polygons spent most
+  native time scanning every remaining vertex for each ear. An x-sorted
+  candidate index bounds these checks in the resident path while preserving
+  exact ear choices and triangle order. The ordinary GL path remains unindexed.
+- No dependencies were added. The existing NumPy/PyO3/Rayon versions suffice.
+
+Raw native-window reports are in `benchmarks/wgpu-r1b-2026-11-08/`.
+Each GUI process is externally bounded with `subprocess.run(..., timeout=240)`;
+measurements use the default 16 ms orbit timer and edges enabled.
+
+A second ride run with the RSS-at-build instrumentation, concurrently with
+validation/profiling work, measured 2.261 s packing (0.728 s handoff,
+1.389 s native, 0.048 s finishing), 0.445 s device/upload, and 2.836 s to
+first picture after load. Peak process RSS at build completion was
+**3,488,202,752 bytes**. Both ride runs meet the <4 s packing and <10 s
+post-load first-picture targets. The latter is explicitly a post-load target;
+the second run took 10.919 s including file loading.
+
+Track is a materially different case: inventory found 4,248 meshes, only **2
+deferred**, with 4,227 nonempty resident prototypes and 19,622 placements.
+Its 3,445,443 triangles must mostly be extracted from existing Python objects.
+
+| Track phase | Local R1 packer | R1b |
+|---|---:|---:|
+| Load | 26.224 s | 24.081 s |
+| Pack | 18.901 s | 12.870 s |
+| Python handoff | not separately instrumented | 12.465 s |
+| Native call | not separately instrumented | 0.380 s |
+| Finish | not separately instrumented | 0.012 s |
+| Device/upload | 0.071 s | 0.160 s |
+| First picture after load | 19.084 s | 13.159 s |
+| First picture including load | 45.307 s | 37.240 s |
+| Peak RSS at build completion | not instrumented | 6,024,921,088 bytes |
+
+Track improves from 18.90 to 12.87 s, but does **not** reach the ride target;
+its Python extraction remains the limiting work. Profiling led to remapping
+built vertices once instead of once per corner, and replacing 2.15 million
+per-face NumPy color conversions with one palette operation per mesh. These
+local runs overlapped validation work and are not isolated distributions. The raw
+reports are retained. Track's resident triangle count matches R1; buffer size
+is 369,601,176 versus 370,105,560 bytes because source edge identity is no
+longer reconstructed through a welded Plan. Distinct coincident source points
+are intentionally retained; welding parity on such inputs is not claimed.
+
+Build and focused validation (worktree-local Python 3.13 environment):
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_core/Cargo.toml
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_scene.py tests/test_face_geometry_native.py
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'
+```
+
+Both release builds succeeded. Rust: 4 core tests and 4 renderer tests passed
+(0 renderer doctests). Focused Python: 21 passed. After each built-mesh remap/palette
+adjustment, the 14 scene-packing tests passed again. Rust tests include exact
+indexed/unindexed ear-order comparisons on 81/200/1000-corner concave polygons
+with and without holes; Python tests cover reference face bytes/colors,
+prototype offsets, hidden/soft edges, mixed deferred/built meshes, one native
+call, no Plan/materialisation, and placement visibility/paint parity.
+
+The final-code ride recheck after the built-mesh palette change measured
+**1.790 s pack**, split into 0.685 s Python handoff, 0.999 s native call,
+0.041 s finishing and approximately 0.065 s local-array teardown. Device
+setup/upload took 0.215 s; the first picture was **2.126 s after load**
+(10.072 s including 7.946 s loading). Peak RSS at build completion was
+**3,766,779,904 bytes**. See `ride-final-code.txt` for the complete report.
+
+The requested bounded full suite was run **once**, in six batches:
+**7,105 passed, 19 failed, 138 skipped, 2 xfailed, 805 deselected**, 56 warnings,
+1,264 s. All 19 failures match the supplied baseline: 14 translation cases
+(including Arabic), cursor pick, extension preview wrapping, hidden panels,
+swatch tooltip and toolbar bold text. There were no additional failures.
+The batch totals and failure names are in `validation.txt`. The later small
+built-mesh remap/palette adjustments were also checked with the focused
+14-test packing suite while the full run was in progress. No GL viewport
+behavior or expected baseline tests were changed.

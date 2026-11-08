@@ -1,0 +1,55 @@
+loaded 7.946013999986462
+{
+  "model": "/Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz",
+  "adapter": "AdapterInfo { name: \"Apple M1 Max\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }; multi_draw=true",
+  "load_s": 7.946013999986462,
+  "build_s": 1.7900514589855447,
+  "upload_s": 0.21500212501268834,
+  "first_picture_s": 10.072307790978812,
+  "after_load_s": 2.1262937909923494,
+  "pack_breakdown": {
+    "handoff": 0.6852366669336334,
+    "native": 0.9991560829803348,
+    "finish": 0.04121091705746949,
+    "peak_build_rss_bytes": 3766779904
+  },
+  "gpu_buffer_bytes": 1021243668,
+  "attachment_bytes": 21536000.0,
+  "placements": 76029,
+  "prototypes": 15906,
+  "visible_placements": 69116,
+  "triangles": 8484592,
+  "edges": true,
+  "samples": 1,
+  "interval_ms": 16,
+  "startup_cpu_s": 15.197595,
+  "peak_rss_bytes": 4629561344,
+  "acquire_ms": {
+    "min": 0.019083,
+    "avg": 0.528946258649094,
+    "max": 258.689292
+  },
+  "frames": 607,
+  "cpu_ms": {
+    "min": 1.7817079999999998,
+    "avg": 2.588883583196046,
+    "max": 265.90500000000003
+  },
+  "gpu_ms": {
+    "min": 10.46475,
+    "avg": 12.239444008517887,
+    "max": 31.555917
+  },
+  "wall_ms": {
+    "min": 1.8865830497816205,
+    "avg": 2.7224042969165123,
+    "max": 266.19179104454815
+  },
+  "pick_ms": 11.634916998445988,
+  "picked": 63969,
+  "logical_size": [
+    1000,
+    673
+  ],
+  "scale": 2.0
+}

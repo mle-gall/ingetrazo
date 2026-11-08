@@ -1,0 +1,26 @@
+FAILED tests/test_panel_refresh_deferred.py::test_hidden_panels_let_the_previous_document_go
+FAILED tests/test_style_editor.py::test_a_swatch_tooltip_keeps_the_tooltip_colours
+FAILED tests/test_tooltips_wrap.py::test_an_extensions_toolbar_added_after_start_up_shows_names_in_bold
+batch 1/6: 3 failed, 1120 passed, 24 skipped, 35 warnings in 179.09s (0:02:59)
+batch 2/6: 1088 passed, 38 skipped, 1 deselected, 2 xfailed in 155.83s (0:02:35)
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[ar]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[de]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[id]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[it]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[ja]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[ko]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[lo]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[pl]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[pt-BR]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[ru]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[th]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[uk]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[vi]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[zh-CN]
+batch 3/6: 14 failed, 1472 passed, 10 skipped, 802 deselected, 2 warnings in 158.70s (0:02:38)
+FAILED tests/test_dimensions.py::test_world_under_cursor_uses_cached_pick - A...
+FAILED tests/test_extension_manager.py::test_long_author_tags_and_license_wrap_within_preview_width
+batch 4/6: 2 failed, 1251 passed, 20 skipped, 1 deselected, 3 warnings in 278.02s (0:04:38)
+batch 5/6: 1187 passed, 22 skipped, 12 warnings in 284.69s (0:04:44)
+batch 6/6: 987 passed, 24 skipped, 1 deselected, 4 warnings in 200.98s (0:03:20)
+19 failed, 7105 passed, 138 skipped, 2 xfailed, 805 deselected, 56 warnings in 1264s (6 batches)
