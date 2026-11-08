@@ -142,6 +142,13 @@ def test_dock_missing_values_and_or_choices():
     dock.checked = {'name': {'Launch', 'Pier 1'}}
     dock.refilter()
     assert dock.result_uids == [parent.uid, child.uid]
+    dock.isolate()
+    dock.show_all()
+    assert dock.result_uids == [parent.uid, child.uid, other.uid]
+    assert window.viewport.view_filter is None
+    dock.previous_view()
+    assert dock.result_uids == [parent.uid, child.uid]
+    assert window.viewport.view_filter == {parent.uid, child.uid}
     dock.close()
     window.close()
 

@@ -37,7 +37,7 @@ class NavigatorDock(QDockWidget, FacetTools):
         row.addWidget(self.views)
         layout.addLayout(row)
         self.button(row, 'Save view…', self.save_view)
-        self.button(row, 'Previous view', lambda: previous_display(self._viewport))
+        self.button(row, 'Previous view', self.previous_view)
         self.color = QComboBox()
         self.color.addItem('Colour by…', None)
         layout.addWidget(self.color)
@@ -284,6 +284,24 @@ class NavigatorDock(QDockWidget, FacetTools):
 
     def show_all(self):
         set_display(self._viewport)
+        self.sync_filter_controls()
+
+    def previous_view(self):
+        if not getattr(self._viewport, '_previous_views', []):
+            return
+        previous_display(self._viewport)
+        self.sync_filter_controls()
+
+    def sync_filter_controls(self):
+        """A restored display must show the same scope in the result list."""
+        self._busy = True
+        self._base_filter = getattr(self._viewport, '_view_expression', None)
+        self.checked.clear()
+        self.search.clear()
+        self.color.setCurrentIndex(max(0, self.color.findData(getattr(self._viewport, '_view_color', None))))
+        self.views.setCurrentIndex(max(0, self.views.findData(getattr(self._viewport, 'active_view_key', None))))
+        self._busy = False
+        self.refilter()
 
     def save_view(self):
         key, ok = QInputDialog.getText(self, 'Save view', 'View key / name')
