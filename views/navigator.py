@@ -128,7 +128,7 @@ class NavigatorDock(QDockWidget, FacetTools):
                 for j in range(parent.childCount()):
                     child = parent.child(j)
                     uid = child.data(0, Qt.UserRole)
-                    child.setSelected(uid in self.index.groups and id(self.index.groups[uid]) in selection)
+                    child.setSelected(isinstance(uid, str) and uid in self.index.groups and id(self.index.groups[uid]) in selection)
             self._busy = False
 
     def facet_names(self):
@@ -234,12 +234,17 @@ class NavigatorDock(QDockWidget, FacetTools):
     def expand(self, item):
         if item.childCount():
             return
-        for uid in item.data(0, Qt.UserRole) or []:
+        uids = item.data(0, Qt.UserRole) or []
+        for uid in uids[:500]:
             row = self.index[uid]
             kinds = ', '.join(str(v) for k, vs in row.items() if k.startswith('kind:') for v in vs)
             child = QTreeWidgetItem(item, [str(row['name'] or ''), str(row['class'] or ''), kinds,
                                           str(row['tag'] or ''), str(row['storey'] or '')])
             child.setData(0, Qt.UserRole, uid)
+        if len(uids) > 500:
+            more = QTreeWidgetItem(item, [f'More placements… ({len(uids) - 500})'])
+            more.setData(0, Qt.UserRole, uids[500:])
+            more.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
 
     def select_rows(self):
         if self._busy:
