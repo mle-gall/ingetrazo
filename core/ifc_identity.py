@@ -34,15 +34,26 @@ def object_guid(scene, obj):
         return result
     owner = obj.get("owner")
     # Shared definitions cannot store a placement's GUID on their faces.
-    faces = ([f for f in owner.mesh.faces
-              if f.attrs.get("ifc", {}).get("id") == obj["tag_id"]]
-             if owner is not None else obj["faces"])
-    guid = next((f.attrs["ifc"]["guid"] for f in faces
-                 if f.attrs["ifc"].get("guid")), None)
+    if owner is not None:
+        from core.mesh import DeferredMesh
+        if type(owner.mesh) is DeferredMesh:
+            # Persist into the deferred document metadata, so both building
+            # and saving later see the identity without building faces now.
+            src = owner.mesh.__dict__["_deferred_source"]
+            table = src["meta"].get("face_attrs") or []
+            attributes = [table[i] for i in dict.fromkeys(src["face_attr"]) if i >= 0]
+        else:
+            attributes = [f.attrs for f in owner.mesh.faces]
+        attributes = [a for a in attributes
+                      if a.get("ifc", {}).get("id") == obj["tag_id"]]
+    else:
+        attributes = [f.attrs for f in obj["faces"]]
+    guid = next((a["ifc"]["guid"] for a in attributes
+                 if a["ifc"].get("guid")), None)
     guid = guid or compressed_guid(uuid.uuid4())
-    for face in faces:
-        if face.attrs["ifc"].get("guid") != guid:
-            face.attrs["ifc"] = {**face.attrs["ifc"], "guid": guid}
+    for attrs in attributes:
+        if attrs["ifc"].get("guid") != guid:
+            attrs["ifc"] = {**attrs["ifc"], "guid": guid}
             scene.version += 1
     if owner is not None:
         return stable_guid(scene.plugin_data["ifc_identity"]["namespace"],

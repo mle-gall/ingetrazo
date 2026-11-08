@@ -241,7 +241,7 @@ def _moved_faces(faces, m) -> list:
 
 
 def _face_tags_in(mesh, memo, seen) -> dict:
-    """``{id: (tag, faces)}`` of the tagged faces of a group's ``mesh``.
+    """``{id: (tag, indices)}`` of the tagged faces of a group's ``mesh``.
     With a ``memo``, a mesh known to hold none is not scanned again until
     it or a tag changes — the takeoff refreshes on every edit."""
     key = None
@@ -253,10 +253,11 @@ def _face_tags_in(mesh, memo, seen) -> dict:
             return {}
     by_id: dict = {}
     if _holds_face_tags(mesh):
-        for f in mesh.faces:
-            tag = f.attrs.get("ifc")
+        from core.geometry_arrays import face_attributes
+        for index, attrs in enumerate(face_attributes(mesh)):
+            tag = attrs.get("ifc")
             if tag:
-                by_id.setdefault(tag.get("id"), (tag, []))[1].append(f)
+                by_id.setdefault(tag.get("id"), (tag, []))[1].append(index)
     if key is not None and not by_id:
         memo[key] = True
     return by_id
@@ -264,10 +265,10 @@ def _face_tags_in(mesh, memo, seen) -> dict:
 
 def collect_objects(scene, memo: dict | None = None) -> list[dict]:
     """Every tagged BIM object in the document, with live quantities:
-    ``{"key", "class", "name", "area", "volume" (or None), "faces" | "group"}``.
+    ``{"key", "class", "name", "area", "volume" (or None), "faces" | "arrays"}``.
     Loose-face objects group by tag id; each tagged group is one object, at
     any depth of the tree. Tagged faces inside a group's mesh are one
-    object per group and tag id: ``"faces"`` (world space) plus ``"owner"``
+    object per group and tag id: ``"arrays"`` (world space) plus ``"owner"``
     (the group) and ``"tag_id"`` — a tagged group's own mesh is that group's
     object, its face tags are not read twice.
 
@@ -301,17 +302,20 @@ def collect_objects(scene, memo: dict | None = None) -> list[dict]:
             if not found:
                 continue            # most groups: no matrix to compose
             m = _compose(base, getattr(g, "xform", None))
-            for obj_id, (ftag, faces) in sorted(
+            from core.geometry_arrays import selected_arrays, quantities, face_attributes
+            attributes = face_attributes(g.mesh)
+            for obj_id, (ftag, indices) in sorted(
                     found.items(), key=lambda kv: kv[0] or 0):
-                if m is not None:
-                    faces = _moved_faces(faces, m)
+                arrays = selected_arrays(g.mesh, indices, m)
+                area, _, volume, _, _ = quantities(arrays)
                 out.append({
                     "key": ("group-faces", id(g), obj_id),
                     "class": ftag.get("class", ""),
                     "name": ftag.get("name", ""),
-                    "area": face_set_area(faces),
-                    "volume": face_set_volume(faces),
-                    "faces": faces,
+                    "area": area,
+                    "volume": volume,
+                    "arrays": lambda arrays=arrays: arrays,
+                    "attributes": [attributes[i] for i in indices],
                     "owner": g,
                     "tag_id": obj_id,
                 })

@@ -115,7 +115,7 @@ def test_export_readback(tmp_path, schema, geometry, closed):
     save_ifc(scene, path, profile='test')
     model = ifcopenshell.open(str(path))
     logger = ifcopenshell.validate.json_logger()
-    ifcopenshell.validate.validate(model, logger)
+    ifcopenshell.validate.validate(model, logger, express_rules=True)
     assert not logger.statements
     if geometry == 'polygonal':
         item, = model.by_type('IfcPolygonalFaceSet')
@@ -195,3 +195,40 @@ def test_untagged_loose_mesh_stays_deferred(tmp_path, monkeypatch):
     assert '_deferred' in loaded.loose_mesh.__dict__
     assert collect_objects(loaded) == []
     assert '_deferred' in loaded.loose_mesh.__dict__
+
+
+def test_deferred_face_tags_inside_group_and_identity(tmp_path, monkeypatch):
+    from formats import igz
+    from formats.ifc import save_ifc
+    import ifcopenshell
+    import core._native as native
+    monkeypatch.setattr(igz, '_LARGE_DOCUMENT', 0)
+    monkeypatch.setattr(igz, '_BULK_MIN', 1)
+    monkeypatch.setattr(native, 'wanted', lambda: True)
+    scene = Scene()
+    g = cube()
+    g.ifc = None
+    tag_faces(g.mesh.faces, 'IfcWall', 'Face-tagged cube', 1)
+    g.xform = QMatrix4x4()
+    g.xform.translate(3, 4, 5)
+    scene.groups.append(g)
+    path = tmp_path / 'tags.igz'
+    igz.save_scene(scene, path)
+    loaded = Scene()
+    igz.load_into(loaded, path)
+    mesh = loaded.groups[0].mesh
+    obj, = collect_objects(loaded)
+    assert 'faces' not in obj
+    assert obj['volume'] == pytest.approx(1)
+    assert obj['arrays']().pos[:, 0].min() == 3
+    assert '_deferred' in mesh.__dict__
+    out = tmp_path / 'tags.ifc'
+    save_ifc(loaded, out)
+    guid = ifcopenshell.open(str(out)).by_type('IfcWall')[0].GlobalId
+    assert '_deferred' in mesh.__dict__
+    igz.save_scene(loaded, path)
+    reloaded = Scene()
+    igz.load_into(reloaded, path)
+    save_ifc(reloaded, out)
+    assert ifcopenshell.open(str(out)).by_type('IfcWall')[0].GlobalId == guid
+    assert '_deferred' in reloaded.groups[0].mesh.__dict__

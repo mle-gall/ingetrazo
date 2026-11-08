@@ -154,3 +154,19 @@ def recorded_arrays(faces):
     pos = np.asarray([p for loop in rings for p in loop], dtype=float).reshape(-1, 3)
     counts = np.asarray([1 + len(face.get('holes', [])) for face in faces], dtype=np.int64)
     return merged([Arrays(pos, np.arange(len(pos)), sizes, counts)])
+
+
+def selected_arrays(mesh, indices, matrix=None):
+    """World geometry of a face-tagged subset inside a placed definition."""
+    a = arrays_of(mesh)
+    mask = np.zeros(len(a.ring_counts), dtype=bool)
+    mask[indices] = True
+    rings = np.repeat(mask, a.ring_counts)
+    corners = np.repeat(rings, a.ring_sizes)
+    pos = a.pos
+    if matrix is not None:
+        from core.group import np_affine
+        rot, trans = np_affine(matrix)
+        pos = (pos @ rot.T + trans).astype(np.float32).astype(float)
+    return merged([Arrays(pos, a.corners[corners], a.ring_sizes[rings],
+                          a.ring_counts[mask])])

@@ -214,6 +214,10 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
             attributes = [attrs for placed, _ in iter_placements(_untagged_part(group, excluded))
                           for attrs in face_attributes(placed.mesh)]
             faces = []
+        elif 'arrays' in obj:
+            arrays = obj['arrays']()
+            attributes = obj['attributes']
+            faces = []
         else:
             faces = obj['faces']
             arrays = faces_arrays(faces)
@@ -243,7 +247,7 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
             from PySide6.QtGui import QVector3D
             matrix = _compose(bases[id(group)], group.xform) if group is not None else None
             attrs['Elevation'] = _f(matrix.map(QVector3D()).z() if matrix is not None else 0)
-        qname, qentries, _ = class_quantities_arrays(original, arrays) if group is not None else class_quantities(original, faces)
+        qname, qentries, _ = class_quantities_arrays(original, arrays) if "arrays" in obj else class_quantities(original, faces)
         dims = {name: value for kind, name, value in qentries}
         if cls in ('IfcDoor', 'IfcWindow'):
             for attr, dim in [('OverallHeight', 'Height'), ('OverallWidth', 'Width')]:
@@ -257,7 +261,7 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
                 attrs['BarLength'] = _f(dims['Length'])
         attrs = {k: v for k, v in attrs.items() if k in available}
         node = w.entity(cls, **attrs)
-        if group is not None:
+        if "arrays" in obj:
             data = measurements(arrays)
             appearance.apply(r, group, faces, node, eg, rep, item,
                              attributes, data[0] if data is not None else [])
