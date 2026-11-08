@@ -198,3 +198,17 @@ for _name, _description, _props, _required in [
     BUILTIN_TOOLS.append(dict(name=_name, description=_description,
         mutates=not _name.startswith('query_'),
         inputSchema=dict(type='object', properties=_props, required=_required)))
+
+# Navigator is core metadata, shared with the desktop dock.
+for _name, _properties, _required in [
+    ('query_facets', {'filter': {}, 'facets': {'type': 'array', 'items': {'type': 'string'}}}, []),
+    ('query_view', {'filter': {}, 'offset': {'type': 'integer'}, 'limit': {'type': 'integer'}}, []),
+    ('set_view_filter', {'filter': {}, 'color_by': {'type': ['string', 'null']}}, []),
+    ('save_view', {'key': {'type': 'string'}, 'name': {'type': 'string'}, 'filter': {},
+                   'color_by': {'type': ['string', 'null']}, 'isolate': {'type': 'boolean'}}, ['key', 'name', 'filter']),
+    ('apply_view', {'key': {'type': 'string'}}, ['key']),
+    ('set_rule', {'key': {'type': 'string'}, 'value': {'type': 'object'}}, ['key', 'value']),
+    ('apply_rule', {'key': {'type': 'string'}}, ['key']),
+]:
+    BUILTIN_TOOLS.append(dict(name=_name, description='Navigator: ' + _name.replace('_', ' '),
+        mutates=not _name.startswith('query_'), inputSchema=dict(type='object', properties=_properties, required=_required)))

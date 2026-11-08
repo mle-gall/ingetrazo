@@ -81,9 +81,10 @@ class _NoDialogs(QObject):
 
 from core.agent_inspection import InspectionTools
 from core.agent_records import RecordTools
+from core.agent_facets import FacetTools
 
 
-class _Bridge(QObject, InspectionTools, RecordTools):
+class _Bridge(QObject, InspectionTools, RecordTools, FacetTools):
     """The in-app half: accepts one agent connection and executes its tool
     calls on the Qt main thread."""
 

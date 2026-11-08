@@ -4,7 +4,7 @@ from copy import deepcopy
 import csv
 import io
 
-SECTIONS = ('classification_systems', 'types', 'systems', 'project', 'export_profiles', 'tag_sets', 'storeys', 'pset_library')
+SECTIONS = ('classification_systems', 'types', 'systems', 'project', 'export_profiles', 'tag_sets', 'storeys', 'pset_library', 'views', 'rules')
 
 def seed_defaults(registry=None):
     r = deepcopy(registry) if registry is not None else {}
@@ -88,6 +88,34 @@ def validate(registry):
                     for code, entry in codes.items():
                         if not isinstance(entry, dict) or not isinstance(entry.get('name'), str) or ('parent' in entry and not isinstance(entry['parent'], str)):
                             errors.append(f'{key}.{code}: invalid code entry')
+    from core.facets import validate_filter
+    for section in ('views', 'rules', 'export_profiles'):
+        for key, value in registry.get(section, {}).items():
+            if not isinstance(value, dict):
+                errors.append(key + ': entry must be an object')
+                continue
+            try:
+                validate_filter(value.get('filter'))
+            except ValueError as exc:
+                errors.append(key + ': ' + str(exc))
+            if section == 'export_profiles':
+                continue
+            if not isinstance(value.get('name'), str) or 'filter' not in value:
+                errors.append(key + ': name and filter required')
+            if section == 'views':
+                if value.get('color_by') is not None and not isinstance(value['color_by'], str):
+                    errors.append(key + ': color_by must be text or null')
+                if type(value.get('isolate', False)) is not bool:
+                    errors.append(key + ': isolate must be boolean')
+            else:
+                apply = value.get('apply')
+                if not isinstance(apply, dict) or not isinstance(apply.get('patch', {}), dict):
+                    errors.append(key + ': apply requires a record patch')
+                    continue
+                items = apply.get('classifications', [])
+                if not isinstance(items, list) or any(not isinstance(c, dict) or
+                        any(not isinstance(c.get(k), str) for k in ('system', 'code', 'name')) for c in items):
+                    errors.append(key + ': invalid classifications')
     defaults = 0
     for key, value in registry.get('tag_sets', {}).items():
         if not isinstance(value, dict) or not isinstance(value.get('classes'), list):
