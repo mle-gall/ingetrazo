@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 
 struct Prepared {
-    triangles: Vec<([u32; 3], V3, [u8; 4])>,
+    triangles: Vec<([u32; 3], [V3; 3], [u8; 4])>,
     edges: Vec<[u32; 2]>,
     bounds: [f32; 8],
 }
@@ -63,6 +63,8 @@ fn prepare(
         insert(e[0], e[1], *f);
     }
     let mut triangles = Vec::new();
+    let mut normals = Vec::new();
+    let mut adjacency: HashMap<(u32, u32), Vec<i64>> = HashMap::new();
     let (mut r, mut k) = (0, 0);
     for (f, &count) in counts.iter().enumerate() {
         let mut rings = Vec::with_capacity(count as usize);
@@ -70,17 +72,56 @@ fn prepare(
             let n = sizes[r] as usize;
             let ring = &c[k..k + n];
             for i in 0..n {
-                insert(ring[i], ring[(i + 1) % n], 0);
+                let (a, b) = (ring[i], ring[(i + 1) % n]);
+                insert(a, b, 0);
+                adjacency
+                    .entry((a.min(b), a.max(b)))
+                    .or_default()
+                    .push(f as i64);
             }
             rings.push(ring);
             k += n;
             r += 1;
         }
+        let (tris, normal) = facegeom::resident_geometry(p, &rings, h);
+        normals.push(normal);
         if !hidden[f] {
-            let (tris, normal) = facegeom::resident_geometry(p, &rings, h);
-            triangles.extend(tris.into_iter().map(|t| (t, normal, colors[f])));
+            triangles.extend(tris.into_iter().map(|t| (t, f, colors[f])));
         }
     }
+    let mut starts = vec![0i64];
+    let mut adjacent = Vec::new();
+    for e in &edge_list {
+        if let Some(fs) = adjacency.get(&(e[0].min(e[1]), e[0].max(e[1]))) {
+            adjacent.extend_from_slice(fs);
+        }
+        starts.push(adjacent.len() as i64);
+    }
+    let smooth_edges: Vec<_> = edge_list
+        .iter()
+        .map(|e| [e[0] as i64, e[1] as i64])
+        .collect();
+    let soft: Vec<_> = edge_flags.iter().map(|f| f & 1 != 0).collect();
+    let corners: Vec<_> = c.iter().map(|&v| v as i64).collect();
+    let fans = crate::smooth::corners(
+        p,
+        &normals,
+        &corners,
+        sizes,
+        counts,
+        &smooth_edges,
+        &soft,
+        &starts,
+        &adjacent,
+        h,
+    );
+    let triangles = triangles
+        .into_iter()
+        .map(|(t, f, color)| {
+            let ns = t.map(|v| fans.get(&(v as usize, f)).copied().unwrap_or(normals[f]));
+            (t, ns, color)
+        })
+        .collect();
     let edges = edge_list
         .into_iter()
         .zip(edge_flags)
@@ -109,8 +150,8 @@ fn fill(p: &[V3], prepared: &Prepared, bytes: &mut [u8], indices: &mut [u32]) {
         cursor += 1;
     };
     for &(t, n, color) in &prepared.triangles {
-        for i in t {
-            vertex(i, n, color);
+        for (i, normal) in t.into_iter().zip(n) {
+            vertex(i, normal, color);
         }
     }
     for &e in &prepared.edges {
@@ -268,6 +309,47 @@ pub fn bake_scene<'py>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_soft_shared_corners_receive_fan_normals() {
+        let pts = [
+            V3(0., 0., 0.),
+            V3(1., 0., 0.),
+            V3(0., 1., 0.),
+            V3(0., 0., 1.),
+        ];
+        let bake = |flag| {
+            prepare(
+                &pts,
+                &[0, 1, 2, 1, 0, 3],
+                &[3, 3],
+                &[1, 1],
+                &[[255; 4]; 2],
+                &[false; 2],
+                &[[0, 1]],
+                &[flag],
+                Hypot::LibCxxFma,
+            )
+        };
+        let hard = bake(0);
+        let soft = bake(1);
+        for k in 0..2 {
+            let (_, hn, _) = hard.triangles[k];
+            let (ids, sn, _) = soft.triangles[k];
+            for j in 0..3 {
+                let delta = (hn[j].0 - sn[j].0).abs()
+                    + (hn[j].1 - sn[j].1).abs()
+                    + (hn[j].2 - sn[j].2).abs();
+                if ids[j] <= 1 {
+                    assert!(delta > 0.1);
+                } else {
+                    assert!(delta < 1e-6);
+                }
+            }
+        }
+        // Hidden edges alone do not request smoothing.
+        let hidden = bake(2);
+        assert_eq!(hard.triangles[0].1[0].2, hidden.triangles[0].1[0].2);
+    }
     #[test]
     fn multiple_mesh_offsets_bounds() {
         let pts = [V3(0., -2., 1.), V3(2., 0., 1.), V3(0., 3., 1.)];
