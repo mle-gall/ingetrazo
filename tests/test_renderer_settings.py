@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """Renderer selection persists while crash recovery covers presentation only."""
 import pytest
 from PySide6.QtCore import QSettings

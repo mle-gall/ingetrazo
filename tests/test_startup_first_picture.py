@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """Opening returns to the renderer before optional document work runs."""
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication

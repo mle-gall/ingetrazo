@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """Choose each document's renderer and detect starts that never presented.
 
 The guard covers renderer creation/presentation only. Loading a document is
