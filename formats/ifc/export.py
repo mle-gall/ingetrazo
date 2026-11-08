@@ -218,6 +218,7 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
                 attrs.update(NominalDiameter=_f(d), CrossSectionArea=_f(math.pi*d*d/4))
             if dims.get('Length', 0) > 0:
                 attrs['BarLength'] = _f(dims['Length'])
+        attrs = {k: v for k, v in attrs.items() if k in available}
         node = w.entity(cls, **attrs)
         exported.append((obj, node, eg, spatial, cls))
         if group is not None:
@@ -280,6 +281,8 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
             aggregates[parent].append(node)
         elif found and not found[2]:
             aggregates[found[0]].append(node)
+        elif TABLES.get(cls, {}).get('domain') == 'group':
+            pass
         else:
             containment[found[0] if found else defaults['storey']].append(node)
     # Relationship identities use semantic parent GUIDs, not transient STEP ids.
@@ -293,8 +296,8 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
 
     for key, members in type_members.items():
         data = record.normalize(registry['types'][key])
-        cls = data.get('ifc_class', 'IfcBuildingElementProxy') + 'Type'
-        if cls.upper() not in ORDERS or cls in ('IfcFlowSegmentType', 'IfcFlowFittingType', 'IfcFlowTerminalType'):
+        cls = TABLES.get(data.get('ifc_class'), {}).get('type_class', {}).get(schema) or 'IfcBuildingElementProxyType'
+        if cls.upper() not in __import__('core.ifc_tables_data', fromlist=['SCHEMA_DATA']).SCHEMA_DATA[schema]['orders']:
             cls = 'IfcBuildingElementProxyType'
         attrs = dict(Name=_s(data.get('name', key)), Description=_s(data.get('description', '')),
                      ElementType=_s(data.get('object_type', '')))

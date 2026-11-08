@@ -24,7 +24,7 @@ def normalize(record):
 
 def role(record):
     cls = record.get('class')
-    if cls in ('IfcSite', 'IfcBuilding', 'IfcBuildingStorey', 'IfcSpace', 'IfcSpatialZone', 'IfcFacility', 'IfcFacilityPart'):
+    if TABLES.get(cls, {}).get('domain') == 'spatial':
         return 'spatial'
     return {'IfcElementAssembly': 'assembly', 'IfcBuildingElementPart': 'part'}.get(cls, 'element')
 
@@ -92,6 +92,12 @@ def validate(record, registry, schema='IFC4'):
                 errors.append('Unknown classification system')
             elif any(not isinstance(item.get(k), str) for k in ('code', 'name')):
                 errors.append('Classification code and name must be text')
+    from core.pset_library import templates
+    try:
+        library = templates(registry)
+    except (OSError, ValueError) as exc:
+        errors.append('Cannot read pset library: ' + str(exc))
+        library = {}
     psets = r.get('psets', {})
     if not isinstance(psets, dict):
         errors.append('psets must be an object')
@@ -108,7 +114,13 @@ def validate(record, registry, schema='IFC4'):
                 elif kind == 'integer': valid &= type(val) is int
                 else: valid &= type(val) in (int, float) and math.isfinite(val)
                 if not valid: errors.append(f'{pset}.{prop}: malformed typed value')
-                if isinstance(cls, str) and pset == common_pset(cls):
+                if pset in library:
+                    template = library[pset]['properties'].get(prop)
+                    if template is None:
+                        errors.append(f'{pset}.{prop}: unknown property')
+                    elif 'members' in template and val not in template['members']:
+                        errors.append(f'{pset}.{prop}: invalid enumeration member')
+                elif isinstance(cls, str) and pset == common_pset(cls):
                     template = TABLES.get(cls, {}).get('common', {}).get(prop, {})
                     members = template.get('members')
                     if members is not None and val not in members:

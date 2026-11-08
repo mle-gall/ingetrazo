@@ -4,7 +4,7 @@ from copy import deepcopy
 import csv
 import io
 
-SECTIONS = ('classification_systems', 'types', 'systems', 'project', 'export_profiles')
+SECTIONS = ('classification_systems', 'types', 'systems', 'project', 'export_profiles', 'tag_sets', 'storeys', 'pset_library')
 
 def seed_defaults(registry=None):
     r = deepcopy(registry) if registry is not None else {}
@@ -87,7 +87,45 @@ def validate(registry):
                     for code, entry in codes.items():
                         if not isinstance(entry, dict) or not isinstance(entry.get('name'), str) or ('parent' in entry and not isinstance(entry['parent'], str)):
                             errors.append(f'{key}.{code}: invalid code entry')
+    from core.ifc_tables import TABLES, predefined_types
+    defaults = 0
+    for key, value in registry.get('tag_sets', {}).items():
+        if not isinstance(value, dict) or not isinstance(value.get('classes'), list):
+            errors.append(key + ': tag set requires classes')
+            continue
+        defaults += value.get('default') is True
+        for field in ('name', 'description'):
+            if field in value and not isinstance(value[field], str):
+                errors.append(key + ': ' + field + ' must be text')
+        if type(value.get('default', False)) is not bool:
+            errors.append(key + ': default must be boolean')
+        for entry in value['classes']:
+            if not isinstance(entry, dict) or entry.get('class') not in TABLES:
+                errors.append(key + ': unknown class')
+                continue
+            cls = entry['class']
+            if entry.get('predefined_type') and not any(entry['predefined_type'] in predefined_types(cls, schema) for schema in TABLES[cls]['schemas']):
+                errors.append(key + ': invalid predefined_type')
+            if 'kinds' in entry and (not isinstance(entry['kinds'], list) or any(not isinstance(k, str) for k in entry['kinds'])):
+                errors.append(key + ': kinds must be text codes')
+    if defaults > 1:
+        errors.append('Only one tag set may be default')
+    import math
+    for name, value in registry.get('storeys', {}).items():
+        elevation = value.get('elevation', 0) if isinstance(value, dict) else None
+        if type(elevation) not in (float, int) or not math.isfinite(elevation):
+            errors.append(name + ': elevation must be finite metres')
+    if 'path' in registry.get('pset_library', {}) and not isinstance(registry['pset_library']['path'], str):
+        errors.append('pset_library.path must be text')
     for key, value in registry.get('project', {}).items():
         if key in ('name', 'description', 'phase', 'author', 'organization') and not isinstance(value, str):
             errors.append('project.' + key + ' must be text')
     return errors
+
+
+def ordered_classes(registry):
+    """Default project choices precede the stable baseline vocabulary."""
+    from core.ifc_tables import IFC_CLASSES
+    preferred = [entry['class'] for value in registry.get('tag_sets', {}).values()
+                 if value.get('default') for entry in value.get('classes', [])]
+    return list(dict.fromkeys(preferred + IFC_CLASSES))

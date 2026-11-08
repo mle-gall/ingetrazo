@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Hand-written interoperability facts; no redistributed EXPRESS or XML.
+"""Generated vocabulary and hand-written common-property facts; no redistributed EXPRESS or XML.
 
 References: buildingSMART IFC4 ADD2 TC1 and IFC4.3 ADD2 lexical documentation.
 An empty enumeration means the entity has no PredefinedType attribute.
@@ -41,36 +41,20 @@ _ENUMS = {
     'Facility': None, 'FacilityPart': None,
 }
 IFC_CLASSES = ['Ifc' + key for key in _ENUMS]
+from core.ifc_tables_data import SCHEMA_DATA
+
+IFC_CLASSES += sorted(set().union(*(d['classes'] for d in SCHEMA_DATA.values())) - set(IFC_CLASSES))
 TABLES = {}
-for name, members in _ENUMS.items():
-    schemas = SCHEMAS[1:] if name in ('Facility', 'FacilityPart') else SCHEMAS
-    values = [] if members is None else (members.split() + ['USERDEFINED', 'NOTDEFINED'])
-    TABLES['Ifc' + name] = {
-        'schemas': list(schemas),
-        'predefined_types': {schema: list(values) for schema in schemas},
-        'common': {},
+for cls in IFC_CLASSES:
+    entries = {schema: data['classes'][cls] for schema, data in SCHEMA_DATA.items() if cls in data['classes']}
+    exemplar = next(iter(entries.values()))
+    TABLES[cls] = {
+        'schemas': list(entries), 'common': {},
+        'predefined_types': {schema: entry['predefined_types'] for schema, entry in entries.items()},
+        'domain': exemplar['domain'],
+        'type_class': {schema: entry['type_class'] for schema, entry in entries.items()},
+        'enum_name': {schema: entry['enum_name'] for schema, entry in entries.items()},
     }
-# IFC4.3 ADD2 extends these occurrence enumerations.
-_ADDITIONS_43 = {
-    'Wall': 'RETAININGWALL WAVEWALL',
-    'Slab': 'APPROACH_SLAB PAVING SIDEWALK TRACKSLAB WEARING',
-    'Column': 'PIERSTEM PIERSTEM_SEGMENT STANDCOLUMN',
-    'Beam': 'CORNICE DIAPHRAGM EDGEBEAM GIRDER_SEGMENT HATSTONE PIERCAP',
-    'Stair': 'LADDER', 'Door': 'BOOM_BARRIER TURNSTILE', 'Railing': 'FENCE',
-    'Covering': 'COPING TOPPING',
-    'Member': 'ARCH_SEGMENT STAY_CABLE STIFFENING_RIB STRUCTURALCABLE SUSPENDER SUSPENSION_CABLE TIEBAR',
-    'Space': 'BERTH', 'ReinforcingBar': 'SPACEBAR',
-    'ElementAssembly': 'ABUTMENT CROSS_BRACING DECK DILATATIONPANEL ENTRANCEWORKS GRID MAST PIER PYLON RAIL_MECHANICAL_EQUIPMENT_ASSEMBLY SHELTER SIGNALASSEMBLY SUMPBUSTER SUPPORTINGASSEMBLY SUSPENSIONASSEMBLY TRACKPANEL TRACTION_SWITCHING_ASSEMBLY TRAFFIC_CALMING_DEVICE TURNOUTPANEL',
-    'BuildingElementPart': 'APRON ARMOURUNIT SAFETYCAGE',
-    'Plate': 'BASE_PLATE COVER_PLATE FLANGE_PLATE GUSSET_PLATE SPLICE_PLATE STIFFENER_PLATE WEB_PLATE',
-    'TransportElement': 'HAULINGGEAR', 'GeographicElement': 'SOIL_BORING_POINT VEGETATION',
-    'DiscreteAccessory': 'BIRDPROTECTION CABLEARRANGER ELASTIC_CUSHION EXPANSION_JOINT_DEVICE FILLER FLASHING INSULATOR LOCK PANEL_STRENGTHENING POINTMACHINEMOUNTINGDEVICE POINT_MACHINE_LOCKING_DEVICE RAILBRACE RAILPAD RAIL_LUBRICATION RAIL_MECHANICAL_EQUIPMENT SLIDINGCHAIR SOUNDABSORPTION TENSIONINGEQUIPMENT',
-    'MechanicalFastener': 'CHAIN COUPLER RAILFASTENING RAILJOINT ROPE',
-    'CableCarrierSegment': 'CABLEBRACKET CATENARYWIRE DROPPER',
-    'SpatialZone': 'INTERFERENCE RESERVATION',
-}
-for name, additions in _ADDITIONS_43.items():
-    TABLES['Ifc' + name]['predefined_types']['IFC4X3_ADD2'] += additions.split()
 
 # IFC4 Common templates. Empty means no Pset_<Class>Common exists.
 # Scalar measures outside length/area/volume use real; see the record contract.

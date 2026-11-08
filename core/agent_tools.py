@@ -188,10 +188,10 @@ for _name, _description, _props, _required in [
     ('import_classification_codes', 'Merge CSV code,title[,parent] rows into a namespace atomically.',
      {'system': _TEXT, 'csv_text': _TEXT}, ['system', 'csv_text']),
     *[(name, 'Upsert a project registry entry.', {'key': _TEXT, 'value': {'type': 'object'}}, ['key', 'value'])
-      for name in ('set_type', 'set_system')],
+      for name in ('set_type', 'set_system', 'set_tag_set')],
     *[(name, 'Delete a registry entry; return referencing uids and refuse unless forced.',
        {'key': _TEXT, 'force': _FORCE}, ['key'])
-      for name in ('delete_type', 'delete_system', 'delete_classification_system')],
+      for name in ('delete_type', 'delete_system', 'delete_classification_system', 'delete_tag_set')],
     ('export_ifc', 'Write the IFC file for a registry export profile (IFC4 default) and return the count, skipped records with reasons, and IDS results. Relative paths land next to the open document.',
      {'path': _TEXT, 'profile': _TEXT, 'project_name': _TEXT}, ['path']),
 ]:

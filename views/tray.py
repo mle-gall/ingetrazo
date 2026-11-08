@@ -4475,9 +4475,9 @@ class BimPanel(QWidget):
         lay.setContentsMargins(8, 6, 8, 8)
 
         row = QHBoxLayout()
-        self.class_box = QComboBox()
-        from core.bim import IFC_CLASSES
-        self.class_box.addItems(IFC_CLASSES)
+        from views.ifc_picker import ClassPicker
+        from core.bim_registry import get
+        self.class_box = ClassPicker(get(window.viewport.scene))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText(tr("Name (e.g. Wall axis A)"))
         row.addWidget(self.class_box)
