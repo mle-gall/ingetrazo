@@ -180,6 +180,13 @@ def values(index, facet, uids=None):
 
 
 def palette(value):
+    # Membership facets are sets: adding an existing code or changing record
+    # order must not recolour an object. A singleton uses the value's colour.
+    if isinstance(value, list):
+        members = {json.dumps(v, sort_keys=True): v for v in value}
+        value = [members[k] for k in sorted(members)]
+        if len(value) == 1:
+            value = value[0]
     digest = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).digest()
     return colorsys.hsv_to_rgb(int.from_bytes(digest[:4], 'big') / 2**32, .55, .85)
 

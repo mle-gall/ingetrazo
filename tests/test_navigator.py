@@ -247,3 +247,8 @@ def test_filter_leaves_excluded_working_mesh_and_drops_hidden_selection():
     assert child not in scene.selection
     assert len(vp.history.undo_stack) == before
     vp.close()
+
+
+def test_categorical_colour_ignores_membership_order_and_duplicates():
+    assert facets.palette(['S']) == facets.palette('S')
+    assert facets.palette(['S', 'A', 'S']) == facets.palette(['A', 'S'])
