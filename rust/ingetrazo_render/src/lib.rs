@@ -185,53 +185,86 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("draw.wgsl").into()),
         });
         let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
-        let pipeline = |topology, fragment, compare, write, bias| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: None,
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &vs,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: 28,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &attrs,
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &vs,
-                entry_point: Some(fragment),
-                compilation_options: Default::default(),
-                targets: &[
-                    Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::R32Uint,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                ],
-            }),
-            primitive: wgpu::PrimitiveState { topology, ..Default::default() },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: write,
-                depth_compare: compare,
-                stencil: Default::default(),
-                bias,
-            }),
-            multisample: Default::default(),
-            multiview: None,
-            cache: None,
-        });
-        let draw = pipeline(wgpu::PrimitiveTopology::TriangleList, "fs", wgpu::CompareFunction::Less, true, Default::default());
-        let xray = pipeline(wgpu::PrimitiveTopology::TriangleList, "fs", wgpu::CompareFunction::Less, false, Default::default());
-        let bias = wgpu::DepthBiasState { constant: -2, slope_scale: -1., clamp: 0. };
-        let edge = pipeline(wgpu::PrimitiveTopology::LineList, "edge_fs", wgpu::CompareFunction::LessEqual, false, bias);
-        let xray_edge = pipeline(wgpu::PrimitiveTopology::LineList, "edge_fs", wgpu::CompareFunction::Always, false, bias);
+        let pipeline = |topology, fragment, compare, write, bias| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: None,
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &vs,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: 28,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &attrs,
+                    }],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &vs,
+                    entry_point: Some(fragment),
+                    compilation_options: Default::default(),
+                    targets: &[
+                        Some(wgpu::ColorTargetState {
+                            format,
+                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                        Some(wgpu::ColorTargetState {
+                            format: wgpu::TextureFormat::R32Uint,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                    ],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: write,
+                    depth_compare: compare,
+                    stencil: Default::default(),
+                    bias,
+                }),
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            })
+        };
+        let draw = pipeline(
+            wgpu::PrimitiveTopology::TriangleList,
+            "fs",
+            wgpu::CompareFunction::Less,
+            true,
+            Default::default(),
+        );
+        let xray = pipeline(
+            wgpu::PrimitiveTopology::TriangleList,
+            "fs",
+            wgpu::CompareFunction::Less,
+            false,
+            Default::default(),
+        );
+        let bias = wgpu::DepthBiasState {
+            constant: -2,
+            slope_scale: -1.,
+            clamp: 0.,
+        };
+        let edge = pipeline(
+            wgpu::PrimitiveTopology::LineList,
+            "edge_fs",
+            wgpu::CompareFunction::LessEqual,
+            false,
+            bias,
+        );
+        let xray_edge = pipeline(
+            wgpu::PrimitiveTopology::LineList,
+            "edge_fs",
+            wgpu::CompareFunction::Always,
+            false,
+            bias,
+        );
         let queries = features.contains(wgpu::Features::TIMESTAMP_QUERY).then(|| {
             device.create_query_set(&wgpu::QuerySetDescriptor {
                 label: None,
@@ -252,10 +285,16 @@ impl Renderer {
         Ok(Self {
             depth: texture(&device, w, h, wgpu::TextureFormat::Depth32Float),
             ids: texture(&device, w, h, wgpu::TextureFormat::R32Uint),
-            timings: (0..4).map(|_| TimingSlot {
-                read: buffer(&device, &[0; 32], wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST),
-                pending: None,
-            }).collect(),
+            timings: (0..4)
+                .map(|_| TimingSlot {
+                    read: buffer(
+                        &device,
+                        &[0; 32],
+                        wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    ),
+                    pending: None,
+                })
+                .collect(),
             last_gpu: None,
             last_cpu: 0.,
             last_acquire: 0.,
@@ -287,11 +326,21 @@ impl Renderer {
     /// Packed little-endian arrays; reject malformed uploads before reaching wgpu.
     fn set_scene(
         &mut self,
-        prototypes: (PyReadonlyArray1<'_, u8>, PyReadonlyArray1<'_, u8>, PyReadonlyArray1<'_, u8>, PyReadonlyArray1<'_, u8>),
+        prototypes: (
+            PyReadonlyArray1<'_, u8>,
+            PyReadonlyArray1<'_, u8>,
+            PyReadonlyArray1<'_, u8>,
+            PyReadonlyArray1<'_, u8>,
+        ),
         instances: PyReadonlyArray1<'_, u8>,
     ) -> PyResult<()> {
         let (v, ix, p, cmd) = (&prototypes.0, &prototypes.1, &prototypes.2, &prototypes.3);
-        let (v, ix, p, cmd) = (v.as_slice()?, ix.as_slice()?, p.as_slice()?, cmd.as_slice()?);
+        let (v, ix, p, cmd) = (
+            v.as_slice()?,
+            ix.as_slice()?,
+            p.as_slice()?,
+            cmd.as_slice()?,
+        );
         let instances = instances.as_slice()?;
         if v.len() % 28 != 0
             || ix.len() % 4 != 0
@@ -315,7 +364,9 @@ impl Renderer {
         }
         let mut start = 0;
         for (j, (row, capacity)) in cmd.chunks_exact(20).zip(counts.iter().cycle()).enumerate() {
-            if j == count { start = 0; }
+            if j == count {
+                start = 0;
+            }
             let c: Command = bytemuck::pod_read_unaligned(row);
             if c.instances != 0
                 || c.start != start
@@ -340,7 +391,11 @@ impl Renderer {
         let vertex = buffer(&self.device, v, wgpu::BufferUsages::VERTEX);
         let index = buffer(&self.device, ix, wgpu::BufferUsages::INDEX);
         let protos = buffer(&self.device, p, wgpu::BufferUsages::STORAGE);
-        let inst = buffer(&self.device, instances, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
+        let inst = buffer(
+            &self.device,
+            instances,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        );
         let commands = buffer(
             &self.device,
             cmd,
@@ -360,15 +415,30 @@ impl Renderer {
             &self.draw.get_bind_group_layout(0),
             &[&self.camera, &inst, &survivors],
         );
-        let edge_draw = bind(&self.device, &self.edge.get_bind_group_layout(0), &[&self.camera, &inst, &survivors]);
-        let xray_draw = bind(&self.device, &self.xray.get_bind_group_layout(0), &[&self.camera, &inst, &survivors]);
-        let xray_edge_draw = bind(&self.device, &self.xray_edge.get_bind_group_layout(0), &[&self.camera, &inst, &survivors]);
+        let edge_draw = bind(
+            &self.device,
+            &self.edge.get_bind_group_layout(0),
+            &[&self.camera, &inst, &survivors],
+        );
+        let xray_draw = bind(
+            &self.device,
+            &self.xray.get_bind_group_layout(0),
+            &[&self.camera, &inst, &survivors],
+        );
+        let xray_edge_draw = bind(
+            &self.device,
+            &self.xray_edge.get_bind_group_layout(0),
+            &[&self.camera, &inst, &survivors],
+        );
         self.gpu_memory =
             (v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 416)
                 as u64;
         self.scene = Some(Scene {
             inst,
-            flags: instances.chunks_exact(80).map(|r| u32::from_le_bytes(r[72..76].try_into().unwrap())).collect(),
+            flags: instances
+                .chunks_exact(80)
+                .map(|r| u32::from_le_bytes(r[72..76].try_into().unwrap()))
+                .collect(),
             vertex,
             index,
             commands,
@@ -385,18 +455,28 @@ impl Renderer {
         Ok(())
     }
     #[pyo3(signature = (selected_ids, hovered_id=None))]
-    fn set_highlight(&mut self, selected_ids: Vec<usize>, hovered_id: Option<usize>) -> PyResult<()> {
+    fn set_highlight(
+        &mut self,
+        selected_ids: Vec<usize>,
+        hovered_id: Option<usize>,
+    ) -> PyResult<()> {
         if let Some(s) = &mut self.scene {
-            if selected_ids.iter().chain(hovered_id.iter()).any(|&i| i >= s.flags.len()) {
+            if selected_ids
+                .iter()
+                .chain(hovered_id.iter())
+                .any(|&i| i >= s.flags.len())
+            {
                 return Err(PyValueError::new_err("instance id out of range"));
             }
             let selected: std::collections::HashSet<_> = selected_ids.into_iter().collect();
             for (i, flag) in s.flags.iter_mut().enumerate() {
-                let next = (*flag & 1) | if selected.contains(&i) { 2 } else { 0 }
+                let next = (*flag & 1)
+                    | if selected.contains(&i) { 2 } else { 0 }
                     | if hovered_id == Some(i) { 4 } else { 0 };
                 if next != *flag {
                     *flag = next;
-                    self.queue.write_buffer(&s.inst, i as u64 * 80 + 72, &next.to_le_bytes());
+                    self.queue
+                        .write_buffer(&s.inst, i as u64 * 80 + 72, &next.to_le_bytes());
                 }
             }
         }
@@ -404,22 +484,30 @@ impl Renderer {
     }
     fn set_overrides(&self, colors: Vec<u32>) -> PyResult<()> {
         if let Some(s) = &self.scene {
-            if colors.len() != s.n as usize { return Err(PyValueError::new_err("one override per instance required")); }
+            if colors.len() != s.n as usize {
+                return Err(PyValueError::new_err("one override per instance required"));
+            }
             for (i, color) in colors.iter().enumerate() {
-                self.queue.write_buffer(&s.inst, i as u64 * 80 + 76, &color.to_le_bytes());
+                self.queue
+                    .write_buffer(&s.inst, i as u64 * 80 + 76, &color.to_le_bytes());
             }
         }
         Ok(())
     }
     fn set_style(&mut self, style: &str) -> PyResult<()> {
         self.style = match style {
-            "shaded" => 0, "xray" => 1, "hidden_line" => 2,
-            "monochrome" => 3, "wireframe" => 4,
+            "shaded" => 0,
+            "xray" => 1,
+            "hidden_line" => 2,
+            "monochrome" => 3,
+            "wireframe" => 4,
             _ => return Err(PyValueError::new_err("unknown display style")),
         };
         Ok(())
     }
-    fn set_edges(&mut self, enabled: bool) { self.edges = enabled; }
+    fn set_edges(&mut self, enabled: bool) {
+        self.edges = enabled;
+    }
     fn set_camera(&mut self, view: Vec<f32>, proj: Vec<f32>) -> PyResult<()> {
         let v: [f32; 16] = view
             .try_into()
@@ -432,7 +520,12 @@ impl Renderer {
         ]);
         let vp = correction * glam::Mat4::from_cols_array(&p) * glam::Mat4::from_cols_array(&v);
         let mut data = vp.to_cols_array().to_vec();
-        data.extend([self.config.width as f32, self.config.height as f32, self.style as f32, 0.]);
+        data.extend([
+            self.config.width as f32,
+            self.config.height as f32,
+            self.style as f32,
+            0.,
+        ]);
         self.queue
             .write_buffer(&self.camera, 0, bytemuck::cast_slice(&data));
         Ok(())
@@ -465,7 +558,11 @@ impl Renderer {
                     let data = slot.read.slice(..).get_mapped_range();
                     let first = u64::from_le_bytes(data[0..8].try_into().unwrap());
                     let last = u64::from_le_bytes(data[24..32].try_into().unwrap());
-                    self.last_gpu = Some(last.saturating_sub(first) as f64 * self.queue.get_timestamp_period() as f64 / 1e6);
+                    self.last_gpu = Some(
+                        last.saturating_sub(first) as f64
+                            * self.queue.get_timestamp_period() as f64
+                            / 1e6,
+                    );
                     drop(data);
                     slot.read.unmap();
                 }
@@ -547,28 +644,54 @@ impl Renderer {
                     }),
                 occlusion_query_set: None,
             });
-            pass.set_pipeline(if self.style == 1 { &self.xray } else { &self.draw });
-            pass.set_bind_group(0, if self.style == 1 { &s.xray_draw } else { &s.draw }, &[]);
+            pass.set_pipeline(if self.style == 1 {
+                &self.xray
+            } else {
+                &self.draw
+            });
+            pass.set_bind_group(
+                0,
+                if self.style == 1 {
+                    &s.xray_draw
+                } else {
+                    &s.draw
+                },
+                &[],
+            );
             pass.set_vertex_buffer(0, s.vertex.slice(..));
             pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
             if self.style != 4 {
-            if self.multi {
-                pass.multi_draw_indexed_indirect(&s.commands, 0, s.p);
-            } else {
-                for k in 0..s.p {
-                    pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
+                if self.multi {
+                    pass.multi_draw_indexed_indirect(&s.commands, 0, s.p);
+                } else {
+                    for k in 0..s.p {
+                        pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
+                    }
                 }
             }
-            }
             if self.edges || self.style == 4 {
-            pass.set_pipeline(if self.style == 1 { &self.xray_edge } else { &self.edge });
-            // Auto-layout pipelines have separate bind-group identities.
-            pass.set_bind_group(0, if self.style == 1 { &s.xray_edge_draw } else { &s.edge_draw }, &[]);
-            if self.multi {
-                pass.multi_draw_indexed_indirect(&s.commands, s.p as u64 * 20, s.p);
-            } else {
-                for k in s.p..s.p*2 { pass.draw_indexed_indirect(&s.commands, k as u64 * 20); }
-            }
+                pass.set_pipeline(if self.style == 1 {
+                    &self.xray_edge
+                } else {
+                    &self.edge
+                });
+                // Auto-layout pipelines have separate bind-group identities.
+                pass.set_bind_group(
+                    0,
+                    if self.style == 1 {
+                        &s.xray_edge_draw
+                    } else {
+                        &s.edge_draw
+                    },
+                    &[],
+                );
+                if self.multi {
+                    pass.multi_draw_indexed_indirect(&s.commands, s.p as u64 * 20, s.p);
+                } else {
+                    for k in s.p..s.p * 2 {
+                        pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
+                    }
+                }
             }
         }
         if let (Some(q), Some(k)) = (&self.queries, timing_slot) {
@@ -580,7 +703,12 @@ impl Renderer {
         let cpu = start.elapsed().as_secs_f64() * 1000.;
         if let (Some(_), Some(k)) = (&self.queries, timing_slot) {
             let (tx, rx) = std::sync::mpsc::channel();
-            self.timings[k].read.slice(..).map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+            self.timings[k]
+                .read
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |r| {
+                    let _ = tx.send(r);
+                });
             self.timings[k].pending = Some(rx);
         }
         self.last_cpu = cpu;
@@ -595,30 +723,55 @@ impl Renderer {
         let y = y0.min(y1).min(self.config.height);
         let w = x0.max(x1).min(self.config.width) - x;
         let h = y0.max(y1).min(self.config.height) - y;
-        if w == 0 || h == 0 { return Ok(vec![]); }
-        let stride = (w*4).div_ceil(256)*256;
+        if w == 0 || h == 0 {
+            return Ok(vec![]);
+        }
+        let stride = (w * 4).div_ceil(256) * 256;
         let read = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("rectangle pick"), size: stride as u64 * h as u64,
+            label: Some("rectangle pick"),
+            size: stride as u64 * h as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let mut e = self.device.create_command_encoder(&Default::default());
         e.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo { texture: &self.ids, mip_level: 0, origin: wgpu::Origin3d {x,y,z:0}, aspect: wgpu::TextureAspect::All },
-            wgpu::TexelCopyBufferInfo { buffer: &read, layout: wgpu::TexelCopyBufferLayout {offset:0, bytes_per_row:Some(stride), rows_per_image:Some(h)} },
-            wgpu::Extent3d {width:w,height:h,depth_or_array_layers:1});
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.ids,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &read,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(stride),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
         self.queue.submit([e.finish()]);
-        let (tx,rx) = std::sync::mpsc::channel();
-        read.slice(..).map_async(wgpu::MapMode::Read, move |r| {let _ = tx.send(r);});
+        let (tx, rx) = std::sync::mpsc::channel();
+        read.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
         self.device.poll(wgpu::Maintain::Wait);
-        rx.recv().map_err(|e| PyValueError::new_err(e.to_string()))?
+        rx.recv()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         let bytes = read.slice(..).get_mapped_range();
         let mut ids = std::collections::BTreeSet::new();
         for row in bytes.chunks_exact(stride as usize) {
-            for b in row[..w as usize*4].chunks_exact(4) {
+            for b in row[..w as usize * 4].chunks_exact(4) {
                 let id = u32::from_le_bytes(b.try_into().unwrap());
-                if id != 0 { ids.insert(id-1); }
+                if id != 0 {
+                    ids.insert(id - 1);
+                }
             }
         }
         drop(bytes);
