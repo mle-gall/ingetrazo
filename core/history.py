@@ -978,7 +978,11 @@ def _dirty_group_chunks(scene) -> None:
     parent, and walking scene.groups as a flat list never reached them.
     """
     from core.group import iter_placements
-    scene.mesh.mark_modified()
+    # The mesh being edited changed too (its faces' paint or tags), so its
+    # revision moves; not mark_modified, which also bumps the mutation
+    # serial and the winding count the viewport keys its geometry caches
+    # on, and a paint would have re-walked every coordinate.
+    scene.mesh.bump_revision()
     for g in getattr(scene, "groups", []):
         for pg, _m in iter_placements(g):
             pg.mesh._chunk_dirty = True

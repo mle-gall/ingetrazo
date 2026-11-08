@@ -348,7 +348,7 @@ class Mesh:
     def _chunk_dirty(self, value):
         self.__dict__["_chunk_dirty_value"] = value
         if value:
-            self.__dict__["_revision"] = self.__dict__.get("_revision", 0) + 1
+            self.bump_revision()
 
     @property
     def _attrs_dirty(self):
@@ -358,7 +358,15 @@ class Mesh:
     def _attrs_dirty(self, value):
         self.__dict__["_attrs_dirty_value"] = value
         if value:
-            self.__dict__["_revision"] = self.__dict__.get("_revision", 0) + 1
+            self.bump_revision()
+
+    def bump_revision(self) -> None:
+        """Advance :attr:`revision` alone: a change readers of the revision
+        must see that touched no coordinate — an attribute, a tag, a
+        material. The mutation serial and the winding count stay put, so
+        the viewport's geometry caches (keyed on those) are not thrown
+        away for a paint; see :meth:`mark_modified` for raw edits."""
+        self.__dict__["_revision"] = self.__dict__.get("_revision", 0) + 1
 
     def mark_modified(self) -> None:
         """Publish a batch of direct element edits, including attributes."""
