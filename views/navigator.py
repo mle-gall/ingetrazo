@@ -253,7 +253,21 @@ class NavigatorDock(QDockWidget, FacetTools):
         for item in self.results.selectedItems():
             data = item.data(0, Qt.UserRole)
             uids.extend(data if isinstance(data, list) else [data])
-        self._viewport.scene.select([self.index.groups[u] for u in uids])
+        if not uids:
+            self._viewport.scene.clear_selection()
+            self._viewport.update()
+            return
+        # The viewport edits one containment context, just like the Outliner.
+        # Metadata toolbar actions still target the entire result set directly.
+        from views.outliner import open_to
+        path = self.index[uids[0]]['path_uids']
+        if not open_to(self._viewport, [self.index.groups[u] for u in path]):
+            return
+        scene = self._viewport.scene
+        siblings = [self.index.groups[u] for u in uids
+                    if self.index[u]['path_uids'] == path
+                    and scene.entity_selectable(self.index.groups[u])]
+        scene.select(siblings)
         self._viewport.update()
 
     def select_all(self):

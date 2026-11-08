@@ -163,3 +163,25 @@ def test_filtered_ifc_profile_exports_only_matching_group(tmp_path):
     text = path.read_text()
     assert text.count('IFCSLAB(') == 1
     assert "'Keep'" in text and "'Omit'" not in text
+
+
+def test_result_selection_opens_the_placement_context(monkeypatch):
+    from types import SimpleNamespace
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QMainWindow
+    from views.navigator import NavigatorDock
+    scene, parent, child, other = model()
+    window = QMainWindow()
+    window.viewport = SimpleNamespace(scene=scene, update=lambda: None)
+    dock = NavigatorDock(window)
+    dock.index = facets.build(scene)
+    dock.checked = {'class': {'IfcColumn'}}
+    dock.refilter()
+    paths = []
+    monkeypatch.setattr('views.outliner.open_to', lambda vp, path: paths.append(path) or True)
+    item = dock.results.topLevelItem(0)
+    item.setSelected(True)
+    assert paths[-1] == [parent]
+    assert scene.selection == {child}
+    dock.close()
+    window.close()

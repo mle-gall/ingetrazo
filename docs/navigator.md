@@ -89,7 +89,9 @@ own clause so another OR choice remains reachable. Facets show the first 50
 values and a text field for finding more. `(missing)` selects absent facts.
 Results group by definition, page
 1,000 definitions at a time and create placement children on expansion.
-Selection follows loaded result rows; Select all includes all matching groups.
+Selection follows loaded result rows and opens their containment context, using
+the Outliner’s sibling-selection rule. Select all includes all matching groups
+across contexts for bulk metadata operations.
 
 Toolbar actions select, isolate, hide, clear, colour, classify using RecordDialog,
 assign an existing tag, save/apply a rule, or export. Right-click editable facet

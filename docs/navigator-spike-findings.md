@@ -71,6 +71,10 @@ checkbox. Both meanings remain visible rather than being conflated.
 * A saved scene can reference a view, but composer renderers must resolve the
   reference in their own viewport. A renamed/deleted view needs dependency checks.
   Referenced rules/views also need revision/frozen-result choices for deliverables.
+* A faceted selection can span multiple containment contexts. Individual result-row selection follows
+  the Outliner’s single-context opening and sibling-selection policy. Select all
+  results can still span contexts; subsequent geometry tools need that policy
+  reconciled. Result-set record edits do not have this containment restriction.
 * BIM takeoff remains document-wide. Pass evaluated UIDs to quantity aggregation;
   never derive quantities from rendered pixels or a partially loaded Qt tree.
 * Definition identity is session-local; persistent views should use object facts,
