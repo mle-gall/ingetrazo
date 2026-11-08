@@ -293,6 +293,8 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
                     manual.setdefault(target, manual.pop(alias))
         for name, value in manual.items():
             kind = quantities.get(name, (None,))[0]
+            if kind is None and name in ('Height', 'Width', 'Depth', 'Thickness', 'Perimeter', 'Diameter'):
+                kind = 'length'
             if kind is None:
                 kind = next((k for k in ('volume', 'area', 'weight', 'length') if k in name.lower()), None)
             if kind is None:

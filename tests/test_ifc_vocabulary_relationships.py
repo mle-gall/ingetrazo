@@ -154,3 +154,18 @@ def test_quantity_library_and_cache_refresh(tmp_path):
     assert load(tmp_path)['Qto_Test']['properties']['Length']['kind'] == 'length'
     path.write_text(path.read_text().replace('Length', 'Volume').replace('Q_LENGTH', 'Q_VOLUME'))
     assert load(tmp_path)['Qto_Test']['properties']['Volume']['kind'] == 'volume'
+
+
+def test_legacy_quantity_dimensions_without_geometry(tmp_path):
+    ifc = pytest.importorskip('ifcopenshell')
+    scene = Scene()
+    group = Group(name='Survey wall')
+    group.ifc = {'class': 'IfcWall', 'storey': {'name': 'Ground', 'elevation': 1},
+                 'quantities': {'Height': 3, 'Width': .3, 'Length': 15}}
+    scene.groups.append(group)
+    path = tmp_path / 'survey.ifc'
+    assert not save_ifc(scene, path).problems
+    model = ifc.open(str(path))
+    quantities = {q.Name: q.LengthValue for q in model.by_type('IfcQuantityLength')}
+    assert quantities['Width'] == .3
+    assert quantities['Height'] == 3
