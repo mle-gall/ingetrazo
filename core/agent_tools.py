@@ -155,3 +155,42 @@ for _name, _description, _props, _required in [
     BUILTIN_TOOLS.append(dict(name=_name, description=_description,
         inputSchema=dict(type="object", properties=_props, required=_required)))
 next(s for s in BUILTIN_TOOLS if s["name"] == "screenshot")["inputSchema"]["properties"]["uids"] = _STRINGS
+
+# Record commands already own their undo step; mutates advertises this to MCP.
+_TEXT = {'type': 'string'}
+_PAGE = {'offset': {'type': 'integer', 'minimum': 0, 'default': 0},
+         'limit': {'type': 'integer', 'minimum': 1, 'maximum': 1000, 'default': 200}}
+_SCHEMA = {'enum': ['IFC4', 'IFC4X3_ADD2'], 'default': 'IFC4'}
+_FORCE = {'type': 'boolean', 'default': False}
+for _name, _description, _props, _required in [
+    ('query_record', 'Read an object record, resolved type defaults and validation problems.',
+     {'uid': _TEXT, 'schema': _SCHEMA}, ['uid']),
+    ('query_records', 'Page placed groups in outliner order; totals cover the entire model. Name is a case-insensitive substring. Problems is an error count.',
+     {**{k: _TEXT for k in ('class', 'system', 'classification_system', 'code', 'type', 'name')},
+      'untagged': {'type': 'boolean'}, 'schema': _SCHEMA, **_PAGE}, []),
+    ('query_vocabulary', 'Read class templates and registry code counts. Request classification_system or search for paged codes.',
+     {'schema': _SCHEMA, 'class': _TEXT, 'classification_system': _TEXT, 'search': _TEXT, **_PAGE}, []),
+    ('query_registry', 'Read the detached project registry.', {}, []),
+    ('set_record', 'Patch records atomically; nested fields replace. Rejection returns applied=false and per-uid problems. Null removes records.',
+     {'uids': _STRINGS, 'patch': {'type': ['object', 'null']}, 'validate_schema': _SCHEMA, 'force': _FORCE}, ['uids', 'patch']),
+    ('tag', 'Set a class and optional record name on groups.',
+     {'uids': _STRINGS, 'ifc_class': _TEXT, 'name': _TEXT}, ['uids', 'ifc_class']),
+    ('untag', 'Remove records in one undo step.', {'uids': _STRINGS}, ['uids']),
+    ('add_classification', 'Merge a classification into each record; default name comes from the registry code.',
+     {'uids': _STRINGS, 'system': _TEXT, 'code': _TEXT, 'name': _TEXT}, ['uids', 'system', 'code']),
+    ('remove_classification', 'Remove one code, or all codes from a namespace, from each record.',
+     {'uids': _STRINGS, 'system': _TEXT, 'code': _TEXT}, ['uids', 'system']),
+    ('set_registry', 'Replace the project registry after validation.', {'value': {'type': 'object'}}, ['value']),
+    ('add_classification_system', 'Upsert a classification namespace and optional codes.',
+     {**{k: _TEXT for k in ('key', 'name', 'edition', 'source', 'description')}, 'codes': {'type': 'object'}}, ['key', 'name']),
+    ('import_classification_codes', 'Merge CSV code,title[,parent] rows into a namespace atomically.',
+     {'system': _TEXT, 'csv_text': _TEXT}, ['system', 'csv_text']),
+    *[(name, 'Upsert a project registry entry.', {'key': _TEXT, 'value': {'type': 'object'}}, ['key', 'value'])
+      for name in ('set_type', 'set_system')],
+    *[(name, 'Delete a registry entry; return referencing uids and refuse unless forced.',
+       {'key': _TEXT, 'force': _FORCE}, ['key'])
+      for name in ('delete_type', 'delete_system', 'delete_classification_system')],
+]:
+    BUILTIN_TOOLS.append(dict(name=_name, description=_description,
+        mutates=not _name.startswith('query_'),
+        inputSchema=dict(type='object', properties=_props, required=_required)))

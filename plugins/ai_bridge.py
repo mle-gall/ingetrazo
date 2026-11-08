@@ -74,9 +74,10 @@ class _NoDialogs(QObject):
 
 
 from core.agent_inspection import InspectionTools
+from core.agent_records import RecordTools
 
 
-class _Bridge(QObject, InspectionTools):
+class _Bridge(QObject, InspectionTools, RecordTools):
     """The in-app half: accepts one agent connection and executes its tool
     calls on the Qt main thread."""
 
@@ -110,7 +111,7 @@ class _Bridge(QObject, InspectionTools):
         for spec in BUILTIN_TOOLS:
             register(self.registry, spec["name"], getattr(self, "_tool_" + spec["name"]),
                      description=spec["description"], input_schema=spec["inputSchema"],
-                     mutates=spec["name"] in {"run_python", "undo", "redo"})
+                     mutates=spec.get("mutates", spec["name"] in {"run_python", "undo", "redo"}))
         register(self.registry, "list_tools", self._tool_list_tools,
                  description="List currently available agent tools.")
         # Queued to a BOUND method of this main-thread QObject — connecting a
