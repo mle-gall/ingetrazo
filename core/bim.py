@@ -277,7 +277,9 @@ def collect_objects(scene, memo: dict | None = None) -> list[dict]:
     each time); entries no longer in the model are dropped from it."""
     out: list[dict] = []
     by_id: dict = {}
-    for f in scene.loose_mesh.faces:
+    # An untagged deferred root can be large too; metadata answers first.
+    loose_faces = scene.loose_mesh.faces if _holds_face_tags(scene.loose_mesh) else ()
+    for f in loose_faces:
         tag = f.attrs.get("ifc")
         if tag:
             by_id.setdefault(tag.get("id"), (tag, []))[1].append(f)

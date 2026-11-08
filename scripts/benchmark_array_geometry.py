@@ -44,6 +44,21 @@ def main():
     measure('collect memo', lambda: collect_objects(scene, memo))
     print(json.dumps({'objects': len(objects), 'deferred_meshes': len(deferred)}), flush=True)
     args.output.mkdir(parents=True, exist_ok=True)
+    # Progress helps distinguish formatting time from collection and final I/O.
+    import importlib
+    exporter = importlib.import_module('formats.ifc.export')
+    original_body = exporter.array_body
+    bodies = 0
+
+    def body(*args, **kwargs):
+        nonlocal bodies
+        result = original_body(*args, **kwargs)
+        bodies += 1
+        if bodies % 100 == 0:
+            print(json.dumps({'bodies_written': bodies}), flush=True)
+        return result
+
+    exporter.array_body = body
     for geometry in ('brep', 'polygonal'):
         scene.plugin_data.setdefault('bim_registry', {}).setdefault('export_profiles', {})['array-benchmark'] = {'geometry': geometry}
         path = args.output / (geometry + '.ifc')

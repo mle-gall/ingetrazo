@@ -177,3 +177,21 @@ def test_closed_shell_with_holes(reverse_holes):
             for hole in face.hole_loops:
                 hole.reverse()
     assert quantities(compare(g))[2] == pytest.approx(8)
+
+
+def test_untagged_loose_mesh_stays_deferred(tmp_path, monkeypatch):
+    from formats import igz
+    import core._native as native
+    monkeypatch.setattr(igz, '_LARGE_DOCUMENT', 0)
+    monkeypatch.setattr(igz, '_BULK_MIN', 1)
+    monkeypatch.setattr(native, 'wanted', lambda: True)
+    scene = Scene()
+    for points in CUBE:
+        scene.loose_mesh.add_face([V(*p) for p in points])
+    path = tmp_path / 'loose.igz'
+    igz.save_scene(scene, path)
+    loaded = Scene()
+    igz.load_into(loaded, path)
+    assert '_deferred' in loaded.loose_mesh.__dict__
+    assert collect_objects(loaded) == []
+    assert '_deferred' in loaded.loose_mesh.__dict__

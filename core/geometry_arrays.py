@@ -4,7 +4,7 @@
 Rings retain their winding and holes. Closure is checked after welding all
 placements, because an object can be assembled from individually open shells.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 
 
@@ -15,6 +15,7 @@ class Arrays:
     ring_sizes: np.ndarray
     ring_counts: np.ndarray
     edge_face_counts: np.ndarray | None = None
+    _measurements: object = field(default=None, init=False, repr=False)
 
 
 def faces_arrays(faces):
@@ -95,7 +96,13 @@ def ring_data(a):
 
 
 def measurements(a):
-    """Reusable face metrics for takeoff classes, without face proxies."""
+    """Cached metrics for read-only arrays, shared by IFC body, Qto and paint.
+
+    Mesh edits replace the array bundle through its mutation serial; consumers
+    must treat these arrays as read-only, just like a deferred Plan.
+    """
+    if a._measurements is not None:
+        return a._measurements
     if not len(a.ring_counts):
         return None
     starts, nxt, points, vectors = ring_data(a)
@@ -116,7 +123,8 @@ def measurements(a):
     volume = (abs(float(np.sum(np.einsum('ij,ij->i', points[starts], signed)) / 3))
               if closed else None)
     normals = vectors[outer] / np.maximum(gross[:, None], 1e-300)
-    return gross, net, normals, volume, closed, starts[outer]
+    a._measurements = gross, net, normals, volume, closed, starts[outer]
+    return a._measurements
 
 
 def quantities(arrays):
