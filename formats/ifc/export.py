@@ -7,15 +7,18 @@ from collections import defaultdict
 from pathlib import Path
 
 from core import bim_registry, record
-from core.bim import collect_objects, class_quantities, class_quantities_arrays, _placed_groups, _compose
+from core.bim import (collect_objects, class_quantities, class_quantities_arrays,
+                      _placed_groups, _compose)
 from core.ifc_identity import object_guid, stable_guid
 from core.ifc_tables import TABLES, predefined_types
 from core.version import __version__
 from .entities import Builder
 from core.ifc_tables_data import SCHEMA_DATA
 from .relationships import Appearance
-from .geometry import _brep, array_body
-from core.geometry_arrays import world_arrays, merged, faces_arrays, quantities, measurements
+from .geometry import array_body
+from core.geometry_arrays import (world_arrays, merged, faces_arrays,
+                                  quantities as array_quantities, measurements,
+                                  face_attributes, recorded_arrays)
 from .step import _s, _f
 from .ids import check_ids
 
@@ -206,11 +209,10 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
         if group is not None:
             arrays = merged(world_arrays(group, bases[id(group)], excluded))
             # Appearance needs attributes only, never geometric face objects.
-            from core.mesh import face_attrs
             from core.bim import _untagged_part
             from core.group import iter_placements
             attributes = [attrs for placed, _ in iter_placements(_untagged_part(group, excluded))
-                          for attrs in face_attrs(placed.mesh)]
+                          for attrs in face_attributes(placed.mesh)]
             faces = []
         else:
             faces = obj['faces']
@@ -262,20 +264,13 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
         else:
             appearance.apply(r, group, faces, node, eg, rep, item)
         for index, opening in enumerate(r.get('openings', [])):
-            from core.mesh import Mesh
             from core.ifc_identity import ensure_guid
-            from PySide6.QtGui import QVector3D
-            mesh = Mesh()
-            for face in opening.get('faces', []):
-                mesh.add_face([QVector3D(*p) for p in face['outer']],
-                              [[QVector3D(*p) for p in hole] for hole in face.get('holes', [])] or None)
-            oarrays = faces_arrays(mesh.faces)
+            oarrays = recorded_arrays(opening.get('faces', []))
             if opening.get('group_uid'):
                 child = next((g for g, _ in _placed_groups(group.children) if g.uid == opening['group_uid']), None)
                 if child is not None:
                     oarrays = merged(world_arrays(child, bases[id(child)]))
-            from core.bim import face_set_volume
-            if quantities(oarrays)[2] is None:
+            if array_quantities(oarrays)[2] is None:
                 problems.append({'uid': getattr(group, 'uid', ''), 'name': opening.get('name', ''),
                                  'messages': ['Opening requires a closed face set or a valid closed child group']})
                 continue

@@ -14,6 +14,7 @@ class Arrays:
     corners: np.ndarray
     ring_sizes: np.ndarray
     ring_counts: np.ndarray
+    edge_face_counts: np.ndarray | None = None
 
 
 def faces_arrays(faces):
@@ -41,11 +42,14 @@ def arrays_of(mesh):
     from core.lazy_mesh import plan_of
     plan = plan_of(mesh)
     if plan is not None:
-        return Arrays(plan.pos, plan.corners, plan.ring_sizes, plan.ring_counts)
+        return Arrays(plan.pos, plan.corners, plan.ring_sizes, plan.ring_counts,
+                      np.diff(plan.ef_start))
     serial = getattr(mesh, '_mut_serial', None)
     cached = mesh.__dict__.get('_geometry_arrays')
     if cached is None or cached[0] != serial:
-        cached = (serial, faces_arrays(mesh.faces))
+        arrays = faces_arrays(mesh.faces)
+        arrays.edge_face_counts = np.asarray([len(e.faces) for e in mesh.edges])
+        cached = (serial, arrays)
         mesh.__dict__['_geometry_arrays'] = cached
     return cached[1]
 
@@ -100,9 +104,17 @@ def measurements(a):
     gross = ring_areas[outer]
     net = np.maximum(2 * gross - np.add.reduceat(ring_areas, outer), 0)
     edges = np.sort(np.column_stack((a.corners, a.corners[nxt])), axis=1)
-    _, counts = np.unique(edges, axis=0, return_counts=True)
+    # Integer keys avoid the structured-array sort of unique(axis=0).
+    keys = edges[:, 0] * np.int64(len(a.pos)) + edges[:, 1]
+    _, counts = np.unique(keys, return_counts=True)
     closed = bool(np.all(counts == 2))
-    volume = abs(float(np.sum(np.einsum('ij,ij->i', points[starts], vectors)) / 3)) if closed else None
+    # Triangulation subtracts holes regardless of their stored winding.
+    owners = np.repeat(np.arange(len(outer)), a.ring_counts)
+    same = np.einsum('ij,ij->i', vectors, vectors[outer][owners]) > 0
+    same[outer] = False
+    signed = np.where(same[:, None], -vectors, vectors)
+    volume = (abs(float(np.sum(np.einsum('ij,ij->i', points[starts], signed)) / 3))
+              if closed else None)
     normals = vectors[outer] / np.maximum(gross[:, None], 1e-300)
     return gross, net, normals, volume, closed, starts[outer]
 
@@ -114,3 +126,23 @@ def quantities(arrays):
         return 0., 0., None, False, 0
     gross, net, _, volume, closed, _ = data
     return float(gross.sum()), float(net.sum()), volume, closed, len(gross)
+
+
+def face_attributes(mesh):
+    """Every face's metadata in ring order (face_attrs only yields distinct sets)."""
+    from core.mesh import DeferredMesh
+    if type(mesh) is DeferredMesh:
+        from formats.igz import _face_attrs_from_json
+        src = mesh.__dict__['_deferred_source']
+        table = [_face_attrs_from_json(a) or {} for a in src['meta'].get('face_attrs') or []]
+        return [table[k] if k >= 0 else {} for k in src['face_attr']]
+    return [f.attrs for f in mesh.faces]
+
+
+def recorded_arrays(faces):
+    """Opening records already contain coordinates; do not build a temporary mesh."""
+    rings = [loop for face in faces for loop in (face['outer'], *face.get('holes', []))]
+    sizes = np.asarray([len(loop) for loop in rings], dtype=np.int64)
+    pos = np.asarray([p for loop in rings for p in loop], dtype=float).reshape(-1, 3)
+    counts = np.asarray([1 + len(face.get('holes', [])) for face in faces], dtype=np.int64)
+    return merged([Arrays(pos, np.arange(len(pos)), sizes, counts)])

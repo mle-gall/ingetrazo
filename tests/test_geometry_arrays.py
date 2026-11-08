@@ -136,6 +136,8 @@ def test_loaded_takeoff_stays_deferred(tmp_path, monkeypatch):
     monkeypatch.setattr(native, 'wanted', lambda: True)
     scene = Scene()
     scene.groups.append(cube())
+    for i, face in enumerate(scene.groups[0].mesh.faces):
+        face.attrs['mat'] = 'Minority' if i == 0 else 'Majority'
     path = tmp_path / 'lazy.igz'
     igz.save_scene(scene, path)
     loaded = Scene()
@@ -146,3 +148,32 @@ def test_loaded_takeoff_stays_deferred(tmp_path, monkeypatch):
     assert obj['volume'] == pytest.approx(1.)
     class_quantities_arrays(obj['class'], obj['arrays']())
     assert '_deferred' in mesh.__dict__
+    from formats.ifc import save_ifc
+    save_ifc(loaded, tmp_path / 'lazy.ifc')
+    import ifcopenshell
+    model = ifcopenshell.open(str(tmp_path / 'lazy.ifc'))
+    assert model.by_type('IfcMaterial')[0].Name == 'Majority'
+    assert '_deferred' in mesh.__dict__
+
+
+@pytest.mark.parametrize("reverse_holes", [False, True])
+def test_closed_shell_with_holes(reverse_holes):
+    g = Group()
+    outer = [(0,0), (3,0), (3,3), (0,3)]
+    inner = [(1,1), (2,1), (2,2), (1,2)]
+    for z, reverse in ((0, True), (1, False)):
+        ring = [V(x,y,z) for x,y in outer]
+        hole = [V(x,y,z) for x,y in reversed(inner)]
+        if reverse:
+            ring.reverse()
+            hole.reverse()
+        g.mesh.add_face(ring, [hole])
+    for ring in (outer, list(reversed(inner))):
+        for i, (x,y) in enumerate(ring):
+            xx, yy = ring[(i+1) % 4]
+            g.mesh.add_face([V(x,y,0),V(xx,yy,0),V(xx,yy,1),V(x,y,1)])
+    if reverse_holes:
+        for face in g.mesh.faces:
+            for hole in face.hole_loops:
+                hole.reverse()
+    assert quantities(compare(g))[2] == pytest.approx(8)

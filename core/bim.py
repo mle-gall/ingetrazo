@@ -560,7 +560,11 @@ def class_quantities_arrays(ifc_class, arrays):
     perim = float(np.linalg.norm(points - np.roll(points, -1, axis=0), axis=1).sum())
     u = np.cross([0., 0., 1.], normals[big])
     length = np.linalg.norm(u)
-    width_height = (float(np.ptp(points @ (u / length))), float(np.ptp(points[:, 2]))) if length >= 1e-6 else (float(np.ptp(points, axis=0)[:2].max()), float(np.ptp(points[:, 2])))
+    height = float(np.ptp(points[:, 2]))
+    if length >= 1e-6:
+        width_height = float(np.ptp(points @ (u / length))), height
+    else:
+        width_height = float(np.ptp(points, axis=0)[:2].max()), height
     entries: list[tuple[str, str, float]] = []
 
     def add(kind, name, value):
