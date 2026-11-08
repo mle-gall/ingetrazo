@@ -14,7 +14,9 @@ class ClassPicker(QComboBox):
         self.activated.connect(self._pick)
 
     def set_registry(self, registry):
-        classes = ordered_classes(registry)
+        preferred = [entry['class'] for value in registry.get('tag_sets', {}).values()
+                     if value.get('default') for entry in value.get('classes', [])]
+        classes = list(dict.fromkeys(preferred)) or ordered_classes(registry)
         if classes == self._classes:
             return
         selected = self.currentText()
@@ -23,10 +25,16 @@ class ClassPicker(QComboBox):
         self.addItems(classes)
         self.insertSeparator(self.count())
         self.addItem('All classes…')
-        if selected in classes:
+        if selected in TABLES:
             self.setCurrentText(selected)
         self.blockSignals(False)
         self._classes = classes
+
+    def setCurrentText(self, text):
+        # Existing records may use a class outside the project's favourites.
+        if text in TABLES and self.findText(text) < 0:
+            self.insertItem(max(0, self.count() - 2), text)
+        super().setCurrentText(text)
 
     def _pick(self, index):
         if self.itemText(index) != 'All classes…':

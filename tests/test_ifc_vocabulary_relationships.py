@@ -145,3 +145,12 @@ def test_copied_openings_get_new_identity_and_internal_references():
     assert copied.children[0].ifc['fills'] == copied_opening['guid']
     assert copied_opening['group_uid'] == copied.children[1].uid
     assert host.ifc['openings'][0]['guid'] == old_guid
+
+
+def test_quantity_library_and_cache_refresh(tmp_path):
+    from core.pset_library import load
+    path = tmp_path / 'qto.xml'
+    path.write_text('<QtoSetDef><Name>Qto_Test</Name><QtoDefs><QtoDef><Name>Length</Name><QtoType>Q_LENGTH</QtoType></QtoDef></QtoDefs></QtoSetDef>')
+    assert load(tmp_path)['Qto_Test']['properties']['Length']['kind'] == 'length'
+    path.write_text(path.read_text().replace('Length', 'Volume').replace('Q_LENGTH', 'Q_VOLUME'))
+    assert load(tmp_path)['Qto_Test']['properties']['Volume']['kind'] == 'volume'

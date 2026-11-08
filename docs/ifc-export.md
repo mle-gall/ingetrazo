@@ -124,4 +124,4 @@ records requiring material usage, decomposition or host relationships are
 reported and skipped. Their names remain available in the vocabulary, but full
 specialization export is unfinished. Group registry type references do not emit
 an invalid proxy type relationship. Referenced child void geometry is excluded from the host representation;
-callers must supply a host already representing the void (no Boolean cut is made). Qto XML templates and non-scalar PSD property types need further support.
+callers must supply a host already representing the void (no Boolean cut is made). Non-scalar PSD property values need further support.

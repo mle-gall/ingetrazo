@@ -40,6 +40,12 @@ def load(path):
             properties[prop_name] = {'kind': 'enum' if members else kind}
             if members:
                 properties[prop_name]['members'] = members
+        for quantity in root.findall('./QtoDefs/QtoDef'):
+            prop_name = quantity.findtext('Name')
+            kind = {'Q_LENGTH': 'length', 'Q_AREA': 'area', 'Q_VOLUME': 'volume',
+                    'Q_COUNT': 'real', 'Q_WEIGHT': 'real', 'Q_TIME': 'real'}.get(quantity.findtext('QtoType'), 'real')
+            if prop_name:
+                properties[prop_name] = {'kind': kind}
         result[name] = {'properties': properties, 'applicable_classes': [n.text for n in root.findall('./ApplicableClasses/ClassName') if n.text]}
     _CACHE[key] = stamp, result
     return deepcopy(result)
