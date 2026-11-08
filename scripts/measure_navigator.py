@@ -16,6 +16,7 @@ print('load', time.perf_counter()-t, flush=True)
 t = time.perf_counter()
 index = facets.build(scene)
 print('index', time.perf_counter()-t, 'groups', len(index), flush=True)
+print('records', sum(g.ifc is not None for g in index.groups.values()), flush=True)
 for expr in [None, {'facet': 'class', 'eq': 'IfcColumn'}, {'text': '*launch*'}, {'all': [{'facet': 'kind:discipline', 'eq': 'S'}, {'facet': 'system', 'exists': True}]}]:
     t = time.perf_counter()
     uids = facets.evaluate(index, expr)

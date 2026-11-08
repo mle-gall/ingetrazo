@@ -8,20 +8,20 @@ the isolated worktree interpreter. No changes were made to the fixture.
 
 | Operation | Seconds | Notes |
 | --- | ---: | --- |
-| Load fixture | 10.674 | Repeated load |
-| Index | 1.167 | 91,211 placements; lazy material/problems |
-| Evaluate null | 0.009 | 91,211 results |
-| Evaluate class = IfcColumn | 0.024 | Zero results |
-| Evaluate text = *launch* | 0.276 | 11,085 results |
-| Evaluate structural AND system exists | 0.048 | Zero results |
-| First facet tree | 0.691 | Offscreen Qt widgets, final grouping/counts |
-| Change class filter | 0.265 | Empty result set |
-| Set isolate display state | 0.175 | Does not include GPU upload/frame latency |
-| Launch isolation + tag colour state | 1.742 | Real Viewport; includes fresh index after prior display change |
-| Build filtered placement proxies | 0.905 | 11,085 placements; no GPU work |
+| Load fixture | 8.416 | Repeated load |
+| Index | 1.059 | 91,211 placements; lazy material/problems |
+| Evaluate null | 0.008 | 91,211 results |
+| Evaluate class = IfcColumn | 0.020 | Zero results |
+| Evaluate text = *launch* | 0.206 | 11,085 results |
+| Evaluate structural AND system exists | 0.039 | Zero results |
+| First facet tree | 0.627 | Offscreen Qt widgets, final grouping/counts |
+| Change class filter | 0.212 | Empty result set |
+| Set isolate display state | 0.129 | Does not include GPU upload/frame latency |
+| Launch isolation + tag colour state | 1.379 | Real Viewport; includes fresh index after prior display change |
+| Build filtered placement proxies | 0.689 | 11,085 placements; no GPU work |
 
-The supplied file loaded **no group IFC records**: class/system counts were
-empty. The reported 1,482 classified records were therefore unavailable in this
+The supplied file loaded **zero group IFC records** (explicitly counted with
+`group.ifc is not None`): class/system counts were empty. The reported 1,482 classified records were therefore unavailable in this
 on-disk fixture. They may exist in an unsaved live document; this experiment did
 not inspect or alter that application. These numbers establish metadata/tree
 performance, not classified-workflow performance. A classified fixture must be
@@ -32,7 +32,7 @@ boolean expressions, lazy materials and validation are not bounded to 0.3 s.
 Material fallback can instantiate deferred meshes and freeze the UI. It needs
 incremental work or extraction from deferred geometry arrays before production.
 Launch isolation, tag colour state and real placement-proxy construction total
-2.65 s. First paint, GPU recolouring and interactive picking latency remain
+2.07 s. First paint, GPU recolouring and interactive picking latency remain
 unmeasured; the offscreen platform reports QOpenGLWidget unsupported.
 The dock groups all results before paging definitions and counts checked
 facets without their own clause. An earlier load took 34.068 s.
@@ -110,3 +110,6 @@ snapshots and BIM takeoff as a quantity view over the same evaluated UID set.
 This is a useful architectural spike, not evidence that all three panels can be
 removed today. The classified ride fixture, real rendering benchmarks and short
 observed task trials are the next acceptance gate.
+
+Exact test commands, counts, interrupted-run details and the failure comparison
+are recorded in [the validation ledger](navigator-validation.md).
