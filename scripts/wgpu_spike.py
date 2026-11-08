@@ -20,9 +20,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model', type=Path)
     parser.add_argument('--measure', action='store_true')
+    parser.add_argument('--inventory-only', action='store_true')
     args = parser.parse_args()
-    import faulthandler
-    faulthandler.dump_traceback_later(60, repeat=True)
     app = QApplication([])
     window = QMainWindow()
     view = WgpuView()
@@ -35,6 +34,23 @@ def main():
     load_into(scene, args.model)
     loaded = time.perf_counter()
     print('loaded', loaded-start, flush=True)
+    if args.inventory_only:
+        from core.group import iter_placements
+        from core.mesh import DeferredMesh
+        groups = [g for root in scene.groups for g, _ in iter_placements(root)]
+        meshes = {id(g.mesh): g.mesh for g in groups}
+        counts = {}
+        for key, mesh in meshes.items():
+            src = mesh.__dict__.get('_deferred_source')
+            counts[key] = ((len(src['pos']), len(src['counts']), len(src['edges']))
+                           if src else (len(mesh.vertices), len(mesh.faces), len(mesh.edges)))
+        print(json.dumps(dict(groups=len(groups), prototypes=len(meshes),
+            raw_pos_placements=sum(counts[id(g.mesh)][0] > 0 for g in groups),
+            raw_face_placements=sum(counts[id(g.mesh)][1] > 0 for g in groups),
+            raw_edge_placements=sum(counts[id(g.mesh)][2] > 0 for g in groups),
+            empty_meshes=sum(c == (0, 0, 0) for c in counts.values()),
+            deferred=sum(type(m) is DeferredMesh for m in meshes.values())), indent=2))
+        return
     view.set_scene(scene)
     window.show()
     app.processEvents()

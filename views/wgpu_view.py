@@ -18,6 +18,7 @@ class WgpuView(QWidget):
         self.camera = OrbitCamera()
         self.renderer = None
         self.packed = None
+        self._scene_dirty = False
         self.last = None
         self.build_seconds = self.upload_seconds = 0.
 
@@ -27,6 +28,7 @@ class WgpuView(QWidget):
     def set_scene(self, scene):
         start = time.perf_counter()
         self.packed = pack_scene(scene)
+        self._scene_dirty = True
         self.build_seconds = time.perf_counter()-start
         lo, hi = self.packed.world_bounds
         self.camera.target = QVector3D(*((lo+hi)/2))
@@ -43,11 +45,12 @@ class WgpuView(QWidget):
         if len(self.packed.instances):
             self.packed.upload(self.renderer)
         self.upload_seconds = time.perf_counter()-start
+        self._scene_dirty = False
         self.update()
 
     def showEvent(self, event):
         super().showEvent(event)
-        if self.renderer is None:
+        if self.renderer is None or self._scene_dirty:
             self._upload()
 
     def resizeEvent(self, event):
