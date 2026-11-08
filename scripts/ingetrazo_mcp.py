@@ -75,7 +75,7 @@ def _bridge(tool: str, args: dict) -> dict:
     for attempt in (0, 1):
         if _sock is None:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(180.0)
+            s.settimeout(1900.0)   # above the bridge's UI_CALL_TIMEOUT
             s.connect((HOST, PORT))
             _sock = s
         _req_id += 1

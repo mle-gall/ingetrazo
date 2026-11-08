@@ -46,6 +46,12 @@ DEFAULT_PORT = 4763
 _REFUSED = b'{"id": null, "ok": false, "error": "not a bridge request; closing"}\n'
 
 
+#: How long a request waits for its turn on the UI thread. The first frame
+#: of a four-million-face model, or its IFC export, runs for minutes on that
+#: thread; a short limit only turned a slow success into a reported failure.
+UI_CALL_TIMEOUT = 1800.0
+
+
 class _NoDialogs(QObject):
     """While an agent's code runs, nobody is at the screen to answer a
     dialog it opens (#694): «Delete sheet» asks Yes/No, a sheet the
@@ -211,9 +217,11 @@ class _Bridge(QObject, InspectionTools, RecordTools):
             return None
         job = {"req": req, "done": threading.Event(), "reply": None}
         self._dispatch.emit(job)
-        job["done"].wait(timeout=120.0)
+        job["done"].wait(timeout=UI_CALL_TIMEOUT)
         reply = job["reply"] or {"id": req.get("id"), "ok": False,
-                                 "error": "timed out on the UI thread"}
+                                 "error": f"timed out on the UI thread after "
+                                          f"{UI_CALL_TIMEOUT:.0f} s (the call may "
+                                          f"still finish; the next call waits for it)"}
         return (json.dumps(reply) + "\n").encode()
 
     # ---- Main-thread side ----------------------------------------------------

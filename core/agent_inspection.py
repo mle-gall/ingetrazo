@@ -124,18 +124,24 @@ class InspectionTools:
             raise ValueError("depth/offset must be nonnegative and limit between 1 and 1000")
         root = self._find(root_uid)[0] if root_uid else None
         root_depth = len(self._find(root_uid)[1]) if root else 0
-        rows = []
+        # Select first, build rows only for the page: a 91k-group model is
+        # paged in ~100 calls, and each used to build every row to slice it.
+        selected = []
         for g, parents, matrix in self._groups():
             if root is not None and g is not root and root not in parents:
                 continue
             relative = len(parents) - root_depth
             if relative > depth or (not include_hidden and any(p.hidden for p in [*parents, g])):
                 continue
+            selected.append((g, parents, matrix, relative))
+        rows = []
+        for g, parents, matrix, relative in selected[offset:offset + limit]:
             row = self._row(g, parents, matrix)
             row["depth"] = relative
             rows.append(row)
-        return dict(rows=rows[offset:offset+limit], total=len(rows),
-                    next_offset=offset+limit if offset+limit < len(rows) else None,
+        total = len(selected)
+        return dict(rows=rows, total=total,
+                    next_offset=offset + limit if offset + limit < total else None,
                     version=self._viewport.scene.version)
 
     def _tool_query_entity(self, uid):
