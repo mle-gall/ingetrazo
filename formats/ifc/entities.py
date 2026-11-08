@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Attribute order is explicit so schema drift fails before a file is written.
 
-These are hand-written interoperability facts, not bundled EXPRESS definitions.
+These are generated interoperability facts, not bundled EXPRESS definitions.
 """
 from .step import _Writer
 

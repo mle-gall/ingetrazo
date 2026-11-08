@@ -84,6 +84,23 @@ _COMMON = {
     'BuildingStorey': 'Reference:label EntranceLevel:boolean AboveGround:enum SprinklerProtection:boolean SprinklerProtectionAutomatic:boolean LoadBearingCapacity:real GrossPlannedArea:area NetPlannedArea:area',
     'SpatialZone': 'Reference:label IsExternal:boolean',
 }
+# Additional IFC4 common property names, independently checked by the
+# optional IfcOpenShell oracle. No library definitions or descriptions ship.
+_COMMON.update({
+    'BuildingSystem': 'Reference:label',
+    'DistributionSystem': 'Reference:label',
+    'Chimney': 'Reference:label Status:enum NumberOfDrafts:integer IsExternal:boolean ThermalTransmittance:real LoadBearing:boolean FireRating:label',
+    'CivilElement': 'Reference:label Status:enum',
+    'DistributionChamberElement': 'Reference:label Status:enum',
+    'OpeningElement': 'Reference:label Status:enum Purpose:label FireExit:boolean ProtectedOpening:boolean',
+    'RampFlight': 'Reference:label Status:enum Headroom:length ClearWidth:length Slope:real CounterSlope:real',
+    'ReinforcingMesh': 'Reference:label Status:enum MeshLength:length MeshWidth:length LongitudinalBarNominalDiameter:length LongitudinalBarSpacing:length LongitudinalBarSurface:enum TransverseBarNominalDiameter:length TransverseBarSpacing:length TransverseBarSurface:enum TransverseBarBendingShapeCode:label TransverseBarBendingParameters:text',
+    'ShadingDevice': 'Reference:label Status:enum ShadingDeviceType:enum MechanicalOperated:boolean SolarTransmittance:real SolarReflectance:real VisibleLightTransmittance:real VisibleLightReflectance:real ThermalTransmittance:real IsExternal:boolean Roughness:label SurfaceColor:label',
+    'StairFlight': 'Reference:label Status:enum NumberOfRiser:integer NumberOfTreads:integer RiserHeight:length TreadLength:length NosingLength:length WalkingLineOffset:length TreadLengthAtOffset:length TreadLengthAtInnerSide:length Headroom:length WaistThickness:length',
+    'Tendon': 'Reference:label Status:enum NominalDiameter:length SheathDiameter:length',
+    'TendonAnchor': 'Reference:label Status:enum',
+    'Zone': _COMMON['Space'],
+})
 _COMMON['Member'] = _COMMON['Beam']
 _COMMON['Pile'] = _COMMON['Footing']
 for name, properties in _COMMON.items():
@@ -95,10 +112,13 @@ for name, properties in _COMMON.items():
             template[prop]['members'] = list(STATUS)
         elif prop in ('AboveGround', 'IsLandmarked'):
             template[prop]['members'] = ['TRUE', 'FALSE', 'UNKNOWN']
-        elif prop == 'BarSurface':
+        elif prop == 'ShadingDeviceType':
+            template[prop]['members'] = ['FIXED', 'MOVABLE', 'OVERHANG', 'SIDEFIN', 'OTHER', 'NOTKNOWN', 'UNSET']
+        elif prop in ('BarSurface', 'LongitudinalBarSurface', 'TransverseBarSurface'):
             template[prop]['members'] = ['PLAIN', 'TEXTURED', 'OTHER', 'USERDEFINED', 'NOTDEFINED']
 # The v1 scalar record cannot encode IFC list-valued bending parameters.
 TABLES['IfcReinforcingBar']['common']['BendingParameters']['scalar_only'] = False
+TABLES['IfcReinforcingMesh']['common']['TransverseBarBendingParameters']['scalar_only'] = False
 
 def predefined_types(ifc_class, schema='IFC4'):
     return list(TABLES.get(ifc_class, {}).get('predefined_types', {}).get(schema, []))
