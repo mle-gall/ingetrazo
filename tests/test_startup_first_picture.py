@@ -21,7 +21,11 @@ def test_open_does_not_prepare_before_picture(tmp_path, monkeypatch):
         assert win.open_path(path)
         assert order == []
         assert win._doc._awaiting_picture
+        win.viewport.frameSwapped.emit()  # stale swap, no loaded chunks yet
+        assert win._doc._awaiting_picture
+        assert order == []
         order.append('frame')
+        win.viewport._edges_version = win.viewport.scene.version
         win.viewport.frameSwapped.emit()
         assert not win._doc._awaiting_picture
         # Use a bounded Qt loop to drain paced jobs without needing a GL driver.

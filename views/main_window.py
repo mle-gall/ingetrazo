@@ -6191,6 +6191,8 @@ class MainWindow(QMainWindow):
         viewport under Metal. Do not run that duplicate whole-scene pass.
         """
         from core import renderer_settings
+        if doc is None:
+            return
         if getattr(self, "_opening_document", False):
             return
         # Progress callbacks can pump a presentation of the previous scene.
@@ -6203,6 +6205,9 @@ class MainWindow(QMainWindow):
             renderer_settings.first_frame()
         if not getattr(doc, "_awaiting_picture", False):
             return
+        if (not getattr(doc, "_renderer_wgpu", False)
+                and doc.viewport._edges_version != doc.viewport.scene.version):
+            return  # a queued swap of the old GL image is not this model
         doc._awaiting_picture = False
         self._drain_document_startup(doc)
 
@@ -6308,7 +6313,7 @@ class MainWindow(QMainWindow):
                     fn(*args)
             return dispatch
         vp.frameSwapped.connect(lambda: self._document_first_frame(
-            next((d for d in self._documents if d.viewport is vp), self._doc)))
+            next((d for d in self._documents if d.viewport is vp), None)))
         vp.projectionChanged.connect(live(self._sync_projection_buttons))
         for name in ("tray", "bim_tray", "georef_tray", "project_browser",
                      "layers_dock", "layers_toolbar", "profile_dock"):
