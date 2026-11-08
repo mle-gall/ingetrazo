@@ -218,3 +218,25 @@ def test_memoised_placement_state_matches_viewport():
     scene._navigator_allowed = {groups[2].uid}
     resolve = _placement_state(scene)
     assert [resolve(g)[0] for g in groups] == [scene.entity_visible(g) for g in groups]
+
+
+def test_nested_placements_inherit_hidden_state_and_tag_visibility():
+    """A child of a hidden group, and a grandchild below it, carry the hidden
+    flag; a child on a switched-off tag inside a visible root does too; a
+    visible sibling does not."""
+    from core.layers import Layer
+    root = Group(triangle(), 'root')
+    hidden_child = Group(triangle(), 'hidden child'); hidden_child.hidden = True
+    grandchild = Group(triangle(), 'grandchild')
+    hidden_child.children = [grandchild]
+    tagged = Group(triangle(), 'on off tag'); tagged.layer = 'off'
+    plain = Group(triangle(), 'plain')
+    root.children = [hidden_child, tagged, plain]
+    scene = Scene(groups=[root])
+    off = Layer('off'); off.visible = False
+    scene.layers.append(off)
+    packed = pack_scene(scene)
+    flags = dict(zip(packed.uids, packed.instances['info'][:, 2].tolist()))
+    assert flags[root.uid] == 0 and flags[plain.uid] == 0
+    assert flags[hidden_child.uid] == 1 and flags[grandchild.uid] == 1
+    assert flags[tagged.uid] == 1

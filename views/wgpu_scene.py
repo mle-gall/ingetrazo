@@ -158,9 +158,24 @@ def pack_scene(scene, view_tint=None):
     meshes, lookup, rows, uids, paints = [], {}, [], [], []
     groups = []
     placements = [(None, None, scene.loose_mesh, False)]
+    # Visibility is inherited down the tree, as the GL proxies do it: a
+    # placement inside a hidden group, or inside a group whose tag is off,
+    # is hidden whatever its own flags say. Taking only the root's state
+    # drew the ride's hidden concrete volumes and context walls (R-look).
+    parent_of = {}
+
+    def map_parents(group):
+        for child in getattr(group, 'children', None) or ():
+            parent_of[id(child)] = group
+            map_parents(child)
+    hidden_of = {}
     for root in scene.groups:
-        root_hidden = not state(root)[0]
-        placements.extend((g, matrix, g.mesh, root_hidden) for g, matrix in iter_placements(root))
+        map_parents(root)
+        for g, matrix in iter_placements(root):
+            parent = parent_of.get(id(g))
+            inherited = hidden_of.get(id(parent), False) if parent is not None else False
+            hidden_of[id(g)] = inherited or not state(g)[0]
+            placements.append((g, matrix, g.mesh, hidden_of[id(g)]))
     for group, matrix, mesh, hidden in placements:
         key = id(mesh)
         if key not in lookup:
