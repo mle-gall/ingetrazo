@@ -30,7 +30,7 @@ def test_shared_mesh_bounds_and_column_major():
     b.xform.translate(10, 20, 30)
     b.xform.scale(-2, 3, 1)
     packed = pack_scene(Scene(groups=[a, b]))
-    assert len(packed.vertices) == 3
+    assert len(packed.vertices) == 9
     assert len(packed.bounds) == 1
     assert len(packed.instances) == 2
     assert packed.commands['count'].tolist() == [3]
@@ -45,15 +45,15 @@ def test_empty_and_explicit_color():
     mesh = triangle()
     mesh.faces[0].attrs['color'] = (1, 0, 0)
     packed = pack_scene(Scene(groups=[Group(mesh)]))
-    np.testing.assert_array_equal(packed.vertices['color'], [[255, 0, 0, 255]]*3)
+    np.testing.assert_array_equal(packed.vertices['color'][:3], [[255, 0, 0, 255]]*3)
 
 
 def test_prototype_offsets():
     packed = pack_scene(Scene(groups=[Group(triangle()), Group(triangle())]))
-    assert packed.commands['first'].tolist() == [0, 3]
-    assert packed.commands['base'].tolist() == [0, 3]
+    assert packed.commands['first'].tolist() == [0, 9]
+    assert packed.commands['base'].tolist() == [0, 9]
     assert packed.commands['start'].tolist() == [0, 1]
-    assert packed.indices.tolist() == [0, 1, 2, 0, 1, 2]
+    assert packed.indices.tolist() == list(range(9))*2
 
 
 def test_lazy_arrays_stay_deferred(tmp_path, monkeypatch):
@@ -70,7 +70,7 @@ def test_lazy_arrays_stay_deferred(tmp_path, monkeypatch):
     assert type(mesh) is DeferredMesh
     packed = pack_scene(scene)
     assert type(mesh) is DeferredMesh
-    assert len(packed.indices) == 3
+    assert len(packed.indices) == 9
     np.testing.assert_array_equal(packed.bounds[0, :, :3], [[0, 0, 0], [2, 3, 0]])
 
 
@@ -90,3 +90,43 @@ def test_hidden_placements_reside_with_a_gpu_flag():
     packed = pack_scene(Scene(groups=[hidden, Group(triangle())]))
     assert len(packed.instances) == 2
     assert packed.instances['info'][:, 2].tolist() == [1, 0]
+
+
+def test_hard_edges_exclude_soft_and_hidden():
+    mesh = triangle()
+    mesh.edges[0].soft = True
+    mesh.edges[1].hidden = True
+    packed = pack_scene(Scene(groups=[Group(mesh)]))
+    assert packed.edge_commands['count'].tolist() == [2]
+    assert packed.edge_commands['first'].tolist() == [3]
+
+
+def test_upload_borrows_contiguous_arrays():
+    packed = pack_scene(Scene(groups=[Group(triangle())]))
+    class Receiver:
+        def set_scene(self, arrays, instances):
+            assert all(a.dtype == np.uint8 and a.flags.c_contiguous for a in arrays)
+            assert np.shares_memory(arrays[0], packed.vertices)
+            assert np.shares_memory(instances, packed.instances)
+            assert len(arrays[3]) == 40
+    packed.upload(Receiver())
+
+
+def test_face_container_and_view_tint_are_independent():
+    mesh = triangle()
+    mesh.faces[0].attrs['color'] = (1, 0, 0)
+    group = Group(mesh)
+    group.material = {'color': (0, 1, 0)}
+    packed = pack_scene(Scene(groups=[group]), {group.uid: (0, 0, 1)})
+    np.testing.assert_array_equal(packed.vertices['color'][:3], [[255, 0, 0, 255]]*3)
+    row = packed.instances['info'][0]
+    assert int(row[1]) == 0xff00ff00
+    assert int(row[3]) == 0xffff0000
+
+
+def test_native_bake_rejects_invalid_ring_shape():
+    with pytest.raises(ValueError, match='ring'):
+        _native.available().bake_vertices(
+            np.zeros((3, 3), np.float32), np.arange(3, dtype=np.int64),
+            np.array([-3], np.int64), np.array([1], np.int64),
+            np.zeros((1, 4), np.uint8), np.zeros(1, bool), _native.qt_hypot())
