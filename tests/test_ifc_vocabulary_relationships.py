@@ -126,3 +126,22 @@ def test_child_opening_and_material_fallback(tmp_path):
 ])
 def test_malformed_relationship_records(patch):
     assert record.validate({'class': 'IfcWall', **patch}, {})
+
+
+def test_copied_openings_get_new_identity_and_internal_references():
+    from core.group import copy_group
+    from core.ifc_identity import ensure_guid
+    host = Group(name='Host')
+    void = Group(mesh_at(0), 'Void')
+    door = Group(name='Door')
+    opening = {'group_uid': void.uid}
+    old_guid = ensure_guid(opening)
+    host.ifc = {'class': 'IfcWall', 'openings': [opening]}
+    door.ifc = {'class': 'IfcDoor', 'fills': old_guid}
+    host.children = [door, void]
+    copied = copy_group(host)
+    copied_opening = copied.ifc['openings'][0]
+    assert copied_opening['guid'] != old_guid
+    assert copied.children[0].ifc['fills'] == copied_opening['guid']
+    assert copied_opening['group_uid'] == copied.children[1].uid
+    assert host.ifc['openings'][0]['guid'] == old_guid
