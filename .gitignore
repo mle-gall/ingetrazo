@@ -87,3 +87,6 @@ benchmarks/models/
 
 # Worktree-local renderer validation scratch
 /.r2-tmp/
+
+# Local comparison texture extraction
+/.look-tmp/

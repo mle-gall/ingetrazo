@@ -144,7 +144,7 @@ def _placement_state(scene):
             # A style-generated Front tint is not material paint. Keep that
             # distinction resident so changing style needs no geometry rebuild.
             unpainted = not paint or (not material and paint.get('front_only'))
-            rgb = paint.get('color') or (0, 0, 0)
+            rgb = paint.get('color') or (210/255,)*3
             alpha = 0 if unpainted else 255
             paints[key] = np.array([*np.clip(np.array(rgb[:3])*255, 0, 255), alpha], np.uint8).view('<u4')[0]
         return visible, paints[key]
