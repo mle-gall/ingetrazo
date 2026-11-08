@@ -6191,6 +6191,13 @@ class MainWindow(QMainWindow):
         viewport under Metal. Do not run that duplicate whole-scene pass.
         """
         from core import renderer_settings
+        if getattr(self, "_opening_document", False):
+            return
+        # Progress callbacks can pump a presentation of the previous scene.
+        # Only a frame after this document's resident upload releases work.
+        if (getattr(doc, "_renderer_wgpu", False)
+                and not getattr(doc, "_resident_scene_ready", True)):
+            return
         if getattr(doc, "_renderer_starting", False):
             doc._renderer_starting = False
             renderer_settings.first_frame()
@@ -6251,6 +6258,7 @@ class MainWindow(QMainWindow):
             renderer_settings.arm()
             doc._renderer_starting = True
             display.set_scene(doc.viewport.scene)
+            doc._resident_scene_ready = True
             if not len(display.packed.instances):
                 self._document_first_frame(doc)
         refresh.timeout.connect(rebuild)
@@ -6987,6 +6995,7 @@ class MainWindow(QMainWindow):
         # answering the desktop on the model of #158.
         self.viewport.setUpdatesEnabled(False)
         self._opening_document = True
+        self._doc._resident_scene_ready = False
         try:
             try:
                 igz_format.load_into(self.viewport.scene,
