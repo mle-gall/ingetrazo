@@ -109,3 +109,57 @@ def test_hide_exact_complement_survives_previous():
     set_display(vp)
     previous_display(vp)
     assert not scene.entity_selectable(child)
+
+
+def test_bridge_saved_views_and_paging():
+    from core.agent_facets import FacetTools
+    from types import SimpleNamespace
+    scene, parent, child, other = model()
+    agent = FacetTools()
+    agent._viewport = SimpleNamespace(scene=scene, history=History(scene), update=lambda: None)
+    assert agent._tool_query_facets(facets=['system']) == {'system': {'launch': 1}}
+    page = agent._tool_query_view(limit=1)
+    assert page['total'] == 3 and page['next_offset'] == 1
+    agent._tool_save_view('columns', 'Columns', {'facet': 'class', 'eq': 'IfcColumn'}, isolate=True)
+    assert agent._tool_apply_view('columns')['uids'] == [child.uid]
+    assert not scene.entity_selectable(other)
+    agent._tool_set_view_filter()
+    assert scene.entity_selectable(other)
+
+
+def test_dock_missing_values_and_or_choices():
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QMainWindow
+    from views.navigator import NavigatorDock
+    scene, parent, child, other = model()
+    window = QMainWindow()
+    window.viewport = SimpleNamespace(scene=scene, history=History(scene), update=lambda: None)
+    dock = NavigatorDock(window)
+    dock.index = facets.build(scene)
+    dock.checked = {'class': {None}}
+    dock.refilter()
+    assert dock.result_uids == [parent.uid, other.uid]
+    dock.checked = {'name': {'Launch', 'Pier 1'}}
+    dock.refilter()
+    assert dock.result_uids == [parent.uid, child.uid]
+    dock.close()
+    window.close()
+
+
+def test_filtered_ifc_profile_exports_only_matching_group(tmp_path):
+    from PySide6.QtGui import QVector3D
+    from formats.ifc import save_ifc
+    scene = Scene()
+    for name in ('Keep', 'Omit'):
+        group = Group(name=name)
+        group.mesh.add_face([QVector3D(0, 0, 0), QVector3D(1, 0, 0), QVector3D(1, 1, 0)])
+        group.ifc = {'class': 'IfcSlab', 'name': name}
+        scene.groups.append(group)
+    registry = bim_registry.seed_defaults()
+    registry['export_profiles']['one'] = dict(schema='IFC4', filter={'facet': 'name', 'eq': 'Keep'})
+    scene.plugin_data['bim_registry'] = registry
+    path = tmp_path / 'one.ifc'
+    save_ifc(scene, path, profile='one')
+    text = path.read_text()
+    assert text.count('IFCSLAB(') == 1
+    assert "'Keep'" in text and "'Omit'" not in text

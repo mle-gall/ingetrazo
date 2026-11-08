@@ -19,6 +19,7 @@ class NavigatorDock(QDockWidget, FacetTools):
         self.setObjectName('NavigatorDock')
         self._window = window
         self.checked = {}
+        self._base_filter = None
         self.current_filter = None
         self._busy = False
         self._signature = None
@@ -134,8 +135,15 @@ class NavigatorDock(QDockWidget, FacetTools):
         kinds = sorted({k for row in self.index.values() for k in row if k.startswith('kind:')})
         return ['class', *kinds, 'system', 'storey', 'tag', 'definition', 'type', 'material', 'status', 'linked', 'path']
 
-    def expression(self):
-        clauses = [{'facet': name, 'in': list(values)} for name, values in self.checked.items() if values]
+    def expression(self, exclude=None):
+        clauses = [self._base_filter] if self._base_filter is not None else []
+        for name, values in self.checked.items():
+            if not values or name == exclude:
+                continue
+            choices = [{'facet': name, 'in': [v for v in values if v is not None]}]
+            if None in values:
+                choices.append({'facet': name, 'exists': False})
+            clauses.append({'any': choices})
         text = self.search.text().strip()
         if text:
             clauses.append({'text': text if any(c in text for c in '*?[') else '*' + text + '*'})
@@ -159,9 +167,11 @@ class NavigatorDock(QDockWidget, FacetTools):
                 continue
             count_uids = self.result_uids
             if self.checked.get(name):
-                expression = {'all': [c for c in self.current_filter['all'] if c.get('facet') != name]}
-                count_uids = facets.evaluate(self.index, expression)
+                count_uids = facets.evaluate(self.index, self.expression(exclude=name))
             counts = facets.values(self.index, name, count_uids)
+            missing = sum(self.index[u].get(name) in (None, '', []) for u in count_uids)
+            if missing:
+                counts[None] = missing
             choices = sorted(counts, key=lambda v: (-counts[v], str(v)))
             choices = list(dict.fromkeys(list(self.checked.get(name, ())) + choices))
             self.fill_values(parent, name, counts, choices[:50])
@@ -179,7 +189,7 @@ class NavigatorDock(QDockWidget, FacetTools):
 
     def fill_values(self, parent, name, counts, choices):
         for value in choices:
-            item = QTreeWidgetItem(parent, [str(value), str(counts.get(value, 0))])
+            item = QTreeWidgetItem(parent, ['(missing)' if value is None else str(value), str(counts.get(value, 0))])
             item.setData(0, Qt.UserRole, (name, value))
             item.setCheckState(0, Qt.Checked if value in self.checked.get(name, ()) else Qt.Unchecked)
 
@@ -264,17 +274,15 @@ class NavigatorDock(QDockWidget, FacetTools):
     def apply_saved(self):
         key = self.views.currentData()
         if key:
-            self._tool_apply_view(key)
             view = bim_registry.get(self._viewport.scene)['views'][key]
-            # Arbitrary saved expressions remain valid even when not representable
-            # as checkboxes; show their result set directly.
-            self.current_filter = view['filter']
-            self.result_uids = facets.evaluate(self.index, self.current_filter)
             self._busy = True
-            self.results.clear()
-            self._result_offset = 0
-            self.more_results()
+            self._base_filter = view['filter']
+            self.checked.clear()
+            self.search.clear()
+            self.color.setCurrentIndex(max(0, self.color.findData(view.get('color_by'))))
             self._busy = False
+            self.refilter()
+            self._tool_apply_view(key)
 
     def targets(self, selected=False):
         uids = [u for u, g in self.index.groups.items() if g in self._viewport.scene.selection] if selected else self.result_uids
@@ -317,6 +325,8 @@ class NavigatorDock(QDockWidget, FacetTools):
         if not data:
             return
         name, value = data
+        if value is None:
+            return
         if name not in ('class', 'system', 'type', 'status', 'tag', 'storey') and not name.startswith('kind:'):
             return
         menu = QMenu(self)

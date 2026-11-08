@@ -86,7 +86,8 @@ not captured by scenes.
 Search treats plain text as a substring and accepts explicit globs. Checked
 values are OR within a facet and AND across facets. Counts exclude that facet's
 own clause so another OR choice remains reachable. Facets show the first 50
-values and a text field for finding more. Results group by definition, page
+values and a text field for finding more. `(missing)` selects absent facts.
+Results group by definition, page
 1,000 definitions at a time and create placement children on expansion.
 Selection follows loaded result rows; Select all includes all matching groups.
 

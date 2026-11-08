@@ -1827,6 +1827,9 @@ class Viewport(QOpenGLWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.view_filter = None
+        self.view_tint = None
+        self.active_view_key = None
         # The model and its camera are the same in every language: a right-
         # to-left interface (#1067) does not mirror what is drawn here.
         from views.rtl import keep_ltr
