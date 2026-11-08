@@ -49,6 +49,19 @@ class WgpuView(QWidget):
             return
         self._content_token = token
         start = time.perf_counter()
+        tracker = getattr(self, '_instance_updates', None)
+        delta = tracker.diff(scene) if tracker is not None else None
+        if delta is not None:
+            ids, rows = delta
+            tracker.apply(ids, rows, self.renderer)
+            if len(ids) or tracker.changed or tracker.removed:
+                self.uid_rows = {uid: [row] for uid, row in tracker.rows.items() if uid in tracker.active}
+                self._selection_signature = None
+                self._tint_signature = None
+                self._prepare_inference()
+            self.build_seconds = time.perf_counter() - start
+            self.update()
+            return
         self.packed = pack_scene(scene, getattr(self.source_viewport, 'view_tint', None))
         self._scene_dirty = True
         self._selection_signature = None
@@ -56,6 +69,17 @@ class WgpuView(QWidget):
         self.uid_rows = {}
         for row, uid in enumerate(self.packed.uids):
             self.uid_rows.setdefault(uid, []).append(row)
+        from views.wgpu_updates import InstanceUpdates
+        self._instance_updates = InstanceUpdates(scene, self.packed)
+        self._prepare_inference()
+        self.build_seconds = time.perf_counter()-start
+        lo, hi = self.packed.world_bounds
+        if self.source_viewport is None:
+            self.camera.target = QVector3D(*((lo+hi)/2))
+            self.camera.distance = max(float(np.linalg.norm(hi-lo))*1.4, 1.)
+        self._upload()
+
+    def _prepare_inference(self):
         from concurrent.futures import ThreadPoolExecutor
         from views.wgpu_inference import prepare
         if not hasattr(self, '_inference_worker'):
@@ -64,13 +88,10 @@ class WgpuView(QWidget):
         if previous is not None:
             previous.cancel()
         self.inference_index = None
-        self._inference_future = self._inference_worker.submit(prepare, self.packed)
-        self.build_seconds = time.perf_counter()-start
-        lo, hi = self.packed.world_bounds
-        if self.source_viewport is None:
-            self.camera.target = QVector3D(*((lo+hi)/2))
-            self.camera.distance = max(float(np.linalg.norm(hi-lo))*1.4, 1.)
-        self._upload()
+        self._inference_future = self._inference_worker.submit(prepare, self._inference_snapshot())
+    def _inference_snapshot(self):
+        from dataclasses import replace
+        return replace(self.packed, instances=self.packed.instances.copy())
 
     def _upload(self):
         if self.packed is None or not self.isVisible():

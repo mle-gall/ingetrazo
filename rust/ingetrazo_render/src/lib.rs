@@ -24,6 +24,13 @@ struct TimingSlot {
 struct Scene {
     inst: wgpu::Buffer,
     flags: Vec<u32>,
+    rows: Vec<u8>,
+    protos: wgpu::Buffer,
+    survivors: wgpu::Buffer,
+    template_data: Vec<u8>,
+    capacity: usize,
+    vertex_data: Vec<u8>,
+    index_data: Vec<u8>,
     vertex: wgpu::Buffer,
     index: wgpu::Buffer,
     commands: wgpu::Buffer,
@@ -446,12 +453,18 @@ impl Renderer {
                 return Err(PyValueError::new_err("scene exceeds storage binding limit"));
             }
         }
-        let vertex = buffer(&self.device, v, wgpu::BufferUsages::VERTEX);
-        let index = buffer(&self.device, ix, wgpu::BufferUsages::INDEX);
-        let protos = buffer(&self.device, p, wgpu::BufferUsages::STORAGE);
+        let vertex = buffer(&self.device, v, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
+        let index = buffer(&self.device, ix, wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST);
+        let protos = buffer(&self.device, p, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
+        let capacity = n.max(1).next_power_of_two();
+        let mut padded = vec![0; capacity * 80];
+        for row in padded.chunks_exact_mut(80) {
+            row[72] = 1;
+        }
+        padded[..instances.len()].copy_from_slice(instances);
         let inst = buffer(
             &self.device,
-            instances,
+            &padded,
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         );
         let commands = buffer(
@@ -461,8 +474,8 @@ impl Renderer {
                 | wgpu::BufferUsages::INDIRECT
                 | wgpu::BufferUsages::COPY_DST,
         );
-        let template = buffer(&self.device, cmd, wgpu::BufferUsages::COPY_SRC);
-        let survivors = buffer(&self.device, &vec![0; n * 4], wgpu::BufferUsages::STORAGE);
+        let template = buffer(&self.device, cmd, wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
+        let survivors = buffer(&self.device, &vec![0; capacity * 4], wgpu::BufferUsages::STORAGE);
         let compute = bind(
             &self.device,
             &self.compute.get_bind_group_layout(0),
@@ -503,6 +516,13 @@ impl Renderer {
                 as u64;
         self.scene = Some(Scene {
             inst,
+            rows: instances.to_vec(),
+            protos,
+            survivors,
+            template_data: cmd.to_vec(),
+            capacity,
+            vertex_data: v.to_vec(),
+            index_data: ix.to_vec(),
             flags: instances
                 .chunks_exact(80)
                 .map(|r| u32::from_le_bytes(r[72..76].try_into().unwrap()))
@@ -524,6 +544,124 @@ impl Renderer {
         self.device.poll(wgpu::Maintain::Wait);
         Ok(())
     }
+    /// Append replacement geometry; existing instance and prototype IDs survive.
+    fn replace_prototype(&mut self, id: usize, vertices: PyReadonlyArray1<'_, u8>,
+        indices: PyReadonlyArray1<'_, u8>, bounds: PyReadonlyArray1<'_, u8>, faces: u32) -> PyResult<()> {
+        let (v, ix, bounds) = (vertices.as_slice()?, indices.as_slice()?, bounds.as_slice()?);
+        let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+        if id >= s.p as usize || v.len()%28 != 0 || ix.len()%4 != 0 || bounds.len()!=32 || faces as usize > ix.len()/4 {
+            return Err(PyValueError::new_err("invalid prototype"));
+        }
+        if ix.chunks_exact(4).any(|i| u32::from_le_bytes(i.try_into().unwrap()) as usize >= v.len()/28) {
+            return Err(PyValueError::new_err("vertex index out of range"));
+        }
+        let base = s.vertex_data.len()/28;
+        let first = s.index_data.len()/4;
+        s.vertex_data.extend_from_slice(v);
+        s.index_data.extend_from_slice(ix);
+        for (target, data, usage, offset, addition) in [
+            (&mut s.vertex, &s.vertex_data, wgpu::BufferUsages::VERTEX, base*28, v),
+            (&mut s.index, &s.index_data, wgpu::BufferUsages::INDEX, first*4, ix)] {
+            if data.len() as u64 > target.size() {
+                let size = (data.len().max(4)).next_power_of_two();
+                *target = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None, size: size as u64, usage: usage | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false });
+                self.queue.write_buffer(target, 0, data);
+            } else if !addition.is_empty() {
+                self.queue.write_buffer(target, offset as u64, addition);
+            }
+        }
+        self.queue.write_buffer(&s.protos, id as u64*32, bounds);
+        for (slot, count, first) in [(id, faces, first), (id+s.p as usize, ix.len() as u32/4-faces, first+faces as usize)] {
+            let c = &mut s.template_data[slot*20..(slot+1)*20];
+            c[0..4].copy_from_slice(&count.to_le_bytes());
+            c[8..12].copy_from_slice(&(first as u32).to_le_bytes());
+            c[12..16].copy_from_slice(&(base as i32).to_le_bytes());
+            self.queue.write_buffer(&s.template, slot as u64*20, c);
+        }
+        Ok(())
+    }
+
+    /// Update existing resident rows without replacing geometry or pick IDs.
+    fn update_instances(&mut self, ids: Vec<usize>, rows: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
+        let rows = rows.as_slice()?;
+        let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+        if rows.len() != ids.len() * 80 {
+            return Err(PyValueError::new_err("invalid instance rows"));
+        }
+        for row in rows.chunks_exact(80) {
+            if u32::from_le_bytes(row[64..68].try_into().unwrap()) >= s.p {
+                return Err(PyValueError::new_err("prototype id out of range"));
+            }
+        }
+        let n = ids.iter().map(|i| i + 1).max().unwrap_or(0).max(s.n as usize);
+        let structure = n != s.n as usize || ids.iter().zip(rows.chunks_exact(80)).any(|(&id, row)|
+            row[64..68] != s.rows[id*80+64..id*80+68]);
+        let old_n = s.n as usize;
+        s.rows.resize(n * 80, 0);
+        s.flags.resize(n, 1);
+        for row in s.rows[old_n*80..].chunks_exact_mut(80) {
+            row[72] = 1;
+        }
+        if n > s.capacity {
+            s.capacity = n.next_power_of_two();
+            let mut padded = vec![0; s.capacity*80];
+            for row in padded.chunks_exact_mut(80) {
+                row[72] = 1;
+            }
+            padded[..s.rows.len()].copy_from_slice(&s.rows);
+            s.inst = buffer(&self.device, &padded, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
+            s.survivors = buffer(&self.device, &vec![0; s.capacity*4], wgpu::BufferUsages::STORAGE);
+            s.compute = bind(&self.device, &self.compute.get_bind_group_layout(0),
+                &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors]);
+            s.draw = bind(&self.device, &self.draw.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
+            s.edge_draw = bind(&self.device, &self.edge.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
+            s.xray_draw = bind(&self.device, &self.xray.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
+            s.xray_edge_draw = bind(&self.device, &self.xray_edge.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
+            s.msaa_draw = bind(&self.device, &self.msaa_draw.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
+            s.msaa_edge_draw = bind(&self.device, &self.msaa_edge.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
+        }
+        s.n = n as u32;
+        for (&id, row) in ids.iter().zip(rows.chunks_exact(80)) {
+            let mut value = row.to_vec();
+            let flags = u32::from_le_bytes(row[72..76].try_into().unwrap());
+            s.flags[id] = (s.flags[id] & 6) | (flags & 1);
+            value[72..76].copy_from_slice(&s.flags[id].to_le_bytes());
+            s.rows[id*80..(id+1)*80].copy_from_slice(&value);
+            self.queue.write_buffer(&s.inst, id as u64 * 80, &value);
+        }
+        if structure {
+            let mut counts = vec![0u32; s.p as usize];
+            for row in s.rows.chunks_exact(80) {
+                counts[u32::from_le_bytes(row[64..68].try_into().unwrap()) as usize] += 1;
+            }
+            let mut starts = vec![0u32; counts.len()];
+            for i in 1..counts.len() {
+                starts[i] = starts[i-1] + counts[i-1];
+            }
+            for (i, command) in s.template_data.chunks_exact_mut(20).enumerate() {
+                command[16..20].copy_from_slice(&starts[i % starts.len()].to_le_bytes());
+            }
+            self.queue.write_buffer(&s.template, 0, &s.template_data);
+        }
+        Ok(())
+    }
+
+    /// Tombstones retain row identities so stale picks cannot select a neighbour.
+    fn remove_instances(&mut self, ids: Vec<usize>) -> PyResult<()> {
+        let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+        if ids.iter().any(|&id| id >= s.n as usize) {
+            return Err(PyValueError::new_err("instance id out of range"));
+        }
+        for id in ids {
+            s.flags[id] = 1;
+            s.rows[id*80+72..id*80+76].copy_from_slice(&1u32.to_le_bytes());
+            self.queue.write_buffer(&s.inst, id as u64 * 80 + 72, &1u32.to_le_bytes());
+        }
+        Ok(())
+    }
+
     #[pyo3(signature = (selected_ids, hovered_id=None))]
     fn set_highlight(
         &mut self,
