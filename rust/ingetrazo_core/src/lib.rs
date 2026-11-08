@@ -13,6 +13,7 @@ use pyo3::prelude::*;
 mod boxes;
 mod facegeom;
 mod render_bake;
+mod scene_bake;
 mod smooth;
 mod gltape;
 mod hlr;
@@ -32,6 +33,7 @@ fn ingetrazo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(face_geometry, m)?)?;
     m.add_function(wrap_pyfunction!(render_bake::bake_vertices, m)?)?;
     m.add_function(wrap_pyfunction!(render_bake::bake_edges, m)?)?;
+    m.add_function(wrap_pyfunction!(scene_bake::bake_scene, m)?)?;
     m.add_function(wrap_pyfunction!(qt_vector_probe, m)?)?;
     m.add_function(wrap_pyfunction!(qt_dot_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(smooth_corner_normals, m)?)?;
