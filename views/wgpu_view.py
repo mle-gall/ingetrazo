@@ -35,6 +35,8 @@ class WgpuView(QWidget):
         self.overlay_ms = 0.
         self.last = None
         self.build_seconds = self.upload_seconds = 0.
+        from views.wgpu_tools import NativeTools
+        self.tools = NativeTools(self)
 
     def paintEngine(self):
         return None
@@ -121,6 +123,7 @@ class WgpuView(QWidget):
         if self.renderer is None or not len(self.packed.instances):
             return None
         start = time.perf_counter()
+        self.tools.sync()
         if self.source_viewport is not None:
             self.camera = self.source_viewport.camera
             style = self.source_viewport._effective_style()
@@ -173,6 +176,8 @@ class WgpuView(QWidget):
         """The resident row identifies both the placement and shared prototype."""
         if self.packed is None or row is None or not 0 <= row < len(self.packed.uids):
             return None
+        if self.packed.instances['info'][row, 2] & 1:
+            return None
         return self.packed.groups[row], int(self.packed.instances['info'][row, 0])
 
     def pick_row(self, x, y):
@@ -202,7 +207,7 @@ class WgpuView(QWidget):
             tool = getattr(source, 'active_tool', None)
             inference = getattr(source, 'inference', None)
             self.last_snap = snap(self.inference_index, self.hovered_row, self, x, y,
-                                  start_point=getattr(tool, 'start_point', None),
+                                  start_point=self.tools.start_point,
                                   acquired_point=getattr(inference, '_acquired_point', None),
                                   acquired_points=getattr(inference, '_encouraged', None),
                                   axis_lock=getattr(inference, 'axis_lock', None),
@@ -266,6 +271,10 @@ class WgpuView(QWidget):
         self.last = self.press = event.position()
         self._drag_nav = event.button() == Qt.MiddleButton or bool(
             getattr(self.source_viewport, 'nav_mode', None))
+        mode = self.tools.sync()
+        if not self._drag_nav and event.button() == Qt.LeftButton and mode in ('tape', 'move'):
+            self.hover(self.press.x(), self.press.y(), event.modifiers())
+            self.tools.click(event)
         if self._drag_nav:
             self._pivot = self._orbit_pivot_at(self.press.x(), self.press.y())
 
@@ -273,6 +282,7 @@ class WgpuView(QWidget):
         if not event.buttons():
             self.last = None
             self.hover(event.position().x(), event.position().y(), event.modifiers())
+            self.tools.hover(event)
             return
         if self.last is None:
             return
@@ -288,7 +298,10 @@ class WgpuView(QWidget):
             else:
                 dy = -delta.y() if getattr(self.source_viewport, '_invert_orbit_y', False) else delta.y()
                 self.camera.orbit_about(self._pivot, delta.x(), dy, self.height())
-        elif event.buttons() & Qt.LeftButton:
+        elif self.tools.sync() in ('tape', 'move'):
+            self.hover(event.position().x(), event.position().y(), event.modifiers())
+            self.tools.hover(event)
+        elif event.buttons() & Qt.LeftButton and self.tools.mode == 'select':
             from views.wgpu_overlay import Primitive
             self.overlay_primitives = [Primitive('rectangle',
                 ((self.press.x(), self.press.y()), (self.last.x(), self.last.y())))]
@@ -302,7 +315,7 @@ class WgpuView(QWidget):
             if mode == 'zoom_window':
                 from views.viewport import Viewport
                 Viewport._zoom_to_box(self, self.press, event.position())
-        elif event.button() == Qt.LeftButton:
+        elif event.button() == Qt.LeftButton and self.tools.sync() == 'select':
             start = time.perf_counter()
             if (event.position()-self.press).manhattanLength() < 3:
                 row = self.pick_row(event.position().x(), event.position().y())
@@ -316,6 +329,8 @@ class WgpuView(QWidget):
         self.update()
 
     def mouseDoubleClickEvent(self, event):
+        if self.tools.sync() != 'select':
+            return
         row = self.pick_row(event.position().x(), event.position().y())
         resolved = self.resolve(row)
         if resolved is not None and resolved[0] is not None and self.source_viewport is not None:
@@ -324,7 +339,10 @@ class WgpuView(QWidget):
             self.update()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
+        mode = self.tools.sync()
+        if event.key() == Qt.Key_Escape and mode in ('tape', 'move'):
+            self.tools.cancel()
+        elif event.key() == Qt.Key_Escape:
             if self.scene.edit_group is not None and self.source_viewport is not None:
                 self.source_viewport.end_one_group_edit()
                 self.source_viewport.notify_scene_changed()
@@ -333,6 +351,8 @@ class WgpuView(QWidget):
             self.last = None
             self.overlay_primitives = []
             self.sync_selection()
+        elif mode == 'inert':
+            event.ignore()
         elif self.source_viewport is not None:
             self.source_viewport.keyPressEvent(event)
         self.update()
