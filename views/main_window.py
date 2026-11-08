@@ -6190,21 +6190,32 @@ class MainWindow(QMainWindow):
         viewport under Metal. Do not run that duplicate whole-scene pass.
         """
         from core import renderer_settings
-        if getattr(doc, "_renderer_wgpu", False):
+        if getattr(doc, "_renderer_starting", False):
+            doc._renderer_starting = False
             renderer_settings.first_frame()
         if not getattr(doc, "_awaiting_picture", False):
             return
         doc._awaiting_picture = False
+        self._drain_document_startup(doc)
+
+    def _drain_document_startup(self, doc):
+        """One optional callback per event-loop slice, paused in background tabs."""
         from PySide6.QtCore import QTimer
-        jobs = doc._after_picture
-        doc._after_picture = []
+        if getattr(doc, "_startup_draining", False):
+            return
+        doc._startup_draining = True
 
         def step():
+            doc._startup_draining = False
             if doc not in self._documents or doc is not self._doc:
                 return
+            jobs = getattr(doc, "_after_picture", [])
             if jobs:
-                jobs.pop(0)()
-                QTimer.singleShot(16, self, step)
+                doc._startup_draining = True
+                try:
+                    jobs.pop(0)()
+                finally:
+                    QTimer.singleShot(16, self, step)
         QTimer.singleShot(0, self, step)
 
     def _install_wgpu_display(self, doc):
@@ -6237,6 +6248,7 @@ class MainWindow(QMainWindow):
                 return
             from core import renderer_settings
             renderer_settings.arm()
+            doc._renderer_starting = True
             display.set_scene(doc.viewport.scene)
             if not len(display.packed.instances):
                 self._document_first_frame(doc)
@@ -6472,6 +6484,8 @@ class MainWindow(QMainWindow):
 
     def _enter_document(self, doc) -> None:
         self._show_renderer_note(doc)
+        if not getattr(doc, "_awaiting_picture", False):
+            self._drain_document_startup(doc)
         vp = doc.viewport
         from core import axes as _axes
         from core import units as _units
