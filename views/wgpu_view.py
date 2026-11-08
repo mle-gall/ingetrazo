@@ -16,6 +16,8 @@ class WgpuView(QWidget):
         for attr in (Qt.WA_NativeWindow, Qt.WA_PaintOnScreen, Qt.WA_NoSystemBackground):
             self.setAttribute(attr)
         self.camera = OrbitCamera()
+        self.source_viewport = None
+        self.setFocusPolicy(Qt.StrongFocus)
         self.renderer = None
         self.packed = None
         self._scene_dirty = False
@@ -27,12 +29,13 @@ class WgpuView(QWidget):
 
     def set_scene(self, scene):
         start = time.perf_counter()
-        self.packed = pack_scene(scene)
+        self.packed = pack_scene(scene, getattr(self.source_viewport, 'view_tint', None))
         self._scene_dirty = True
         self.build_seconds = time.perf_counter()-start
         lo, hi = self.packed.world_bounds
-        self.camera.target = QVector3D(*((lo+hi)/2))
-        self.camera.distance = max(float(np.linalg.norm(hi-lo))*1.4, 1.)
+        if self.source_viewport is None:
+            self.camera.target = QVector3D(*((lo+hi)/2))
+            self.camera.distance = max(float(np.linalg.norm(hi-lo))*1.4, 1.)
         self._upload()
 
     def _upload(self):
@@ -63,7 +66,27 @@ class WgpuView(QWidget):
         if self.renderer is None or not len(self.packed.instances):
             return None
         start = time.perf_counter()
+        if self.source_viewport is not None:
+            self.camera = self.source_viewport.camera
+            style = self.source_viewport._effective_style()
+            mode = style.face_mode
+            self.renderer.set_style('shaded' if mode == 'textures' else mode)
+            self.renderer.set_edges(style.edges)
+            tint = getattr(self.source_viewport, 'view_tint', None) or {}
+            signature = tuple(sorted(tint.items()))
+            if signature != getattr(self, '_tint_signature', None):
+                colors = []
+                for uid in self.packed.uids:
+                    rgb = tint.get(uid)
+                    colors.append(int(np.array([*np.clip(np.array(rgb[:3])*255, 0, 255), 255],
+                                               np.uint8).view('<u4')[0]) if rgb is not None else 0)
+                self.renderer.set_overrides(colors)
+                self._tint_signature = signature
         self.camera.aspect = self.width()/max(1, self.height())
+        physical = (self.width(), self.height(), self.devicePixelRatioF())
+        if physical != getattr(self, '_physical_size', None):
+            self.renderer.resize(*physical)
+            self._physical_size = physical
         self.renderer.set_camera(self.camera.view_matrix().data(), self.camera.projection_matrix().data())
         cpu, gpu = self.renderer.render()
         wall = (time.perf_counter()-start)*1000
@@ -74,6 +97,7 @@ class WgpuView(QWidget):
         self.draw_frame()
 
     def mousePressEvent(self, event):
+        self.setFocus()
         self.last = event.position()
         self.press = event.position()
 
@@ -82,7 +106,9 @@ class WgpuView(QWidget):
             return
         delta = event.position()-self.last
         self.last = event.position()
-        if event.buttons() & Qt.RightButton:
+        if not event.buttons() & (Qt.MiddleButton | Qt.LeftButton):
+            return
+        if event.modifiers() & Qt.ShiftModifier:
             self.camera.pan(delta.x(), delta.y(), self.height())
         else:
             self.camera.orbit(delta.x(), delta.y(), self.height())
@@ -96,8 +122,26 @@ class WgpuView(QWidget):
         self.last = None
 
     def wheelEvent(self, event):
-        self.camera.zoom(event.angleDelta().y()/120)
+        from views.wheel_zoom import zoom_steps
+        self.camera.zoom(zoom_steps(event, getattr(self.source_viewport, "_invert_wheel", False)))
         self.update()
+
+    def set_highlight(self, selected_ids, hovered_id=None):
+        """Translate stable document IDs to resident placement indices."""
+        if self.renderer is None:
+            return
+        selected = set(selected_ids)
+        indices = [i for i, uid in enumerate(self.packed.uids) if uid in selected]
+        hover = next((i for i, uid in enumerate(self.packed.uids) if uid == hovered_id), None)
+        self.renderer.set_highlight(indices, hover)
+        self.update()
+
+    def pick_rect(self, x0, y0, x1, y1):
+        if self.renderer is None:
+            return []
+        scale = self.devicePixelRatioF()
+        indices = self.renderer.pick_rect(*(max(0, int(v*scale)) for v in (x0, y0, x1, y1)))
+        return [self.packed.uids[i] for i in indices]
 
     def closeEvent(self, event):
         self.renderer = None

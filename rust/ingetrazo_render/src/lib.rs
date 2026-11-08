@@ -364,7 +364,7 @@ impl Renderer {
         let xray_draw = bind(&self.device, &self.xray.get_bind_group_layout(0), &[&self.camera, &inst, &survivors]);
         let xray_edge_draw = bind(&self.device, &self.xray_edge.get_bind_group_layout(0), &[&self.camera, &inst, &survivors]);
         self.gpu_memory =
-            (v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 288)
+            (v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 416)
                 as u64;
         self.scene = Some(Scene {
             inst,

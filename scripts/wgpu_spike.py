@@ -3,6 +3,7 @@ import argparse
 import json
 import math
 import os
+import resource
 from pathlib import Path
 import sys
 import time
@@ -19,6 +20,8 @@ from views.wgpu_view import WgpuView
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model', type=Path)
+    parser.add_argument('--interval', type=int, default=16)
+    parser.add_argument('--no-edges', action='store_true')
     parser.add_argument('--measure', action='store_true')
     parser.add_argument('--inventory-only', action='store_true')
     args = parser.parse_args()
@@ -29,6 +32,7 @@ def main():
     label = QLabel('Preparing resident scene')
     window.statusBar().addWidget(label)
     window.resize(1000, 700)
+    cpu_start = time.process_time()
     start = time.perf_counter()
     scene = Scene()
     load_into(scene, args.model)
@@ -55,9 +59,11 @@ def main():
     window.show()
     app.processEvents()
     first = time.perf_counter()-start
+    startup_cpu = time.process_time()-cpu_start
+    view.renderer.set_edges(not args.no_edges)
     frames = []
     def record(cpu, gpu, wall):
-        frames.append((cpu, gpu, wall))
+        frames.append((cpu, gpu, wall, view.renderer.last_timings()[2]))
         label.setText(f'{wall:.2f} ms | {1000/max(wall, 0.001):.1f} fps | GPU {gpu}')
     view.frameReady.connect(record)
     orbit_start = time.perf_counter()
@@ -80,7 +86,10 @@ def main():
                 attachment_bytes=view.width()*view.height()*view.devicePixelRatioF()**2*8,
                 placements=len(view.packed.instances), prototypes=len(view.packed.bounds),
                 visible_placements=int((view.packed.instances["info"][:, 2] == 0).sum()),
-                triangles=len(view.packed.indices)//3, frames=len(frames), cpu_ms=summary(0),
+                triangles=int(view.packed.commands["count"].sum())//3,
+                edges=not args.no_edges, samples=1, interval_ms=args.interval, startup_cpu_s=startup_cpu,
+                peak_rss_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                acquire_ms=summary(3), frames=len(frames), cpu_ms=summary(0),
                 gpu_ms=summary(1), wall_ms=summary(2), pick_ms=pick_ms, picked=picked,
                 logical_size=[view.width(), view.height()], scale=view.devicePixelRatioF()), indent=2), flush=True)
             window.close()
@@ -88,7 +97,7 @@ def main():
     timer = QTimer()
     timer.timeout.connect(tick)
     if args.measure:
-        timer.start(0)
+        timer.start(args.interval)
     QTimer.singleShot(240000, app.quit)
     app.exec()
 
