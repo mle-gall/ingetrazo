@@ -3,6 +3,8 @@
 Run each model in an externally bounded subprocess (240 seconds). All outputs
 and texture extraction stay in this worktree; source documents are read-only.
 """
+import argparse
+import math
 import json
 import os
 from pathlib import Path
@@ -22,12 +24,27 @@ from views.wgpu_view import WgpuView
 
 app = QApplication([])
 out = Path('docs/benchmarks/wgpu-look-2026-11-09')
-source = Path(sys.argv[1])
+parser = argparse.ArgumentParser()
+parser.add_argument('model', type=Path)
+parser.add_argument('--mode', choices=('shaded', 'hidden_line', 'monochrome', 'wireframe', 'xray'))
+parser.add_argument('--pitch', type=float)
+parser.add_argument('--capture-only', action='store_true')
+args = parser.parse_args()
+source = args.model
+label = source.stem
+if args.mode:
+    label += '-' + args.mode
+if args.pitch is not None:
+    label += '-pitch' + str(args.pitch)
 scene = Scene()
 load_into(scene, source)
+if args.mode:
+    scene.display_style.face_mode = args.mode
 metal = WgpuView()
 metal.resize(1000, 700)
 metal.set_scene(scene)
+if args.pitch is not None:
+    metal.camera.pitch = math.radians(args.pitch)
 gl = Viewport()
 gl.resize(1000, 700)
 gl.scene = scene
@@ -51,18 +68,18 @@ def capture():
         reference = reference.convertToFormat(QImage.Format_RGBA8888)
         data = bytes(metal.renderer.read_pixels())
         native = QImage(data, w, h, QImage.Format_RGBA8888).copy()
-        reference.save(str(out / f'{source.stem}-gl.png'))
-        native.save(str(out / f'{source.stem}-wgpu.png'))
+        reference.save(str(out / f'{label}-gl.png'))
+        native.save(str(out / f'{label}-wgpu.png'))
         pair = QImage(w*2, h, QImage.Format_RGB32)
         painter = QPainter(pair)
         painter.drawImage(0, 0, reference)
         painter.drawImage(w, 0, native)
         painter.end()
-        pair.save(str(out / f'{source.stem}-comparison.png'))
+        pair.save(str(out / f'{label}-comparison.png'))
         a = np.frombuffer(reference.constBits(), np.uint8).reshape(h, w, 4)
         b = np.frombuffer(native.constBits(), np.uint8).reshape(h, w, 4)
         result = {'scale': scale, 'size': [w,h], 'rgb_mae': float(np.abs(a[:,:,:3].astype(float)-b[:,:,:3]).mean()), 'frames': {}}
-        for aa in (False, True):
+        for aa in (() if args.capture_only else (False, True)):
             metal.renderer.set_antialias(aa)
             for edges in (False, True):
                 scene.display_style.edges = edges
@@ -75,7 +92,7 @@ def capture():
                     'cpu_median_ms': float(np.median([s[0] for s in samples])),
                     'gpu_median_ms': float(np.median([s[1] for s in samples if s[1] is not None])),
                     'wall_median_ms': float(np.median([s[2] for s in samples]))}
-        (out / f'{source.stem}.json').write_text(json.dumps(result, indent=2))
+        (out / f'{label}.json').write_text(json.dumps(result, indent=2))
         print(json.dumps(result), flush=True)
     except Exception as error:
         failed.append(str(error))

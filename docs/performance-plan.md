@@ -894,3 +894,5 @@ No claim of visual equivalence or bit-exact GL shading is made. The ride camera
 frames the full model rather than the requested curated section.
 
 [Reproduction, raw measurements, build workaround and detailed limitations](benchmarks/wgpu-look-2026-11-09/README.md).
+
+Additional [display-mode and horizon comparisons](benchmarks/wgpu-look-2026-11-09/README.md#display-mode-and-horizon-captures) cover hidden-line, monochrome, wireframe, X-ray, and a 5-degree camera pitch.

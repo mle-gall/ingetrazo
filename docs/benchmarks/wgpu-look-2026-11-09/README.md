@@ -65,7 +65,7 @@ QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'no
 ```
 
 Every GUI subprocess was externally bounded to 240 seconds. The full suite
-was invoked once with a 900-second outer bound. The capture script extracts
+was invoked once with an initially 900-second outer bound, extended to 30 minutes on the same run. The capture script extracts
 textures into `.look-tmp/textures` inside this checkout.
 
 The ordinary renderer release build succeeded but failed to import on this
@@ -76,7 +76,8 @@ See [Rust issue 157750](https://github.com/rust-lang/rust/issues/157750).
 ## Measurement limits
 
 The JSON files contain medians over 35 frames after ten warm-up frames, at 2×
-HiDPI. GPU values come from the existing asynchronous timestamp ring and may
+HiDPI. GPU values span compute through color resolve (excluding the first background
+and the final overlay), come from the asynchronous timestamp ring, and may
 refer to earlier frames. CPU values include surface acquisition; unpaced
 loops show large acquisition variance. These are whole-frame on/off samples,
 not isolated per-pass timings. Do not subtract CPU medians to estimate pass
@@ -111,3 +112,16 @@ This capture is evidence of a remaining correctness gap.
 - Offscreen Python scene/style tests: 21 passed.
 - Release builds of both crates succeeded; renderer import requires the strip workaround above.
 - Native captures of all three documents completed within their 240-second bounds.
+
+## Display-mode and horizon captures
+
+- [hidden_line](pusher_car_rust-hidden_line-comparison.png), RGB MAE 0.654/255.
+- [monochrome](pusher_car_rust-monochrome-comparison.png), RGB MAE 2.398/255.
+- [wireframe](pusher_car_rust-wireframe-comparison.png), RGB MAE 0.960/255.
+- [xray](pusher_car_rust-xray-comparison.png), RGB MAE 10.955/255.
+- [shaded-pitch5.0](pusher_car_rust-shaded-pitch5.0-comparison.png), RGB MAE 0.950/255.
+
+Reproduce with `--mode hidden_line --capture-only` (or another mode); use
+`--mode shaded --pitch 5 --capture-only` for the on-screen horizon. These runs
+do not collect timing samples. The captured GL X-ray path itself shows
+substantial overlap artifacts; it is preserved as observed, not retouched.
