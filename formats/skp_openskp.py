@@ -1546,12 +1546,21 @@ def _adapt(model, name: str, skp_path=None):
     # places nothing.
     protos = _merge_equal_protos(protos)
 
-    import hashlib
-    import json
-    # No model GUID is exposed. Definition GUIDs distinguish files with the
-    # same names; sorting keeps the namespace independent of parse order.
-    signature = sorted((str(d.name), str(getattr(d, "guid", ""))) for d in defs.values())
-    namespace = hashlib.sha256(json.dumps(signature).encode()).hexdigest()
+    # The namespace the placements' persistent ids are turned into uids
+    # under. The file's name: a re-import of the file after it was edited
+    # in SketchUp — a component added, one renamed — must give the same
+    # groups the same uids, which a digest of the definition list did not
+    # (every uid changed with the list). OpenSKP exposes no model GUID;
+    # when one is decoded it replaces this. Without a path (a stream), the
+    # definition list is all there is.
+    if skp_path is not None:
+        namespace = Path(skp_path).stem.casefold()
+    else:
+        import hashlib
+        import json
+        signature = sorted((str(d.name), str(getattr(d, "guid", "")))
+                           for d in defs.values())
+        namespace = hashlib.sha256(json.dumps(signature).encode()).hexdigest()
     payload = {"backend": "openskp", "groups": groups, "protos": protos,
                "identity_namespace": namespace}
     if not groups and not any(e["faces"] or e["children"]

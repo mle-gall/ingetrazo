@@ -226,16 +226,19 @@ The bridge retains the instance reader's own preamble ID through
 random UIDs. Legacy Image records currently also fall back to random UIDs.
 Classic definition IDs are archive slots, not persistent IDs.
 
-The file namespace is SHA-256 of the sorted definition name/GUID pairs
-(including multiplicity), because no model GUID is exposed. UUID5 over that
-namespace and the placement's PID path is truncated to 16 hexadecimal digits.
+The file namespace is the file's name (its stem, case-folded), because no
+model GUID is exposed: a file edited in SketchUp and imported again — a
+component added or renamed — gives the same groups the same UIDs; renaming
+the file changes them. A file read without a path falls back to SHA-256 of
+the sorted definition name/GUID pairs. UUID5 over the namespace and the
+placement's PID path is truncated to 16 hexadecimal digits.
 The ancestor PID path distinguishes a nested entity placed through multiple
 copies of its enclosing component. Root loose geometry uses a reserved root
 identity. Missing IDs or collisions with existing groups use a random UID;
 importing twice into one scene therefore does not create duplicate UIDs.
-Renaming definitions changes this fallback namespace, and files with identical
-definition lists share it (including empty lists). A future model-GUID decoder
-would improve identity across edits and between such files.
+Two files of the same name share the namespace, so importing both into one
+scene leaves the second with random UIDs where PIDs coincide. A future
+model-GUID decoder would replace the name.
 
 Regression fixtures `tests/data/skp_arcs_2017.skp`, `skp_arcs_2021.skp` and
 `skp_instances_2021.skp` come unchanged from OpenSKP tag `python-v1.5.0`,

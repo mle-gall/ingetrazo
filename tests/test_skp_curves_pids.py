@@ -47,6 +47,27 @@ def test_nested_legacy_groups_keep_uids_and_repeated_imports_do_not_collide():
     assert after[:5] == before
 
 
+def test_the_identity_namespace_is_the_file_name_not_its_definitions(tmp_path):
+    """A file edited in SketchUp (a component added, one renamed) and
+    imported again keeps its UIDs: the namespace comes from the file's name,
+    not from a digest of its definition list."""
+    import shutil
+    from formats.skp import parse_skp
+    src = DATA / "skp_instances_2021.skp"
+    assert parse_skp(src)["identity_namespace"] == "skp_instances_2021"
+    same_name = tmp_path / "SKP_Instances_2021.skp"      # case-folded
+    shutil.copy(src, same_name)
+    a, b = Scene(), Scene()
+    load_skp(a, src)
+    load_skp(b, same_name)
+    assert [g.uid for g in walk(a.groups)] == [g.uid for g in walk(b.groups)]
+    other_name = tmp_path / "renamed.skp"
+    shutil.copy(src, other_name)
+    c = Scene()
+    load_skp(c, other_name)
+    assert [g.uid for g in walk(a.groups)] != [g.uid for g in walk(c.groups)]
+
+
 def test_flattened_copies_of_polyline_curves_get_separate_ids():
     from openskp.model import Definition, Edge, Vertex, Instance
     child = Definition(id=1, vertices={
