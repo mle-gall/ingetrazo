@@ -33,12 +33,7 @@ import math
 from PySide6.QtGui import QVector3D
 
 #: Curated civil/architecture classes (IFC4 names).
-IFC_CLASSES = [
-    "IfcWall", "IfcSlab", "IfcColumn", "IfcBeam", "IfcFooting",
-    "IfcRoof", "IfcStair", "IfcRamp", "IfcDoor", "IfcWindow",
-    "IfcRailing", "IfcCovering", "IfcPile", "IfcMember", "IfcSpace",
-    "IfcReinforcingBar",
-]
+from core.ifc_tables import IFC_CLASSES
 
 #: Density of reinforcing steel, kg/m³ — the bar's weight is its volume
 #: times this, as a takeoff bills it.

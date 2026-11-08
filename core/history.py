@@ -3954,7 +3954,7 @@ class ReplaceComponentCommand(Command):
             g.axes = QMatrix4x4(src.axes) if src.axes is not None else None
             g.component = True
             g.text3d = dict(src.text3d) if src.text3d else None
-            g.ifc = {k: v for k, v in src.ifc.items() if k != "guid"} if src.ifc else None
+            g.ifc = copy.deepcopy({k: v for k, v in src.ifc.items() if k != "guid"}) if src.ifc else None
             g.ext = copy.deepcopy(src.ext) if src.ext else None
             g.billboard = src.billboard
             g.exploded = dict(src.exploded) if src.exploded else None
@@ -5512,3 +5512,119 @@ class ChangeAxesCommand(Command):
     def _copy(m):
         from PySide6.QtGui import QMatrix4x4
         return QMatrix4x4(m)
+
+
+class SetRecordCommand(Command):
+    """Top-level patch of group records; None patch removes the record.
+
+    Nested values replace whole fields. GUIDs cannot be changed by a patch.
+    Snapshots are detached and retained across redo, including new identities.
+    """
+    # History currently treats keeps_paint as also keeping BIM tags.
+    keeps_paint = False
+
+    def __init__(self, targets, patch):
+        from copy import deepcopy
+        self.targets = list(targets)
+        self.patch = deepcopy(patch)
+        self._before = None
+        self._after = None
+
+    def _write(self, scene, records):
+        from copy import deepcopy
+        meshes = {id(scene.mesh): scene.mesh}
+        for group, record in zip(self.targets, records):
+            group.ifc = deepcopy(record)
+            meshes[id(group.mesh)] = group.mesh
+        for mesh in meshes.values():
+            mesh.bump_revision()
+        scene.version += 1
+
+    def do(self, scene):
+        from copy import deepcopy
+        from core.ifc_identity import ensure_guid
+        from core.record import normalize
+        if self._before is None:
+            self._before = [deepcopy(g.ifc) for g in self.targets]
+            self._after = []
+            for old in self._before:
+                if self.patch is None:
+                    self._after.append(None)
+                    continue
+                new = {**deepcopy(old or {}), **deepcopy(self.patch)}
+                if old and old.get('guid'):
+                    new['guid'] = old['guid']
+                else:
+                    new.pop('guid', None)
+                    ensure_guid(new)
+                self._after.append(normalize(new))
+        self._write(scene, self._after)
+
+    def undo(self, scene):
+        self._write(scene, self._before)
+
+
+class TagGroupsCommand(SetRecordCommand):
+    def __init__(self, targets, ifc_class, name=''):
+        super().__init__(targets, {'class': ifc_class, 'name': name})
+
+
+class UntagGroupsCommand(SetRecordCommand):
+    def __init__(self, targets):
+        super().__init__(targets, None)
+
+
+class SetRegistryCommand(SetPluginDataCommand):
+    def __init__(self, value):
+        from core.bim_registry import validate
+        errors = validate(value)
+        if errors:
+            raise ValueError('; '.join(errors))
+        super().__init__('bim_registry', value)
+
+    def do(self, scene):
+        super().do(scene)
+        scene.mesh.bump_revision()
+
+    def undo(self, scene):
+        super().undo(scene)
+        scene.mesh.bump_revision()
+
+
+class SetFaceTagsCommand(Command):
+    """Legacy loose-face tags, with stable identities across redo."""
+    # History currently treats keeps_paint as also keeping BIM tags.
+    keeps_paint = False
+
+    def __init__(self, faces, ifc_class=None, name=''):
+        self.faces = list(faces)
+        self.ifc_class, self.name = ifc_class, name
+        self._before = self._after = None
+
+    def _write(self, scene, values):
+        from copy import deepcopy
+        from core import bim
+        for face, value in zip(self.faces, values):
+            if value is None:
+                face.attrs.pop('ifc', None)
+            else:
+                face.attrs['ifc'] = deepcopy(value)
+        bim._TAG_EPOCH += 1
+        scene.mesh.bump_revision()
+        scene.version += 1
+
+    def do(self, scene):
+        from copy import deepcopy
+        from core.bim import next_object_id
+        from core.ifc_identity import ensure_guid
+        if self._before is None:
+            self._before = [deepcopy(f.attrs.get('ifc')) for f in self.faces]
+            tag = None
+            if self.ifc_class:
+                tag = {'id': next_object_id(scene), 'class': self.ifc_class, 'name': self.name}
+                ensure_guid(tag)
+            self._after = [deepcopy(tag) for f in self.faces]
+        self._write(scene, self._after)
+
+    def undo(self, scene):
+        self._write(scene, self._before)

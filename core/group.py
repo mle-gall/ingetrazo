@@ -705,7 +705,8 @@ def copy_group(group, delta=None, _in_definition=False):
                 face.attrs["ifc"] = {k: v for k, v in face.attrs["ifc"].items()
                                      if k != "guid"}
     g.layer = group.layer
-    g.ifc = {k: v for k, v in group.ifc.items() if k != "guid"} if group.ifc else None
+    from copy import deepcopy
+    g.ifc = deepcopy({k: v for k, v in group.ifc.items() if k != "guid"}) if group.ifc else None
     g.billboard = group.billboard
     g.text3d = dict(group.text3d) if group.text3d else None
     g.ext = copy.deepcopy(group.ext) if getattr(group, "ext", None) else None

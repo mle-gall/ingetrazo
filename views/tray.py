@@ -4485,6 +4485,13 @@ class BimPanel(QWidget):
         btns.addStretch(1)
         lay.addLayout(btns)
 
+        for label, callback in [('Edit object record…', self._edit_record),
+                                ('Project registry…', self._edit_registry),
+                                ('Create type from object…', self._create_type)]:
+            button = QPushButton(label)
+            button.clicked.connect(callback)
+            lay.addWidget(button)
+
         # Active class (tag-as-you-draw): while checked, every face you draw
         # is stamped with the class/name above, and pushing it extends the
         # tag to the whole solid. One BIM object per activation.
@@ -4542,26 +4549,18 @@ class BimPanel(QWidget):
 
     # ---- Actions -------------------------------------------------------------
     def _on_tag(self) -> None:
-        from core.bim import next_object_id, tag_faces, tag_group
+        from core.history import TagGroupsCommand, SetFaceTagsCommand, CompoundCommand
         scene = self._scene()
         faces = [s for s in scene.selection if isinstance(s, Face)]
         groups = [s for s in scene.selection if isinstance(s, Group)]
-        cls = self.class_box.currentText()
-        name = self.name_edit.text().strip()
-        tagged = 0
-        for g in groups:
-            tag_group(g, cls, name or g.name)
-            tagged += 1
+        cls, name = self.class_box.currentText(), self.name_edit.text().strip()
+        commands = [TagGroupsCommand([g], cls, name or g.name) for g in groups]
         if faces:
-            tag_faces(faces, cls, name, next_object_id(scene))
-            tagged += 1
-        if not tagged:
-            self._window.statusBar().showMessage(
-                tr("Select faces (or a group) to tag first"), 2500)
-            return
-        scene.version += 1
-        self._window.viewport.update()
-        self.refresh()
+            commands.append(SetFaceTagsCommand(faces, cls, name))
+        if commands:
+            self._window.viewport.history.execute(CompoundCommand(commands))
+            self._window.viewport.update()
+            self.refresh()
 
     def _on_active_toggle(self, checked: bool) -> None:
         scene = self._scene()
@@ -4584,14 +4583,64 @@ class BimPanel(QWidget):
             self._on_active_toggle(True)
 
     def _on_untag(self) -> None:
-        from core.bim import untag_faces, untag_group
+        from core.history import UntagGroupsCommand, SetFaceTagsCommand, CompoundCommand
         scene = self._scene()
-        untag_faces(s for s in scene.selection if isinstance(s, Face))
-        for g in scene.selection:
-            if isinstance(g, Group):
-                untag_group(g)
-        scene.version += 1
-        self._window.viewport.update()
+        groups = [s for s in scene.selection if isinstance(s, Group)]
+        faces = [s for s in scene.selection if isinstance(s, Face)]
+        commands = ([UntagGroupsCommand(groups)] if groups else [])
+        if faces:
+            commands.append(SetFaceTagsCommand(faces))
+        if commands:
+            self._window.viewport.history.execute(CompoundCommand(commands))
+            self._window.viewport.update()
+            self.refresh()
+
+    def _edit_record(self):
+        from core import bim_registry
+        from core.history import SetRecordCommand, SetRegistryCommand, CompoundCommand
+        from views.object_record import RecordDialog
+        groups = [g for g in self._scene().selection if isinstance(g, Group)]
+        if not groups:
+            self._window.statusBar().showMessage('Select groups to edit records', 2500)
+            return
+        registry = bim_registry.get(self._scene())
+        dialog = RecordDialog(self, groups[0].ifc, registry)
+        if dialog.exec():
+            commands = []
+            if 'bim_registry' not in self._scene().plugin_data:
+                commands.append(SetRegistryCommand(registry))
+            commands.append(SetRecordCommand(groups, dialog.patch))
+            self._window.viewport.history.execute(CompoundCommand(commands))
+            self.refresh()
+
+    def _edit_registry(self):
+        from core import bim_registry
+        from core.history import SetRegistryCommand
+        from views.object_record import RegistryDialog
+        dialog = RegistryDialog(self, bim_registry.get(self._scene()))
+        if dialog.exec():
+            self._window.viewport.history.execute(SetRegistryCommand(dialog.value))
+            self.refresh()
+
+    def _create_type(self):
+        from copy import deepcopy
+        from PySide6.QtWidgets import QInputDialog
+        from core import bim_registry
+        from core.history import SetRegistryCommand, SetRecordCommand, CompoundCommand
+        groups = [g for g in self._scene().selection if isinstance(g, Group) and g.ifc]
+        if not groups: return
+        key, ok = QInputDialog.getText(self, 'Create type', 'Unique registry key')
+        if not ok or not key: return
+        registry = bim_registry.get(self._scene())
+        if key in registry['types']:
+            self._window.statusBar().showMessage('Type key already exists', 2500)
+            return
+        source = groups[0].ifc
+        value = {k: deepcopy(source[k]) for k in ('name', 'description', 'predefined_type', 'object_type', 'psets', 'classifications') if k in source}
+        value['ifc_class'] = source['class']
+        registry['types'][key] = value
+        self._window.viewport.history.execute(CompoundCommand([
+            SetRegistryCommand(registry), SetRecordCommand(groups, {'type': key})]))
         self.refresh()
 
     def _on_pick_object(self, item, _col) -> None:
