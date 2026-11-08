@@ -338,3 +338,58 @@ INGETRAZO_RUST=1 QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q \
 ```
 
 Result: **1 passed in 1.12 s** (`.pick-reuse-test.log`).
+
+Full-detail before/after (navigation edge suppression disabled **in the local
+benchmark only**, no product setting changed):
+
+```text
+before: frame 35868ms ... sync=18261ms faces=17121ms edges=476ms cull=0k/0k tris +0k edges
+before orbit: frame 443ms ... faces=135ms edges=302ms cull=0k/0k tris +0k edges
+ after: frame 38621ms ... sync=19850ms faces=18309ms edges=458ms ... inst_proto=10040 inst_place=61766 inst_frustum=26117 inst_pixel=2909 inst_batches=10040 inst_draws=19787 face_draws=9987 edge_draws=9800 gather=15036.4ms inst_python=18332.5ms inst_gl_submit=428.4ms inst_vbo=758.1MiB
+ after orbit: frame 260ms ... faces=151ms edges=105ms ... inst_proto=11250 inst_place=65745 inst_frustum=24525 inst_pixel=3132 inst_batches=11250 inst_draws=22200 face_draws=11198 edge_draws=11002 gather=19.4ms inst_python=20.0ms inst_gl_submit=231.0ms inst_vbo=806.6MiB
+ after spike: frame 5413ms ... faces=4614ms edges=785ms ... inst_proto=11950 inst_place=67138 inst_frustum=22025 inst_pixel=3080 inst_batches=11950 inst_draws=23577 face_draws=11896 edge_draws=11681 gather=1993.4ms inst_python=4657.1ms inst_gl_submit=735.9ms inst_vbo=830.2MiB
+```
+
+Before: 21 logged orbit samples, median 295 ms, range 56–5,720 ms. With telemetry:
+48 logged orbit samples, median 293.5 ms, range 46–5,413 ms. These unequal, short
+runs with concurrent tests and cache warming are diagnostics, not a speedup
+claim. `frame` logs omit frames below 25 ms; medians describe logged samples,
+not an unbiased complete frame distribution. Logs are `.perf-before-detail.log`
+and `.perf-after-detail.log`; the local runner/wrapper, stack samples and
+`.perf-runtime/results.json` retain the reproduction details. Every GUI child
+has exited. The maximum measured prototype VBO lower bound was **830.2 MiB**;
+no hybrid memory estimate exists because no hybrid path was implemented.
+
+Assessment: this implementation has not demonstrated any of the three latency gates. At full
+detail the current renderer sends roughly 20–24k instanced calls per sampled
+frame. Even native replay spends hundreds of milliseconds in submission on
+some frames; changing visibility can also trigger seconds of gather/recording.
+Moving the same Python loop into Rust alone cannot remove those draw calls.
+The next experiment should collapse small prototypes with a bounded memory
+budget and preserve chunk culling, then measure again. These observations do
+not establish GL 3.3's post-consolidation ceiling and do not justify claiming
+that wgpu is either necessary or unnecessary. A decision to migrate now would
+be based on the current batching architecture, not on a tested GL 3.3 limit.
+
+Bounded suite (run once):
+
+```sh
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'
+```
+
+Result: **22 failed, 7,083 passed, 138 skipped, 2 xfailed, 805 deselected,
+56 warnings in 1,398 s (six batches)**, recorded in `.bounded-suite.log`.
+Nineteen failures match the supplied baseline: 14 translations (including ar),
+cursor pick, extension wrapping, hidden-panel lifetime, swatch tooltip and
+bold toolbar tooltip. The additional three are source-inspection tests in
+`test_nested_group_edit.py`: the process imported the viewport before it was
+edited, then `inspect.getsource` read shifted source lines from the edited file.
+All three passed in the final fresh-process focused run above (which includes
+all 24 tests in that file). No additional unresolved regression was observed.
+The bounded suite was not repeated on the final snapshot; the new telemetry
+file and camera-reuse case were added after their batch collection and were
+validated separately by the exact focused commands above.
+
+Generated drawing/texture caches (~3.3 GiB) were removed after measurement;
+benchmark scripts, logs, stack samples and the baseline source snapshot remain
+locally under the worktree. Nothing was pushed, and no PR or issue was created.
