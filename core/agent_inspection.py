@@ -19,6 +19,16 @@ def bounds(pair):
 
 class InspectionTools:
     def _groups(self):
+        # Every tool starts from this walk; a sweep of one query_entity per
+        # group on a 20k-placement model repeated it 20k times. Any edit
+        # moves scene.version, so that is the cache key (selection and
+        # camera changes leave the tree alone).
+        scene = self._viewport.scene
+        key = (id(scene), scene.version, len(scene.groups))
+        cached = getattr(self, "_groups_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+
         def walk(groups, parents, base):
             for g in groups:
                 matrix = g.xform
@@ -26,7 +36,9 @@ class InspectionTools:
                     matrix = base if matrix is None else base * matrix
                 yield g, parents, matrix
                 yield from walk(g.children or [], parents + [g], matrix)
-        return list(walk(self._viewport.scene.groups, [], None))
+        rows = list(walk(scene.groups, [], None))
+        self._groups_cache = (key, rows)
+        return rows
 
     def _find(self, uid):
         for row in self._groups():

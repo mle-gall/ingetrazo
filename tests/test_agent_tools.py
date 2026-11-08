@@ -182,3 +182,21 @@ def test_noop_mutating_tool_preserves_redo(model):
     before = len(win.viewport.history.undo_stack)
     assert call(bridge, "nothing") is None
     assert len(win.viewport.history.undo_stack) == before
+
+
+def test_tree_walk_is_cached_until_the_document_changes():
+    from types import SimpleNamespace
+    from core.agent_inspection import InspectionTools
+    from core.group import Group
+    from core.mesh import Mesh
+    from core.scene import Scene
+    scene = Scene()
+    scene.groups.append(Group(Mesh(), 'A'))
+    tools = InspectionTools()
+    tools._viewport = SimpleNamespace(scene=scene)
+    first = tools._groups()
+    assert tools._groups() is first
+    scene.groups.append(Group(Mesh(), 'B'))
+    scene.version += 1
+    rows = tools._groups()
+    assert rows is not first and [g.name for g, _, _ in rows] == ['A', 'B']

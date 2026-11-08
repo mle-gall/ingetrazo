@@ -216,3 +216,60 @@ def test_dialog_patch_carries_only_what_changed():
     # A fresh record keeps its class even when the default was not touched.
     fresh = RecordDialog(None, None, registry()); fresh.submit()
     assert fresh.patch == {'class': 'IfcWall'}
+
+
+def test_bim_tray_catches_up_only_when_shown(monkeypatch):
+    """A hidden BIM tray must not re-measure the takeoff on every change:
+    20k tagged groups froze the window for twenty minutes."""
+    from views import tray as tray_module
+    app = QApplication.instance() or QApplication([])
+    scene = Scene(); groups = [Group(Mesh(), f'G{i}') for i in range(3)]
+    scene.groups.extend(groups)
+    history = History(scene)
+    vp = SimpleNamespace(scene=scene, history=history, update=lambda: None)
+    window = SimpleNamespace(viewport=vp)
+    dock = tray_module.BimTray.__new__(tray_module.BimTray)
+    # Build the panel without a real QMainWindow: the dock's own init
+    # needs one, the behaviour under test does not.
+    from PySide6.QtWidgets import QDockWidget
+    QDockWidget.__init__(dock, 'BIM')
+    dock.bim = tray_module.BimPanel(window)
+    dock.setWidget(dock.bim)
+    dock._dirty = False
+    dock.visibilityChanged.connect(dock._on_visibility)
+    calls = []
+    monkeypatch.setattr(dock.bim, 'refresh', lambda: calls.append(1))
+    dock.hide()
+    dock.on_scene_changed()
+    assert calls == [] and dock._dirty
+    dock.show()
+    app.processEvents()
+    assert calls == [1] and not dock._dirty
+    dock.on_scene_changed()
+    assert calls == [1, 1]
+    dock.close()
+
+
+def test_live_takeoff_switches_off_above_the_limit(monkeypatch):
+    from views import tray as tray_module
+    from views.tray import BimPanel
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(tray_module, 'LIVE_TAKEOFF_LIMIT', 2)
+    scene = Scene(); groups = [Group(Mesh(), f'G{i}') for i in range(3)]
+    scene.groups.extend(groups)
+    history = History(scene)
+    vp = SimpleNamespace(scene=scene, history=history, update=lambda: None)
+    panel = BimPanel(SimpleNamespace(viewport=vp))
+    measured = []
+    import core.bim
+    real = core.bim.collect_objects
+    monkeypatch.setattr(core.bim, 'collect_objects',
+                        lambda s, memo=None: measured.append(1) or real(s, memo))
+    history.execute(TagGroupsCommand(groups, 'IfcColumn'))
+    panel._takeoff_key = None
+    panel.refresh()
+    assert measured == [] and not panel.too_many.isHidden() and panel._objects == []
+    assert '3' in panel.too_many.text()
+    panel._on_measure_anyway()
+    assert measured == [1] and len(panel._objects) == 3 and panel.too_many.isHidden()
+    panel.close()

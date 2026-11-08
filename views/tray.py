@@ -4449,6 +4449,17 @@ class ScenesPanel(QWidget):
         self._window.viewport.update()
 
 
+#: Tagged groups above which the BIM panel stops measuring on every change.
+LIVE_TAKEOFF_LIMIT = 2000
+
+
+def _tagged_group_count(scene) -> int:
+    """How many placed groups carry a record: one walk, no measuring."""
+    from core.bim import _placed_groups
+    return sum(1 for g, _base in _placed_groups(scene.groups)
+               if getattr(g, "ifc", None))
+
+
 class BimPanel(QWidget):
     """BIM tagging (the thesis layer): mark the selected geometry as an IFC
     object — class + name — and read its LIVE quantities. Freeform stays
@@ -4520,6 +4531,20 @@ class BimPanel(QWidget):
         self.tree.itemCollapsed.connect(self._fit_tree)
         lay.addWidget(self.tree)
 
+        # Past a few thousand tagged objects the live takeoff (one world-
+        # space copy of every object's faces, one tree row each) takes
+        # minutes and freezes the window; the panel then says so and
+        # measures only on request. The IFC and CSV exports are unaffected.
+        self.too_many = QLabel()
+        self.too_many.setWordWrap(True)
+        self.too_many.hide()
+        lay.addWidget(self.too_many)
+        self.measure_btn = QPushButton(tr("Measure anyway (slow)"))
+        self.measure_btn.hide()
+        self.measure_btn.clicked.connect(self._on_measure_anyway)
+        lay.addWidget(self.measure_btn)
+        self._measure_all = False
+
         exp = QPushButton(tr("Export quantities CSV…"))
         exp.setToolTip(tr(
             "The takeoff table — the bridge to IngePresupuestos"))
@@ -4527,6 +4552,11 @@ class BimPanel(QWidget):
         lay.addWidget(exp)
         self._objects: list = []
         self._containers: list = []
+        self.refresh()
+
+    def _on_measure_anyway(self) -> None:
+        self._measure_all = True
+        self._takeoff_key = None
         self.refresh()
 
     def _scene(self):
@@ -4741,6 +4771,21 @@ class BimPanel(QWidget):
                 and getattr(self, "_untagged_scene", None) == id(scene)
                 and hist.tags_cv == scene.content_version):
             return
+        tagged = _tagged_group_count(scene)
+        if tagged > LIVE_TAKEOFF_LIMIT and not self._measure_all:
+            self._objects = []
+            self._containers = []
+            self._untagged_scene = None
+            self.tree.clear()
+            self.too_many.setText(tr(
+                "{n} tagged objects: the live takeoff is switched off above "
+                "{limit}. Export IFC or the quantities CSV instead, or "
+                "measure on request.", n=tagged, limit=LIVE_TAKEOFF_LIMIT))
+            self.too_many.show()
+            self.measure_btn.show()
+            return
+        self.too_many.hide()
+        self.measure_btn.hide()
         # A memo per panel: an edit re-measures only the objects it touched.
         memo = self.__dict__.setdefault("_takeoff_memo", {})
         self._objects = collect_objects(scene, memo)
@@ -4918,9 +4963,22 @@ class BimTray(QDockWidget):
                          | QDockWidget.DockWidgetClosable)
         self.bim = BimPanel(window)
         self.setWidget(_scrolled([(tr("BIM tagging"), self.bim)]))
+        self._dirty = False
+        # Tabified behind another dock, or closed, the panel is not on
+        # screen: catch up when it comes back instead of measuring now.
+        self.visibilityChanged.connect(self._on_visibility)
 
     def on_scene_changed(self) -> None:
+        if not self.bim.isVisible():
+            self._dirty = True
+            return
+        self._dirty = False
         self.bim.refresh()
+
+    def _on_visibility(self, visible: bool) -> None:
+        if visible and self._dirty:
+            self._dirty = False
+            self.bim.refresh()
 
 
 class SurveyPointsPanel(QWidget):
