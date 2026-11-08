@@ -1,0 +1,54 @@
+Timeout (0:00:10)!
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1047 in _read_document
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1232 in _load_into_inner
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1110 in load_into
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 30 in load
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6989 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6941 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 72 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 73 in <module>
+Timeout (0:00:10)!
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/general_settings.py", line 34 in value
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1940 in _document_geometry_arrays
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1953 in _load_geometry
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1668 in _load_mesh
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1345 in _load_into_inner
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1110 in load_into
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 30 in load
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6989 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6941 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 72 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 73 in <module>
+Timeout (0:00:10)!
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1047 in _read_document
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1232 in _load_into_inner
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1110 in load_into
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 30 in load
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/links.py", line 189 in load_source
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/links.py", line 421 in reload
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/links.py", line 455 in resolve
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/links.py", line 443 in resolve
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/formats/igz.py", line 1121 in load_into
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 30 in load
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6989 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6941 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 72 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 73 in <module>
+DOCUMENT_LOADED 529908.3780035
+DOCUMENT_LOADED 529912.781913
+PHASE _apply_camera_home 4.416599404066801e-05
+PHASE _remember_recent 0.0016739999409765005
+PHASE _sync_style_menu 0.0034285419387742877
+PHASE _sync_section_menu 1.5959027223289013e-05
+PHASE _update_title 0.0023842910304665565
+Timeout (0:00:10)!
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/wgpu_scene.py", line 190 in pack_scene
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/wgpu_view.py", line 34 in set_scene
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6252 in rebuild
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 73 in <module>
+FIRST_MODEL_FRAME 4.647620999952778
+PACK 3.379955583019182 {'handoff': 0.9947038339450955, 'native': 2.2186691659735516, 'finish': 0.06108141702134162, 'peak_build_rss_bytes': 3294658560} UPLOAD 0.9262237920193002
