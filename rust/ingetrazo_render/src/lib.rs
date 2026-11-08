@@ -26,6 +26,7 @@ struct Scene {
     flags: Vec<u32>,
     rows: Vec<u8>,
     protos: wgpu::Buffer,
+    prototype_data: Vec<u8>,
     survivors: wgpu::Buffer,
     template_data: Vec<u8>,
     capacity: usize,
@@ -83,6 +84,14 @@ struct Renderer {
     #[pyo3(get)]
     adapter: String,
 }
+fn grown_capacity(current: usize, needed: usize) -> usize {
+    current.max(needed.max(1).next_power_of_two())
+}
+
+fn merge_instance_flags(old: u32, incoming: u32) -> u32 {
+    (old & 6) | (incoming & 1)
+}
+
 fn texture(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
     d.create_texture(&wgpu::TextureDescriptor {
         label: None,
@@ -456,7 +465,7 @@ impl Renderer {
         let vertex = buffer(&self.device, v, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
         let index = buffer(&self.device, ix, wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST);
         let protos = buffer(&self.device, p, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
-        let capacity = n.max(1).next_power_of_two();
+        let capacity = grown_capacity(0, n);
         let mut padded = vec![0; capacity * 80];
         for row in padded.chunks_exact_mut(80) {
             row[72] = 1;
@@ -518,6 +527,7 @@ impl Renderer {
             inst,
             rows: instances.to_vec(),
             protos,
+            prototype_data: p.to_vec(),
             survivors,
             template_data: cmd.to_vec(),
             capacity,
@@ -549,12 +559,28 @@ impl Renderer {
         indices: PyReadonlyArray1<'_, u8>, bounds: PyReadonlyArray1<'_, u8>, faces: u32) -> PyResult<()> {
         let (v, ix, bounds) = (vertices.as_slice()?, indices.as_slice()?, bounds.as_slice()?);
         let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
-        if id >= s.p as usize || v.len()%28 != 0 || ix.len()%4 != 0 || bounds.len()!=32 || faces as usize > ix.len()/4 {
+        if id > s.p as usize || v.len()%28 != 0 || ix.len()%4 != 0 || bounds.len()!=32 || faces as usize > ix.len()/4 {
             return Err(PyValueError::new_err("invalid prototype"));
         }
         if ix.chunks_exact(4).any(|i| u32::from_le_bytes(i.try_into().unwrap()) as usize >= v.len()/28) {
             return Err(PyValueError::new_err("vertex index out of range"));
         }
+        if id == s.p as usize {
+            let old_p = s.p as usize;
+            s.p += 1;
+            s.prototype_data.extend_from_slice(bounds);
+            s.protos = buffer(&self.device, &s.prototype_data, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
+            let old = std::mem::take(&mut s.template_data);
+            s.template_data.extend_from_slice(&old[..old_p*20]);
+            s.template_data.extend_from_slice(&[0; 20]);
+            s.template_data.extend_from_slice(&old[old_p*20..]);
+            s.template_data.extend_from_slice(&[0; 20]);
+            s.commands = buffer(&self.device, &s.template_data, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST);
+            s.template = buffer(&self.device, &s.template_data, wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
+            s.compute = bind(&self.device, &self.compute.get_bind_group_layout(0),
+                &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors]);
+        }
+        s.prototype_data[id*32..(id+1)*32].copy_from_slice(bounds);
         let base = s.vertex_data.len()/28;
         let first = s.index_data.len()/4;
         s.vertex_data.extend_from_slice(v);
@@ -605,7 +631,7 @@ impl Renderer {
             row[72] = 1;
         }
         if n > s.capacity {
-            s.capacity = n.next_power_of_two();
+            s.capacity = grown_capacity(s.capacity, n);
             let mut padded = vec![0; s.capacity*80];
             for row in padded.chunks_exact_mut(80) {
                 row[72] = 1;
@@ -626,7 +652,7 @@ impl Renderer {
         for (&id, row) in ids.iter().zip(rows.chunks_exact(80)) {
             let mut value = row.to_vec();
             let flags = u32::from_le_bytes(row[72..76].try_into().unwrap());
-            s.flags[id] = (s.flags[id] & 6) | (flags & 1);
+            s.flags[id] = merge_instance_flags(s.flags[id], flags);
             value[72..76].copy_from_slice(&s.flags[id].to_le_bytes());
             s.rows[id*80..(id+1)*80].copy_from_slice(&value);
             self.queue.write_buffer(&s.inst, id as u64 * 80, &value);
@@ -1335,5 +1361,25 @@ mod reference_tests {
         // Reset between frames; no stale counts may survive the template copy.
         counts.fill(0);
         assert_eq!(counts, [0, 0, 0]);
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    #[test]
+    fn growth_doubles_and_never_shrinks() {
+        assert_eq!(grown_capacity(8, 9), 16);
+        assert_eq!(grown_capacity(16, 4), 16);
+        assert_eq!(grown_capacity(8, 33), 64);
+        assert_eq!(grown_capacity(0, 0), 1);
+    }
+
+    #[test]
+    fn row_updates_preserve_selection_and_hover() {
+        assert_eq!(merge_instance_flags(6, 1), 7);
+        assert_eq!(merge_instance_flags(7, 0), 6);
+        assert_eq!(merge_instance_flags(0, 6), 0);
     }
 }

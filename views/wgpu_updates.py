@@ -6,24 +6,32 @@ of mutated prototypes uses one R1b bake; transform previews only write rows.
 import numpy as np
 from core.group import Group, iter_placements
 from core.scene import Scene
-from views.wgpu_scene import _placement_state, pack_scene, INSTANCE
+from views.wgpu_scene import _placement_state, pack_scene, INSTANCE, COMMAND
 
 
 class InstanceUpdates:
     def __init__(self, scene, packed):
+        self.scene = scene
         self.packed = packed
         self.meshes = {}
         for row, group in enumerate(packed.groups):
             mesh = group.mesh if group is not None else scene.loose_mesh
             self.meshes[id(mesh)] = (mesh, mesh._mut_serial,
                                     int(packed.instances['info'][row, 0]))
+        # Empty containers have no GPU row, but still need a serial sentinel.
+        all_meshes = [scene.loose_mesh]
+        all_meshes.extend(g.mesh for root in scene.groups for g, _ in iter_placements(root))
+        for mesh in all_meshes:
+            self.meshes.setdefault(id(mesh), (mesh, mesh._mut_serial, -1))
         self.rows = {uid: i for i, uid in enumerate(packed.uids)}
         self.active = set(self.rows)
         self.changed = []
         self.removed = []
 
     def diff(self, scene):
-        """Return changed rows; new mesh identities currently require repacking."""
+        """Return changed resident rows, retaining prototype and placement IDs."""
+        if scene is not self.scene:
+            return None
         placements = [(None, None, False)]
         state = _placement_state(scene)
         for root in scene.groups:
@@ -35,10 +43,17 @@ class InstanceUpdates:
             mesh = group.mesh if group is not None else scene.loose_mesh
             old = self.meshes.get(id(mesh))
             uid = getattr(group, 'uid', 'loose')
-            if old is None:
-                if group is None and not mesh.vertices and not mesh.faces:
+            if old is not None and old[2] == -1:
+                if old[1] == mesh._mut_serial:
                     continue
-                return None
+                old = None
+            if old is None:
+                code = len(self.packed.bounds)
+                old = (mesh, -1, code)
+                self.meshes[id(mesh)] = old
+                self.packed.bounds = np.concatenate((self.packed.bounds, np.zeros((1, 2, 4), np.float32)))
+                self.packed.commands = np.concatenate((self.packed.commands, np.zeros(1, COMMAND)))
+                self.packed.edge_commands = np.concatenate((self.packed.edge_commands, np.zeros(1, COMMAND)))
             if old[1] != mesh._mut_serial:
                 changed[id(mesh)] = old
             row = self.rows.get(uid)
@@ -72,12 +87,18 @@ class InstanceUpdates:
             # A single native bake for the changed set, including shared meshes.
             baked = pack_scene(Scene(groups=[Group(mesh) for mesh, _, _ in self.changed]))
             for i, (mesh, _, code) in enumerate(self.changed):
-                face, edge = baked.commands[i], baked.edge_commands[i]
+                uid = next((j for j, group in enumerate(baked.groups) if group.mesh is mesh), None)
+                if uid is None:
+                    face = edge = np.zeros((), COMMAND)
+                    bounds = np.zeros((2, 4), np.float32)
+                else:
+                    prototype = int(baked.instances['info'][uid, 0])
+                    face, edge = baked.commands[prototype], baked.edge_commands[prototype]
+                    bounds = baked.bounds[prototype]
                 start = int(face['base'])
                 count = int(face['count'] + edge['count'])
                 vertices = baked.vertices[start:start+count]
                 indices = baked.indices[start:start+count]
-                bounds = baked.bounds[i]
                 if renderer is not None:
                     renderer.replace_prototype(code, vertices.view(np.uint8).reshape(-1),
                                                indices.view(np.uint8).reshape(-1),
