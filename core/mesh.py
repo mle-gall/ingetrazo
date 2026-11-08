@@ -364,6 +364,10 @@ class Mesh:
         """Publish a batch of direct element edits, including attributes."""
         self._chunk_dirty = True
         self._attrs_dirty = True
+        # Raw position and winding edits must invalidate readers that key
+        # on geometry alone, not just the renderer's material dirty flag.
+        self._mut_serial += 1
+        self._winding_rev = getattr(self, "_winding_rev", 0) + 1
 
     # ---- Vertices -----------------------------------------------------------
     def _lookup(self, position: QVector3D) -> Optional[Vertex]:

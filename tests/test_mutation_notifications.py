@@ -86,8 +86,12 @@ def test_mesh_revision_geometry_attributes_winding_and_undo():
     m._chunk_dirty = False
     assert m.revision == before
     face.attrs["custom"] = 42
+    serial = m._mut_serial
+    winding = getattr(m, "_winding_rev", 0)
     m.mark_modified()
     assert m.revision > before
+    assert m._mut_serial > serial
+    assert m._winding_rev > winding
 
 
 def test_deferred_revision_and_scene_reads_do_not_build():
