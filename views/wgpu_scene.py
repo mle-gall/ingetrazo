@@ -103,11 +103,14 @@ def _source_arrays(mesh):
     palette = np.full((len(table)+1, 4), 210, np.uint8)
     palette[:, 3] = 0
     hidden = np.zeros(len(table)+1, bool)
-    for k, own in enumerate(table):
-        hidden[k+1] = bool(own.get('hidden'))
-        if own.get('color') is not None:
-            palette[k+1, :3] = np.clip(np.asarray(own['color'][:3])*255, 0, 255)
-            palette[k+1, 3] = 255
+    hidden[1:] = [bool(own.get('hidden')) for own in table]
+    painted = [(k+1, own['color'][:3]) for k, own in enumerate(table)
+               if own.get('color') is not None]
+    if painted:
+        ids, rgb = zip(*painted)
+        ids = np.asarray(ids, np.int64)
+        palette[ids, :3] = np.clip(np.asarray(rgb)*255, 0, 255)
+        palette[ids, 3] = 255
     return (np.asarray(pos, np.float32), np.asarray(corners, np.int64),
             np.asarray(sizes, np.int64), np.asarray(counts, np.int64),
             np.asarray(edges, np.int64), np.asarray(flags, np.uint8),
