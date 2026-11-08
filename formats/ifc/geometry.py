@@ -119,8 +119,8 @@ def mapped_body(w, group, base, excluded, context_id, geometry, cache, axis):
             rot, trans = np_affine(matrix) if matrix is not None else (np.eye(3), np.zeros(3))
             scale = float(np.linalg.norm(rot[:, 0]))
             uniform = (scale > 1e-12 and np.linalg.det(rot) > 0 and
-                       np.allclose(rot.T @ rot, np.eye(3) * scale**2,
-                                   rtol=1e-6, atol=1e-10))
+                       np.allclose((rot / scale).T @ (rot / scale), np.eye(3),
+                                   rtol=1e-6, atol=1e-6))
             if uniform:
                 key = id(placed.mesh)
                 if key not in cache:
@@ -131,7 +131,8 @@ def mapped_body(w, group, base, excluded, context_id, geometry, cache, axis):
                 origin = w.add('IFCCARTESIANPOINT', '(' + ','.join(_f(v) for v in trans) + ')')
                 transform = w.add('IFCCARTESIANTRANSFORMATIONOPERATOR3D',
                                   f'#{directions[0]}', f'#{directions[1]}',
-                                  f'#{origin}', _f(scale), f'#{directions[2]}')
+                                  f'#{origin}', _f(scale) if scale >= 1e-6 else format(scale, '.15E'),
+                                  f'#{directions[2]}')
                 item = w.add('IFCMAPPEDITEM', f'#{cache[key]}', f'#{transform}')
             else:
                 baked = Arrays((a.pos @ rot.T + trans).astype(np.float32).astype(float),

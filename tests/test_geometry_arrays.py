@@ -331,3 +331,24 @@ def test_loose_edges_do_not_open_closed_solid():
     g = cube()
     g.mesh.add_edge(V(5,0,0), V(6,0,0))
     assert quantities(world_arrays(g))[2:4] == (1., True)
+
+
+def test_mapping_tiny_scales_preserve_uniformity_and_scale(tmp_path):
+    import ifcopenshell
+    from formats.ifc import save_ifc
+    scene = Scene()
+    prototype = cube()
+    for scale in ((1e-8, 1e-8, 1e-8), (1e-6, 2e-6, 1e-6)):
+        g = Group(prototype.mesh)
+        g.ifc = {'class': 'IfcWall'}
+        g.xform = QMatrix4x4()
+        g.xform.scale(*scale)
+        scene.groups.append(g)
+    scene.plugin_data['bim_registry'] = {'export_profiles': {'test': {'instancing': True}}}
+    path = tmp_path / 'tiny.ifc'
+    save_ifc(scene, path, profile='test')
+    model = ifcopenshell.open(str(path))
+    maps = model.by_type('IfcRepresentationMap')
+    assert len(maps) == 2
+    scales = [m.MappingTarget.Scale for m in model.by_type('IfcMappedItem')]
+    assert scales == pytest.approx([1e-8, 1.])
