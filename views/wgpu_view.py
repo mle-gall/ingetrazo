@@ -210,38 +210,98 @@ class WgpuView(QWidget):
             self.renderer.set_highlight(indices, self.hovered_row)
             self._selection_signature = signature
 
+    def select_rows(self, rows, modifiers=Qt.NoModifier):
+        start = time.perf_counter()
+        groups = {self.packed.groups[i] for i in rows if self.resolve(i) is not None}
+        groups = [g for g in groups if g is not None and self.scene.entity_selectable(g)]
+        mode = ('toggle' if modifiers & (Qt.ControlModifier | Qt.MetaModifier)
+                else 'add' if modifiers & Qt.ShiftModifier else 'replace')
+        self.scene.select(groups, mode=mode)
+        self.sync_selection()
+        if self.source_viewport is not None:
+            self.source_viewport.notify_scene_changed()
+        self.update()
+        self.selection_ms = (time.perf_counter()-start)*1000
+
     def mousePressEvent(self, event):
         self.setFocus()
-        self.last = event.position()
-        self.press = event.position()
+        self.last = self.press = event.position()
+        self._drag_nav = event.button() == Qt.MiddleButton or bool(
+            getattr(self.source_viewport, 'nav_mode', None))
+        if self._drag_nav:
+            self._pivot = self._orbit_pivot_at(self.press.x(), self.press.y())
 
     def mouseMoveEvent(self, event):
         if not event.buttons():
+            self.last = None
             self.hover(event.position().x(), event.position().y())
             return
         if self.last is None:
             return
-        delta = event.position()-self.last
+        delta = event.position().toPoint()-self.last.toPoint()
         self.last = event.position()
-        if not event.buttons() & (Qt.MiddleButton | Qt.LeftButton):
-            return
-        if event.modifiers() & Qt.ShiftModifier:
-            self.camera.pan(delta.x(), delta.y(), self.height())
-        else:
-            self.camera.orbit(delta.x(), delta.y(), self.height())
+        mode = getattr(self.source_viewport, 'nav_mode', None)
+        if self._drag_nav and mode != 'zoom_window':
+            if mode == 'zoom':
+                self.camera.zoom(-delta.y()*.035)
+            elif mode == 'pan' or event.modifiers() & Qt.ShiftModifier:
+                depth = QVector3D.dotProduct(self._pivot-self.camera.eye(), self.camera.forward())
+                self.camera.pan(delta.x(), delta.y(), self.height(), depth=depth)
+            else:
+                dy = -delta.y() if getattr(self.source_viewport, '_invert_orbit_y', False) else delta.y()
+                self.camera.orbit(delta.x(), dy, self.height())
+        elif event.buttons() & Qt.LeftButton:
+            from views.wgpu_overlay import Primitive
+            self.overlay_primitives = [Primitive('rectangle',
+                ((self.press.x(), self.press.y()), (self.last.x(), self.last.y())))]
         self.update()
 
     def mouseReleaseEvent(self, event):
-        if self.renderer is not None and (event.position()-self.press).manhattanLength() < 3:
-            scale = self.devicePixelRatioF()
-            index = self.renderer.pick(int(event.position().x()*scale), int(event.position().y()*scale))
-            print('pick', self.packed.uids[index] if index >= 0 else None, flush=True)
+        if self.last is None:
+            return
+        mode = getattr(self.source_viewport, 'nav_mode', None)
+        if self._drag_nav:
+            if mode == 'zoom_window':
+                from views.viewport import Viewport
+                Viewport._zoom_to_box(self, self.press, event.position())
+        elif event.button() == Qt.LeftButton:
+            start = time.perf_counter()
+            if (event.position()-self.press).manhattanLength() < 3:
+                row = self.pick_row(event.position().x(), event.position().y())
+                rows = [] if row is None else [row]
+            else:
+                rows = self.rect_rows(self.press.x(), self.press.y(), event.position().x(), event.position().y())
+            self.select_rows(rows, event.modifiers())
+            self.selection_ms = (time.perf_counter()-start)*1000
         self.last = None
-
-    def wheelEvent(self, event):
-        from views.wheel_zoom import zoom_steps
-        self.camera.zoom(zoom_steps(event, getattr(self.source_viewport, "_invert_wheel", False)))
+        self.overlay_primitives = []
         self.update()
+
+    def mouseDoubleClickEvent(self, event):
+        row = self.pick_row(event.position().x(), event.position().y())
+        resolved = self.resolve(row)
+        if resolved is not None and resolved[0] is not None and self.source_viewport is not None:
+            self.source_viewport.begin_group_edit(resolved[0])
+            self.source_viewport.notify_scene_changed()
+            self.update()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            if self.scene.edit_group is not None and self.source_viewport is not None:
+                self.source_viewport.end_one_group_edit()
+                self.source_viewport.notify_scene_changed()
+            else:
+                self.scene.clear_selection()
+            self.last = None
+            self.overlay_primitives = []
+            self.sync_selection()
+        elif self.source_viewport is not None:
+            self.source_viewport.keyPressEvent(event)
+        self.update()
+
+    def keyReleaseEvent(self, event):
+        if self.source_viewport is not None:
+            self.source_viewport.keyReleaseEvent(event)
 
     def _depth_world_at(self, x, y):
         from views.wgpu_inference import surface
@@ -275,7 +335,8 @@ class WgpuView(QWidget):
     def wheelEvent(self, event):
         from views.viewport import Viewport
         self._invert_wheel = getattr(self.source_viewport, '_invert_wheel', False)
-        Viewport.wheelEvent(self, event)
+        from views.wheel_zoom import zoom_steps
+        self.camera.zoom(zoom_steps(event, self._invert_wheel))
         self.update()
 
     def set_highlight(self, selected_ids, hovered_id=None):
