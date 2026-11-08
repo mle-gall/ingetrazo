@@ -621,7 +621,14 @@ impl Renderer {
                 return Err(PyValueError::new_err("prototype id out of range"));
             }
         }
+        let max_rows = self.device.limits().max_storage_buffer_binding_size as usize / 80;
+        if ids.iter().any(|&id| id >= max_rows) {
+            return Err(PyValueError::new_err("instance rows exceed storage binding limit"));
+        }
         let n = ids.iter().map(|i| i + 1).max().unwrap_or(0).max(s.n as usize);
+        if grown_capacity(s.capacity, n) > max_rows {
+            return Err(PyValueError::new_err("instance capacity exceeds storage binding limit"));
+        }
         let structure = n != s.n as usize || ids.iter().zip(rows.chunks_exact(80)).any(|(&id, row)|
             row[64..68] != s.rows[id*80+64..id*80+68]);
         let old_n = s.n as usize;

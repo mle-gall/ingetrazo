@@ -170,3 +170,34 @@ def test_prototype_reassignment_preserves_row():
     assert updates.rows[scene.groups[0].uid] == 0
     assert updates.packed.instances['info'][:, 0].tolist() == [1, 0]
     assert updates.packed.commands['start'].tolist() == [0, 1]
+
+
+def test_native_move_preview_then_history_commit():
+    from core.history import History
+    from tools.move import MoveTool
+    from views.wgpu_tools import NativeTools
+    scene, updates = fixture_scene()
+    scene.select([scene.groups[0]])
+    history = History(scene)
+    source = SimpleNamespace(active_tool=MoveTool(), history=history,
+                             flash_status=lambda *a: None, notify_scene_changed=lambda: None,
+                             measurementChanged=SimpleNamespace(emit=lambda *a: None))
+    view = SimpleNamespace(scene=scene, packed=updates.packed, renderer=Renderer(),
+                           source_viewport=source, overlay_primitives=[],
+                           uid_rows={uid: [row] for uid, row in updates.rows.items()},
+                           _instance_updates=updates, update=lambda: None,
+                           _world_to_pixel=lambda point: (point.x(), point.y()),
+                           set_scene=lambda scene: updates.apply(*updates.diff(scene)))
+    native = NativeTools(view)
+    event = SimpleNamespace(position=lambda: QPointF(), modifiers=lambda: Qt.NoModifier)
+    view.last_snap = SimpleNamespace(point=QVector3D(), kind='endpoint')
+    native.click(event)
+    view.last_snap = SimpleNamespace(point=QVector3D(2, 0, 0), kind='endpoint')
+    native.hover(event)
+    assert scene.groups[0].xform.column(3).x() == 0
+    assert view.packed.instances['world'][0, 3, 0] == 2
+    native.click(event)
+    assert isinstance(history.undo_stack[-1], MoveGroupCommand)
+    assert scene.groups[0].xform.column(3).x() == 2
+    history.undo()
+    assert scene.groups[0].xform.column(3).x() == 0

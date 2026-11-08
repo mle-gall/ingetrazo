@@ -981,7 +981,8 @@ History's existing listener API identifies root-placement Move commands and
 record/registry commands, including compound commands and undo/redo. Known
 record edits do not scan placements or submit GPU work. Untracked edits use a
 conservative full placement scan, without rebaking unchanged prototypes. Bounds
-reduction and some bookkeeping remain proportional to the resident table.
+updates touch changed rows; a full reduction is needed when an edited row held
+a scene extremum. Untracked edit discovery still scans the resident table.
 Exact inference is invalidated immediately after changes and prepared again
 in the background, scheduled after the input event. Its prototype BVHs are
 still rebuilt; incremental inference preparation remains an R2b gap.
@@ -1013,7 +1014,7 @@ QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2b-tmp .venv-work/bin/python scripts/pyt
 .venv-work/bin/python scripts/wgpu_r2b_measure.py /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz
 ```
 
-Both release builds passed. Focused Python: **39 passed**. Rust: **4 core,
+Both release builds passed. Focused Python: **42 passed**. Rust: **4 core,
 6 renderer passed**. Device-free tests cover record-only no-ops, changed/shared
 prototypes, new prototypes, stable row IDs, additions/removals, History command
 identity and undo, direct Tape versus native adapter measurement, dispatch, and

@@ -117,7 +117,9 @@ class WgpuView(QWidget):
         self._inference_future = self._inference_worker.submit(prepare, self._inference_snapshot())
     def _inference_snapshot(self):
         from dataclasses import replace
-        return replace(self.packed, instances=self.packed.instances.copy())
+        return replace(self.packed, instances=self.packed.instances.copy(),
+                       bounds=self.packed.bounds.copy(), commands=self.packed.commands.copy(),
+                       edge_commands=self.packed.edge_commands.copy())
 
     def _upload(self):
         if self.packed is None or not self.isVisible():
