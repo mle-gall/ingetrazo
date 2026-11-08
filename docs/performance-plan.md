@@ -1020,6 +1020,9 @@ prototypes, new prototypes, stable row IDs, additions/removals, History command
 identity and undo, direct Tape versus native adapter measurement, dispatch, and
 History-guided discovery. Rust tests cover capacity growth and flag preservation;
 they do not exercise a device-backed reallocation in the unit test harness.
+A separate native-window smoke (`scripts/wgpu_r2b_smoke.py`, externally bounded
+to 120 seconds) completed instance growth, prototype insertion/replacement and
+removal without a wgpu validation error.
 
 The ride diagnostic is externally bounded to 290 seconds per process and loads
 the input read-only. It records command/submission timings, renderer calls,
