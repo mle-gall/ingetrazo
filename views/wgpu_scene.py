@@ -30,6 +30,7 @@ class PackedScene:
     uids: list
     world_bounds: np.ndarray
     timings: dict | None = None
+    groups: list | None = None
 
     def upload(self, renderer):
         renderer.set_scene(tuple(a.view(np.uint8).reshape(-1) for a in
@@ -155,6 +156,7 @@ def pack_scene(scene, view_tint=None):
     begin = perf_counter()
     state = _placement_state(scene)
     meshes, lookup, rows, uids, paints = [], {}, [], [], []
+    groups = []
     placements = [(None, None, scene.mesh, False)]
     for root in scene.groups:
         root_hidden = not state(root)[0]
@@ -173,6 +175,7 @@ def pack_scene(scene, view_tint=None):
         world = np.eye(4, dtype=np.float32) if matrix is None else np.array(matrix.data(), np.float32).reshape(4, 4)
         rows.append((code, world, hidden or not visible))
         uids.append(getattr(group, 'uid', 'loose'))
+        groups.append(group)
         paints.append(paint)
     offsets = np.zeros((len(meshes)+1, 5), np.int64)
     for i, arrays in enumerate(meshes):
@@ -215,11 +218,11 @@ def pack_scene(scene, view_tint=None):
     if len(rows):
         shown = instances[instances['info'][:, 2] == 0]
         if not len(shown):
-            return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)))
+            return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups)
         b = bounds[shown['info'][:, 0], :, :3]
         center, extent = (b[:, 0]+b[:, 1])/2, (b[:, 1]-b[:, 0])/2
         mat = shown['world'].transpose(0, 2, 1)
         wc = np.einsum('nij,nj->ni', mat[:, :3, :3], center)+mat[:, :3, 3]
         we = np.einsum('nij,nj->ni', abs(mat[:, :3, :3]), extent)
         world_bounds = np.array([(wc-we).min(axis=0), (wc+we).max(axis=0)])
-    return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)))
+    return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups)
