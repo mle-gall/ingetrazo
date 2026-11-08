@@ -61,6 +61,11 @@ def snap(index, row, view, x, y, **options):
                                     float(x), float(y), 12., 256)
     edges = [SimpleNamespace(a=QVector3D(*aa), b=QVector3D(*bb), in_group=True,
                              context='group') for aa, bb in zip(a, b)]
+    group, _ = view.resolve(row)
+    if group is not None and group.is_instance():
+        origin = QVector3D(*view.packed.instances['world'][row, 3, :3])
+        edges.insert(0, SimpleNamespace(a=origin, b=origin, component_origin=True))
+
     def occluded(candidate):
         pixel = view._world_to_pixel(candidate)
         if pixel is None:

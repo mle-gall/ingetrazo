@@ -157,7 +157,7 @@ def pack_scene(scene, view_tint=None):
     state = _placement_state(scene)
     meshes, lookup, rows, uids, paints = [], {}, [], [], []
     groups = []
-    placements = [(None, None, scene.mesh, False)]
+    placements = [(None, None, scene.loose_mesh, False)]
     for root in scene.groups:
         root_hidden = not state(root)[0]
         placements.extend((g, matrix, g.mesh, root_hidden) for g, matrix in iter_placements(root))

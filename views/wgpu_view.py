@@ -2,7 +2,7 @@
 import time
 import numpy as np
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QVector3D
+from PySide6.QtGui import QColor, QVector3D
 from PySide6.QtWidgets import QWidget
 from core.camera import OrbitCamera
 from views.wgpu_scene import pack_scene
@@ -41,8 +41,9 @@ class WgpuView(QWidget):
 
     def set_scene(self, scene):
         self.scene = scene
+        allowed = getattr(scene, '_navigator_allowed', None)
         token = (id(scene), scene._bounds_key(),
-                 frozenset(getattr(scene, '_navigator_allowed', None) or ()))
+                 None if allowed is None else frozenset(allowed))
         if token == getattr(self, "_content_token", None):
             self.update()
             return
@@ -110,11 +111,13 @@ class WgpuView(QWidget):
             signature = (tuple(sorted(tint.items())), id(context))
             if signature != getattr(self, '_tint_signature', None):
                 colors = []
+                from core.group import iter_placements
+                context_ids = ({id(g) for g, _ in iter_placements(context)}
+                               if context is not None else set())
                 for uid, group in zip(self.packed.uids, self.packed.groups):
                     rgb = tint.get(uid)
-                    if context is not None and group is not None and group is not context:
-                        if getattr(group, 'owner', None) is not context:
-                            rgb = (.35, .35, .35)
+                    if context is not None and id(group) not in context_ids:
+                        rgb = (.35, .35, .35)
                     colors.append(int(np.array([*np.clip(np.array(rgb[:3])*255, 0, 255), 255],
                                                np.uint8).view('<u4')[0]) if rgb is not None else 0)
                 self.renderer.set_overrides(colors)
@@ -166,7 +169,7 @@ class WgpuView(QWidget):
         from views.viewport import Viewport
         return Viewport._world_to_pixel(self, point)
 
-    def hover(self, x, y):
+    def hover(self, x, y, modifiers=Qt.NoModifier):
         from views.wgpu_inference import snap
         from views.wgpu_overlay import snap_glyph, Primitive
         start = time.perf_counter()
@@ -180,18 +183,32 @@ class WgpuView(QWidget):
             self.last_snap = snap(self.inference_index, self.hovered_row, self, x, y,
                                   start_point=getattr(tool, 'start_point', None),
                                   acquired_point=getattr(inference, '_acquired_point', None),
-                                  acquired_points=getattr(inference, '_encouraged', None))
+                                  acquired_points=getattr(inference, '_encouraged', None),
+                                  axis_lock=getattr(inference, 'axis_lock', None),
+                                  shift_held=bool(modifiers & Qt.ShiftModifier),
+                                  reference_edge=getattr(inference, 'reference_edge', None),
+                                  reference_mode=getattr(inference, 'reference_mode', None),
+                                  linear_mode=getattr(source, 'linear_inference_mode', 'all'),
+                                  project_onto_line=lambda start, direction:
+                                      self._project_to_lock_line(start, direction, x, y))
+            if inference is not None:
+                source._note_snap(self.last_snap)
+                point = (self.last_snap.point if self.last_snap is not None
+                         and self.last_snap.kind in source._ENCOURAGING_KINDS else None)
+                inference._dwell_on(point)
         if self.last_snap is not None:
             pixel = self._world_to_pixel(self.last_snap.point)
             if pixel is not None:
-                self.overlay_primitives.append(snap_glyph(pixel, self.last_snap.kind))
+                self.overlay_primitives.append(snap_glyph(
+                    pixel, self.last_snap.kind, QColor.fromRgbF(*self.last_snap.color).name()))
             guides = list(self.last_snap.guides or [])
             if self.last_snap.guide:
                 guides.append((*self.last_snap.guide, self.last_snap.color))
             for a, b, color in guides:
                 pa, pb = self._world_to_pixel(a), self._world_to_pixel(b)
                 if pa is not None and pb is not None:
-                    self.overlay_primitives.append(Primitive('polyline', (pa, pb)))
+                    self.overlay_primitives.append(Primitive(
+                        'polyline', (pa, pb), QColor.fromRgbF(*color).name()))
         self.sync_selection()
         self.hover_ms = (time.perf_counter()-start)*1000
         from views.viewport import _PERF, _plog
@@ -234,7 +251,7 @@ class WgpuView(QWidget):
     def mouseMoveEvent(self, event):
         if not event.buttons():
             self.last = None
-            self.hover(event.position().x(), event.position().y())
+            self.hover(event.position().x(), event.position().y(), event.modifiers())
             return
         if self.last is None:
             return
@@ -249,7 +266,7 @@ class WgpuView(QWidget):
                 self.camera.pan(delta.x(), delta.y(), self.height(), depth=depth)
             else:
                 dy = -delta.y() if getattr(self.source_viewport, '_invert_orbit_y', False) else delta.y()
-                self.camera.orbit(delta.x(), dy, self.height())
+                self.camera.orbit_about(self._pivot, delta.x(), dy, self.height())
         elif event.buttons() & Qt.LeftButton:
             from views.wgpu_overlay import Primitive
             self.overlay_primitives = [Primitive('rectangle',
@@ -303,6 +320,10 @@ class WgpuView(QWidget):
         if self.source_viewport is not None:
             self.source_viewport.keyReleaseEvent(event)
 
+    def _project_to_lock_line(self, start, direction, x, y):
+        from views.viewport import Viewport
+        return Viewport._project_to_lock_line(self, start, direction, x, y)
+
     def _depth_world_at(self, x, y):
         from views.wgpu_inference import surface
         row = self.pick_row(x, y)
@@ -335,8 +356,7 @@ class WgpuView(QWidget):
     def wheelEvent(self, event):
         from views.viewport import Viewport
         self._invert_wheel = getattr(self.source_viewport, '_invert_wheel', False)
-        from views.wheel_zoom import zoom_steps
-        self.camera.zoom(zoom_steps(event, self._invert_wheel))
+        Viewport.wheelEvent(self, event)
         self.update()
 
     def set_highlight(self, selected_ids, hovered_id=None):

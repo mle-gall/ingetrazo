@@ -855,3 +855,106 @@ See [tests.json](benchmarks/wgpu-r2-2026-11-08/tests.json) and
 [full output](benchmarks/wgpu-r2-2026-11-08/validation.txt).
 Rust output is retained alongside them. No push, PR, issue or external comment
 was made. Branch: `renderer/r2-tools`, based on `af3959af`.
+
+## R2a — 2026-11-08: ID-local interaction and navigation
+
+The opt-in native view now resolves a resident ID to its group, prototype,
+and placement matrix. A worker builds native InstanceProto/InstanceSet BVHs
+from the resident triangles and hard edges after packing; no GL pick index or
+lazy-native memo is built by mouse hover. The index survives camera changes.
+Queries pass only the picked placement to the native candidate search, then
+reuse the GL Möller–Trumbore test and `compute_snap`. Local occlusion rejects
+back-side points within the picked prototype. Glyphs and inference guides use
+the R2 overlay. `INGETRAZO_PERF` hover logging includes the native total.
+
+Selection writes `scene.selection`, with Shift add and Ctrl/Cmd toggle as
+requested for this path. Highlight rows are cached by uid; panel changes are
+observed during presentation. Rubber-band release reads the normalized ID
+rectangle. Double-click and Esc call the source viewport's edit-context
+methods; override colors dim placements outside the context. Packing uses
+`loose_mesh`, avoiding a second copy of the open group's mesh. Selection-only
+refreshes do not rebuild geometry. The GL default is unchanged.
+
+The view retains the source camera. Middle-drag orbit uses the picked world
+pivot; pan uses pivot depth. Wheel zoom uses the GL wheel handler and focal
+plane fallback; zoom window uses the GL box handler. Menu camera actions
+already mutate that shared camera, and key events are forwarded to the source
+viewport. Device-free tests compare GL/native middle-drag orbit and pan.
+
+### Ride measurements
+
+Reproduction: `scripts/wgpu_r2a_measure.py` with the read-only ride file,
+1000×700 logical pixels, 2× scale, 76,029 placements. Each native subprocess
+was externally bounded to 290 seconds. Raw samples:
+[1×](benchmarks/wgpu-r2a-2026-11-08/interaction.json) and
+[4×](benchmarks/wgpu-r2a-2026-11-08/interaction-msaa.json).
+
+The 1× run measured first hover **4.118 ms**, maximum **9.197 ms** over
+15 occupied grid positions; click through highlight-buffer submission max
+**2.187 ms**. A rectangle containing **1,010** visible placements took
+**25.303 ms** through selection and highlight-buffer submission. A full-view
+rectangle containing 8,130 took 100.073 ms. These exclude presentation latency;
+they are sampled results, not a proof of a worst-case bound at every pixel.
+The final rerun (2026-11-09, after the suite ended) additionally renders the
+highlight and waits for a subsequent ID readback: click through **GPU
+completion max 28.930 ms**, and the 1,010-placement box **52.249 ms**. This
+includes GPU work but still does not measure OS compositor presentation.
+At 4× the click GPU-completion maximum is **40.635 ms**; the 1,009-placement
+box is **59.292 ms**.
+The script waits for preparation to finish before measuring the first hover.
+While preparation is pending, hover highlights IDs but has no exact snap yet.
+
+For the last 20 paced frames, 1× CPU/GPU/wall averages were
+**1.995 / 13.674 / 2.171 ms**. The 4× averages were
+**3.853 / 18.819 / 4.042 ms**: about **5.144 ms** extra GPU cost. GPU samples
+are asynchronous and can repeat. The comparison path renders color a second
+time and resolves it, retaining the original single-sample ID/depth pass.
+The GPU interval includes both scene passes. This exceeds a 16.67 ms frame
+budget on the ride, so MSAA stays disabled by default; `Renderer.set_msaa(True)`
+enables comparison. X-ray retains its original single-sample path.
+
+### Validation and limits
+
+Private Python 3.13 venv and private Cargo cache; no new dependencies:
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2a-tmp .venv-work/bin/python -m pytest -q tests/test_wgpu_interaction.py tests/test_wgpu_scene.py tests/test_wgpu_overlay.py
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_core/Cargo.toml
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2a-tmp .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'
+.venv-work/bin/python scripts/wgpu_r2a_measure.py /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz
+.venv-work/bin/python scripts/wgpu_r2a_measure.py /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz --msaa
+```
+
+Both release builds passed; Rust: **4 core + 4 renderer tests passed**.
+Focused Python: **30 passed**. Coverage includes row resolution, transformed
+endpoint/midpoint/face equality with the existing exact snap rules, selection
+modifiers and external updates, rectangle mapping, shared projection, GL/native
+orbit/pan/wheel/zoom-window equivalence, direct GL viewport snap comparison,
+and avoiding duplicate geometry inside edit context.
+
+Remaining acceptance limitations: circle/face reference acquisition and sticky
+lock modes are not fully integrated with the native input loop. Named-point
+dwell reuses the source inference engine, and explicit axes use the shared
+lock-line projection. The synthetic GL viewport
+comparison covers vertex, component origin, midpoint and face; it does not
+establish parity for all inference states. Neighboring
+placements within the snap radius are intentionally not queried, so snaps
+just outside a silhouette and cross-placement occlusion need additional
+validation. Full keyboard/navigation and Outliner/Navigator GUI parity have
+not been demonstrated by the bounded standalone experiment. This is therefore
+an implementation increment with measured local gates, not full R2a acceptance.
+
+
+The required bounded full-suite invocation reached its **1,800-second** cap
+in batch 6; the process group was terminated. Completed batches 1–5:
+**6,131 passed, 19 failed, 115 skipped, 2 xfailed, 804 deselected,
+52 warnings**. The failures match the supplied baseline categories exactly:
+14 translations (including Arabic), cursor pick, extension wrapping, hidden
+panels, swatch tooltip, and toolbar bold. Batch 6 has no completed summary;
+this is **not a complete full-suite pass or a complete regression comparison**.
+The suite was not rerun. The focused native tests completed separately.
