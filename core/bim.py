@@ -167,12 +167,19 @@ def face_set_volume(faces):
                 counts[key] = counts.get(key, 0) + 1
     if any(c != 2 for c in counts.values()):
         return None
-    total = 0.0
+    # Convert before subtracting: QVector3D arithmetic itself is float32.
+    import math
+    origin = faces[0].loop[0].position
+    anchor = (float(origin.x()), float(origin.y()), float(origin.z()))
+    terms = []
     for f in faces:
-        for t0, t1, t2 in f.triangulate():
-            total += QVector3D.dotProduct(
-                t0, QVector3D.crossProduct(t1, t2)) / 6.0
-    return abs(total)
+        for triangle in f.triangulate():
+            a, b, c = [(float(v.x()) - anchor[0], float(v.y()) - anchor[1],
+                        float(v.z()) - anchor[2]) for v in triangle]
+            terms.append((a[0] * (b[1]*c[2] - b[2]*c[1])
+                          + a[1] * (b[2]*c[0] - b[0]*c[2])
+                          + a[2] * (b[0]*c[1] - b[1]*c[0])) / 6.0)
+    return abs(math.fsum(terms))
 
 
 def _group_signature(g, base=None) -> tuple:
@@ -192,17 +199,17 @@ def _group_signature(g, base=None) -> tuple:
     return (id(g), tag, tuple(parts))
 
 
-def _untagged_part(g):
+def _untagged_part(g, excluded=()):
     """``g`` with its tagged descendants pruned — a stand-in
     :func:`core.group.world_mesh` folds like the group itself."""
     from types import SimpleNamespace
     return SimpleNamespace(
         mesh=g.mesh, xform=getattr(g, "xform", None),
-        children=[_untagged_part(c) for c in getattr(g, "children", None)
-                  or () if not getattr(c, "ifc", None)])
+        children=[_untagged_part(c, excluded) for c in getattr(g, "children", None)
+                  or () if not getattr(c, "ifc", None) and c.uid not in excluded])
 
 
-def _tagged_group_faces(g, base) -> list:
+def _tagged_group_faces(g, base, excluded=()) -> list:
     """A tagged group's world-space faces: its own geometry and that of
     its nested placements, less the tagged ones (objects of their own)."""
     if (base is None and getattr(g, "xform", None) is None
@@ -212,7 +219,7 @@ def _tagged_group_faces(g, base) -> list:
 
     from core.group import world_mesh
     from core.mesh import Mesh
-    part = _untagged_part(g)
+    part = _untagged_part(g, excluded)
     if base is not None:
         part = SimpleNamespace(mesh=Mesh(), xform=base, children=[part])
     return list(world_mesh(part).faces)

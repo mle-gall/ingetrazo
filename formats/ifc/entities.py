@@ -24,6 +24,14 @@ class Builder(_Writer):
 
     def entity(self, entity, **values):
         attrs = self.attributes(entity)
+        # Required enum attributes can honestly express an unspecified value.
+        for name, enum in SCHEMA_DATA[self.schema]['enums'][entity.upper()].items():
+            if enum['required'] and name not in values and 'NOTDEFINED' in enum['members']:
+                values[name] = '.NOTDEFINED.'
+        if entity == 'IfcStructuralLoadCase':
+            values['PredefinedType'] = '.LOAD_CASE.'
+        if entity == 'IfcStructuralResultGroup':
+            values.setdefault('IsLinear', '.F.')
         unknown = values.keys() - set(attrs)
         if unknown:
             raise ValueError(f'{entity}: unknown attributes {unknown}')

@@ -9,7 +9,7 @@ compare or display the count; new callers use `count`, `path`, `problems` and
 ValueError. When every record is rejected, the file contains a valid project
 skeleton and the report has count zero.
 
-The package separates STEP encoding (`step.py`), hand-written attribute orders
+The package separates STEP encoding (`step.py`), generated attribute orders
 and strict entity construction (`entities.py`), world-space faceted geometry
 (`geometry.py`), model traversal (`export.py`) and optional IDS checks
 (`ids.py`). No native IFC package is imported to write IFC. Attribute names and
@@ -99,3 +99,29 @@ the IFC. HTML reporting is not included. The UI shows a non-modal report.
 Optional developer dependencies are `ifcopenshell` and `ifctester`; tests skip
 their consumer checks if absent. The small hand-authored wall handover IDS fixture
 requires Pset_WallCommon.Status and a Discipline classification.
+
+## Generated facts and additional relationships
+
+Run `.venv-work/bin/python scripts/gen_ifc_tables.py` with IfcOpenShell installed
+to regenerate `core/ifc_tables_data.py`. Runtime export remains pure Python.
+Entity and attribute names/order and enum members are interoperability facts.
+Never vendor buildingSMART EXPRESS, XML/JSON property libraries or HTML text:
+their CC BY-ND distribution terms are incompatible with this GPL codebase.
+User-downloaded PSD libraries are read only at runtime (see project registry).
+
+The vocabulary includes concrete elements, spatial objects and groups from
+IFC4 and IFC4X3_ADD2. Required enum values use NOTDEFINED where available.
+Type counterparts are resolved through the occurrence supertype chain.
+
+Materials and layer sets are shared; surface styles carry sRGB and transparency.
+Presentation layers use the source layer name and uid, assigned to shape
+representations. These entities are not IfcRoot and have no GlobalId. Material
+associations, void/fill relations and named-storey containment have semantic,
+stable GUIDs. Openings use the explicit geometry described in object-record.md.
+
+Current limitations: bare StandardCase/ElementedCase and standalone feature
+records requiring material usage, decomposition or host relationships are
+reported and skipped. Their names remain available in the vocabulary, but full
+specialization export is unfinished. Group registry type references do not emit
+an invalid proxy type relationship. Referenced child void geometry is excluded from the host representation;
+callers must supply a host already representing the void (no Boolean cut is made). Qto XML templates and non-scalar PSD property types need further support.

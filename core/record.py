@@ -20,6 +20,10 @@ def normalize(record):
             if isinstance(properties, dict):
                 for key, value in properties.items():
                     properties[key] = typed(value)
+    if isinstance(result, dict) and isinstance(result.get('quantities'), dict):
+        for name, value in result['quantities'].items():
+            if type(value) in (int, float):
+                result['quantities'][name] = {'value': value, 'source': 'manual'}
     return result
 
 def role(record):
@@ -93,9 +97,10 @@ def validate(record, registry, schema='IFC4'):
             elif any(not isinstance(item.get(k), str) for k in ('code', 'name')):
                 errors.append('Classification code and name must be text')
     from core.pset_library import templates
+    from xml.etree.ElementTree import ParseError
     try:
         library = templates(registry)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, ParseError) as exc:
         errors.append('Cannot read pset library: ' + str(exc))
         library = {}
     psets = r.get('psets', {})
@@ -125,6 +130,56 @@ def validate(record, registry, schema='IFC4'):
                     members = template.get('members')
                     if members is not None and val not in members:
                         errors.append(f'{pset}.{prop}: invalid enumeration member')
+    material = r.get('material')
+    if material is not None and not isinstance(material, (str, dict)):
+        errors.append('material must be a name or an object')
+    if isinstance(material, dict):
+        if not isinstance(material.get('name'), str):
+            errors.append('material.name must be text')
+        layers = material.get('layers', [])
+        if not isinstance(layers, list):
+            errors.append('material.layers must be a list')
+        else:
+            for layer in layers:
+                if not isinstance(layer, dict) or not isinstance(layer.get('name'), str) or type(layer.get('thickness')) not in (int, float) or not math.isfinite(layer['thickness']) or layer['thickness'] < 0:
+                    errors.append('material layer requires a name and nonnegative finite thickness')
+    if 'storey' in r and not isinstance(r['storey'], (str, dict)):
+        errors.append('storey must be a name or legacy object')
+    if isinstance(r.get('storey'), dict):
+        info = r['storey']
+        if not isinstance(info.get('name'), str) or type(info.get('elevation', 0)) not in (int, float) or not math.isfinite(info.get('elevation', 0)):
+            errors.append('storey requires a name and finite elevation')
+    if 'fills' in r and (not isinstance(r['fills'], str) or cls not in ('IfcDoor', 'IfcWindow')):
+        errors.append('fills requires an opening GUID on a door or window')
+    openings = r.get('openings', [])
+    if not isinstance(openings, list):
+        errors.append('openings must be a list')
+    else:
+        for opening in openings:
+            if not isinstance(opening, dict):
+                errors.append('opening must be an object')
+                continue
+            if opening.get('class', 'IfcOpeningElement') != 'IfcOpeningElement':
+                errors.append('opening class must be IfcOpeningElement')
+            if 'guid' in opening and (not isinstance(opening['guid'], str) or not re.fullmatch(r'[0-3][0-9A-Za-z_$]{21}', opening['guid'])):
+                errors.append('opening guid must be an IFC compressed GUID')
+            if 'group_uid' in opening and not isinstance(opening['group_uid'], str):
+                errors.append('opening group_uid must be text')
+            faces = opening.get('faces', [])
+            if not isinstance(faces, list):
+                errors.append('opening faces must be a list')
+                continue
+            for face in faces:
+                if not isinstance(face, dict) or not isinstance(face.get('outer'), list):
+                    errors.append('opening face requires outer vertices')
+                    continue
+                if not isinstance(face.get('holes', []), list):
+                    errors.append('opening holes must be a list')
+                    continue
+                loops = [face['outer']] + face.get('holes', [])
+                for loop in loops:
+                    if not isinstance(loop, list) or len(loop) < 3 or any(not isinstance(p, (list, tuple)) or len(p) != 3 or any(type(v) not in (int, float) or not math.isfinite(v) for v in p) for p in loop):
+                        errors.append('opening loop requires finite world-metre triples')
     quantities = r.get('quantities', {})
     if not isinstance(quantities, dict):
         errors.append('quantities must be an object')

@@ -11,7 +11,9 @@ from core.bim import collect_objects, class_quantities, _placed_groups, _tagged_
 from core.ifc_identity import object_guid, stable_guid
 from core.ifc_tables import TABLES, predefined_types
 from core.version import __version__
-from .entities import Builder, ORDERS
+from .entities import Builder
+from core.ifc_tables_data import SCHEMA_DATA
+from .relationships import Appearance
 from .geometry import _brep
 from .step import _s, _f
 from .ids import check_ids
@@ -129,6 +131,9 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
         defaults[key] = node
         parent = node
 
+    appearance = Appearance(scene, w, relation)
+    opening_nodes = {}
+    pending_fills = []
     problems = []
     classifications = defaultdict(list)
     classification_names = {}
@@ -164,10 +169,17 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
         group = obj.get('group')
         raw = record.normalize(group.ifc) if group is not None else {'class': obj['class'], 'name': obj['name']}
         messages = record.validate(raw, registry, schema) if group is not None else []
+        # These specializations require topology or material usage that a bare
+        # class tag cannot supply. Reject rather than invent engineering facts.
+        if raw.get('class') in ('IfcBeamStandardCase', 'IfcColumnStandardCase', 'IfcMemberStandardCase',
+                   'IfcWallStandardCase', 'IfcSlabStandardCase', 'IfcPlateStandardCase',
+                   'IfcWallElementedCase', 'IfcSlabElementedCase', 'IfcOpeningElement',
+                   'IfcOpeningStandardCase', 'IfcVoidingFeature', 'IfcProjectionElement', 'IfcSurfaceFeature', 'IfcEarthworksCut'):
+            messages.append('Class requires explicit feature or material-usage relationships; use a base class or the openings record')
         # Unsupported classes have a deliberate substitute; malformed records are skipped.
         fatal = [m for m in messages if m != 'class is not supported in ' + schema]
         if messages:
-            problems.append({'uid': group.uid, 'name': group.name, 'messages': messages})
+            problems.append({'uid': getattr(group, 'uid', ''), 'name': getattr(group, 'name', obj['name']), 'messages': messages})
         if fatal:
             continue
         r = record.apply_type(raw, registry)
@@ -181,14 +193,17 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
         if cls == 'IfcFacilityPart':
             cls = 'IfcFacilityPartCommon'
             r['object_type'] = r.get('object_type') or original
-        faces = _tagged_group_faces(group, bases[id(group)]) if group is not None else obj['faces']
+        excluded = {o['group_uid'] for o in r.get('openings', []) if o.get('group_uid')}
+        faces = _tagged_group_faces(group, bases[id(group)], excluded) if group is not None else obj['faces']
         eg = object_guid(scene, obj)
         attrs = dict(GlobalId=_s(eg), OwnerHistory=owner,
                      Name=_s(raw.get('name') or (group.name if group is not None else obj['name']) or cls),
                      Description=_s(r.get('description', '')), ObjectType=_s(r.get('object_type', '')),
                      ObjectPlacement=ref(placement))
+        rep, item = None, None
         if faces:
             rep = _brep(w, faces, body)
+            item = w.last_shape_item
             attrs['Representation'] = ref(w.add('IFCPRODUCTDEFINITIONSHAPE', '$', '$', refs([rep])))
         available = w.attributes(cls)
         if 'Tag' in available:
@@ -220,6 +235,44 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
                 attrs['BarLength'] = _f(dims['Length'])
         attrs = {k: v for k, v in attrs.items() if k in available}
         node = w.entity(cls, **attrs)
+        appearance.apply(r, group, faces, node, eg, rep, item)
+        for index, opening in enumerate(r.get('openings', [])):
+            from core.mesh import Mesh
+            from core.ifc_identity import ensure_guid
+            from PySide6.QtGui import QVector3D
+            mesh = Mesh()
+            for face in opening.get('faces', []):
+                mesh.add_face([QVector3D(*p) for p in face['outer']],
+                              [[QVector3D(*p) for p in hole] for hole in face.get('holes', [])] or None)
+            ofaces = list(mesh.faces)
+            if opening.get('group_uid'):
+                child = next((g for g, _ in _placed_groups(group.children) if g.uid == opening['group_uid']), None)
+                if child is not None:
+                    ofaces = _tagged_group_faces(child, bases[id(child)])
+            from core.bim import face_set_volume
+            if not ofaces or face_set_volume(ofaces) is None:
+                problems.append({'uid': getattr(group, 'uid', ''), 'name': opening.get('name', ''),
+                                 'messages': ['Opening requires a closed face set or a valid closed child group']})
+                continue
+            # Assign on the stored record, never just on the detached export view.
+            if 'openings' not in group.ifc:
+                from copy import deepcopy
+                group.ifc['openings'] = deepcopy(r['openings'])
+            stored = group.ifc['openings'][index]
+            if not stored.get('guid'):
+                ensure_guid(stored)
+                scene.version += 1
+            og = stored['guid']
+            oa = dict(GlobalId=_s(og), Name=_s(opening.get('name', 'Opening')),
+                      ObjectPlacement=ref(placement), PredefinedType='.OPENING.')
+            if ofaces:
+                orep = _brep(w, ofaces, body)
+                oa['Representation'] = ref(w.entity('IfcProductDefinitionShape', Representations=refs([orep])))
+            onode = w.entity('IfcOpeningElement', **oa)
+            opening_nodes[og] = onode
+            relation('IfcRelVoidsElement', (eg, og), RelatingBuildingElement=ref(node), RelatedOpeningElement=ref(onode))
+        if r.get('fills'):
+            pending_fills.append((eg, node, r['fills']))
         exported.append((obj, node, eg, spatial, cls))
         if group is not None:
             group_nodes[id(group)] = (node, eg, spatial, cls)
@@ -256,11 +309,19 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
         for item in raw.get('classifications', []):
             classifications[(item['system'], item['code'])].append(node)
             classification_names.setdefault((item['system'], item['code']), item.get('name', ''))
-        if raw.get('type'):
+        if raw.get('type') and TABLES.get(cls, {}).get('domain') != 'group':
             type_members[raw['type']].append(node)
         for key in r.get('systems', []):
             system_members[key].append(node)
 
+    appearance.finish()
+    for eg, node, opening in pending_fills:
+        if opening in opening_nodes:
+            relation('IfcRelFillsElement', (eg, opening), RelatingOpeningElement=ref(opening_nodes[opening]), RelatedBuildingElement=ref(node))
+        else:
+            problems.append({'uid': eg, 'name': '', 'messages': ['Unknown opening: ' + opening]})
+    named_storeys = {}
+    named_guids = {}
     aggregates = defaultdict(list)
     containment = defaultdict(list)
     for obj, node, eg, spatial, cls in exported:
@@ -284,10 +345,26 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
         elif TABLES.get(cls, {}).get('domain') == 'group':
             pass
         else:
-            containment[found[0] if found else defaults['storey']].append(node)
+            parent = found[0] if found else defaults['storey']
+            shortcut = (group.ifc or {}).get('storey') if group is not None else None
+            if shortcut and (not found or found[3] == 'IfcBuilding'):
+                name = shortcut.get('name') if isinstance(shortcut, dict) else shortcut
+                building = found[0] if found else defaults['building']
+                building_guid = found[1] if found else guid('building')
+                key = (building_guid, name)
+                if key not in named_storeys:
+                    elevation = registry.get('storeys', {}).get(name, {}).get('elevation', shortcut.get('elevation', 0) if isinstance(shortcut, dict) else 0)
+                    parent = root('IfcBuildingStorey', ('named-storey', *key), Name=_s(name),
+                                  ObjectPlacement=ref(placement), CompositionType='.ELEMENT.', Elevation=_f(elevation))
+                    named_storeys[key] = parent
+                    named_guids[parent] = guid('named-storey', *key)
+                    aggregates[building].append(parent)
+                parent = named_storeys[key]
+            containment[parent].append(node)
     # Relationship identities use semantic parent GUIDs, not transient STEP ids.
     node_guids = {node: eg for _, node, eg, _, _ in exported}
     node_guids.update({value: guid(key) for key, value in defaults.items()})
+    node_guids.update(named_guids)
     node_guids[project] = guid('project')
     for parent, children in aggregates.items():
         relation('IfcRelAggregates', ('children', node_guids[parent]), RelatingObject=ref(parent), RelatedObjects=refs(children))
@@ -297,7 +374,7 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
     for key, members in type_members.items():
         data = record.normalize(registry['types'][key])
         cls = TABLES.get(data.get('ifc_class'), {}).get('type_class', {}).get(schema) or 'IfcBuildingElementProxyType'
-        if cls.upper() not in __import__('core.ifc_tables_data', fromlist=['SCHEMA_DATA']).SCHEMA_DATA[schema]['orders']:
+        if cls.upper() not in SCHEMA_DATA[schema]['orders']:
             cls = 'IfcBuildingElementProxyType'
         attrs = dict(Name=_s(data.get('name', key)), Description=_s(data.get('description', '')),
                      ElementType=_s(data.get('object_type', '')))

@@ -38,7 +38,8 @@ def generate():
                                  ('IfcSpatialElement', 'spatial'), ('IfcGroup', 'group')]:
                 if base in chain:
                     domain = bucket
-            counterpart = entities.get(name + 'Type')
+            counterpart = next((entities[base + 'Type'] for base in chain
+                                if base + 'Type' in entities and not entities[base + 'Type'].is_abstract()), None)
             pt = enum_attrs.get('PredefinedType', {})
             classes[name] = dict(domain=domain, type_class=counterpart.name() if counterpart and not counterpart.is_abstract() else None,
                                  enum_name=pt.get('name'), predefined_types=pt.get('members', []))

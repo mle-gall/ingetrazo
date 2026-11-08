@@ -4750,6 +4750,8 @@ class BimPanel(QWidget):
         from PySide6.QtWidgets import QTreeWidgetItem
         from core.bim import collect_objects
         from core.bim import class_quantities
+        from core.bim_registry import get
+        self.class_box.set_registry(get(self._scene()))
         # File ▸ New (scene.clear) drops the active class — mirror it in the UI.
         if self.active_check.isChecked() and not self._scene().active_ifc:
             self.active_check.blockSignals(True)

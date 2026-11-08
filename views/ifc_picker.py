@@ -9,10 +9,24 @@ from core.ifc_tables import TABLES
 class ClassPicker(QComboBox):
     def __init__(self, registry, parent=None):
         super().__init__(parent)
-        self.addItems(ordered_classes(registry))
+        self._classes = None
+        self.set_registry(registry)
+        self.activated.connect(self._pick)
+
+    def set_registry(self, registry):
+        classes = ordered_classes(registry)
+        if classes == self._classes:
+            return
+        selected = self.currentText()
+        self.blockSignals(True)
+        self.clear()
+        self.addItems(classes)
         self.insertSeparator(self.count())
         self.addItem('All classes…')
-        self.activated.connect(self._pick)
+        if selected in classes:
+            self.setCurrentText(selected)
+        self.blockSignals(False)
+        self._classes = classes
 
     def _pick(self, index):
         if self.itemText(index) != 'All classes…':

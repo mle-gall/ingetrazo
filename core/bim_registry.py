@@ -51,6 +51,7 @@ def import_codes_csv(registry, key, text):
 
 def validate(registry):
     from core.record import validate as validate_record
+    from core.ifc_tables import TABLES, predefined_types
     if not isinstance(registry, dict):
         return ['Registry must be an object']
     errors = []
@@ -78,7 +79,7 @@ def validate(registry):
             if section == 'types':
                 record = {**value, 'class': value.get('ifc_class')}
                 errors.extend(key + ': ' + e for e in validate_record(record, registry,
-                    'IFC4X3_ADD2' if record['class'] in ('IfcFacility', 'IfcFacilityPart') else 'IFC4'))
+                    next(iter(TABLES.get(record['class'], {}).get('schemas', ['IFC4'])))))
             if section == 'classification_systems':
                 codes = value.get('codes', {})
                 if not isinstance(codes, dict):
@@ -87,7 +88,6 @@ def validate(registry):
                     for code, entry in codes.items():
                         if not isinstance(entry, dict) or not isinstance(entry.get('name'), str) or ('parent' in entry and not isinstance(entry['parent'], str)):
                             errors.append(f'{key}.{code}: invalid code entry')
-    from core.ifc_tables import TABLES, predefined_types
     defaults = 0
     for key, value in registry.get('tag_sets', {}).items():
         if not isinstance(value, dict) or not isinstance(value.get('classes'), list):
