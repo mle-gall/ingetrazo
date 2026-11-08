@@ -76,6 +76,7 @@ class NativeTools:
                 self.ids = np.asarray([row for uid in selected for row in self.view.uid_rows.get(uid, ())], np.int64)
                 self.original = self.view.packed.instances[self.ids].copy()
                 self.start_point = QVector3D(ctx.world)
+                self.tool.start_point = QVector3D(ctx.world)
             else:
                 delta = ctx.world - self.start_point
                 self.restore()
@@ -84,6 +85,7 @@ class NativeTools:
                     self.view.source_viewport.notify_scene_changed()
                     self.view.set_scene(self.view.scene)
                 self.start_point = None
+                self.tool.start_point = None
                 self.original = None
         self.view.update()
 
@@ -131,6 +133,7 @@ class NativeTools:
                     self.view.source_viewport.history.execute(move_command(self.groups, delta.normalized()*value))
                     self.original = None
                     self.start_point = None
+                    self.tool.start_point = None
                     self.view.source_viewport.notify_scene_changed()
                     self.view.set_scene(self.view.scene)
             self.value_buffer = ''
@@ -160,6 +163,8 @@ class NativeTools:
             self.tool.on_cancel(self)
         self.original = None
         self.start_point = None
+        if self.mode == "move" and self.tool is not None:
+            self.tool.start_point = None
         self.value_buffer = ""
         self.view.overlay_primitives = []
 
