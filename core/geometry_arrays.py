@@ -163,10 +163,11 @@ def selected_arrays(mesh, indices, matrix=None):
     mask[indices] = True
     rings = np.repeat(mask, a.ring_counts)
     corners = np.repeat(rings, a.ring_sizes)
-    pos = a.pos
+    # Unselected vertices must not influence the subset's weld.
+    pos = a.pos[a.corners[corners]]
     if matrix is not None:
         from core.group import np_affine
         rot, trans = np_affine(matrix)
         pos = (pos @ rot.T + trans).astype(np.float32).astype(float)
-    return merged([Arrays(pos, a.corners[corners], a.ring_sizes[rings],
+    return merged([Arrays(pos, np.arange(len(pos)), a.ring_sizes[rings],
                           a.ring_counts[mask])])
