@@ -149,3 +149,24 @@ def test_history_journal_limits_move_discovery(monkeypatch):
     renderer = Renderer()
     updates.apply(*updates.diff(scene), renderer)
     assert renderer.calls == []
+
+
+def test_updated_bounds_match_fresh_pack():
+    scene, updates = fixture_scene()
+    scene.groups[0].xform.translate(20, -5, 8)
+    updates.apply(*updates.diff(scene))
+    np.testing.assert_allclose(updates.packed.world_bounds, pack_scene(scene).world_bounds)
+    scene.groups.pop(0)
+    updates.apply(*updates.diff(scene))
+    np.testing.assert_allclose(updates.packed.world_bounds, pack_scene(scene).world_bounds)
+
+
+def test_prototype_reassignment_preserves_row():
+    scene, updates = fixture_scene()
+    mesh = Mesh()
+    mesh.add_edge(QVector3D(), QVector3D(2, 2, 2))
+    scene.groups[0].mesh = mesh
+    updates.apply(*updates.diff(scene))
+    assert updates.rows[scene.groups[0].uid] == 0
+    assert updates.packed.instances['info'][:, 0].tolist() == [1, 0]
+    assert updates.packed.commands['start'].tolist() == [0, 1]

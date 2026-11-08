@@ -32,6 +32,21 @@ class InstanceUpdates:
         self.journal_valid = True
         self.unsubscribe = None
         self.roots = set(scene.groups)
+        self.world_boxes = self._boxes(np.arange(len(packed.instances)))
+
+    def _boxes(self, ids):
+        rows = self.packed.instances[ids]
+        bounds = self.packed.bounds[rows['info'][:, 0], :, :3]
+        matrix = rows['world'].transpose(0, 2, 1)
+        center = bounds.mean(axis=1)
+        extent = (bounds[:, 1]-bounds[:, 0])*.5
+        wc = np.einsum('nij,nj->ni', matrix[:, :3, :3], center)+matrix[:, :3, 3]
+        we = np.einsum('nij,nj->ni', abs(matrix[:, :3, :3]), extent)
+        boxes = np.stack((wc-we, wc+we), axis=1)
+        hidden = rows['info'][:, 2] != 0
+        boxes[hidden, 0] = np.inf
+        boxes[hidden, 1] = -np.inf
+        return boxes
 
     def observe(self, history):
         """Use History's existing journal callbacks to avoid scanning known edits."""
@@ -153,18 +168,27 @@ class InstanceUpdates:
             self.packed.instances['info'][self.removed, 2] = 1
         if not len(ids) and not self.changed and not self.removed:
             return
-        counts = np.bincount(self.packed.instances['info'][:, 0], minlength=len(self.packed.commands))
-        self.packed.commands['start'] = self.packed.edge_commands['start'] = np.cumsum(counts)-counts
-
-        if len(ids) or self.changed or self.removed:
-            shown = self.packed.instances[self.packed.instances['info'][:, 2] == 0]
-            if len(shown):
-                bounds = self.packed.bounds[shown['info'][:, 0], :, :3]
-                matrix = shown['world'].transpose(0, 2, 1)
-                center = bounds.mean(axis=1)
-                extent = (bounds[:, 1]-bounds[:, 0])*.5
-                wc = np.einsum('nij,nj->ni', matrix[:, :3, :3], center)+matrix[:, :3, 3]
-                we = np.einsum('nij,nj->ni', abs(matrix[:, :3, :3]), extent)
-                self.packed.world_bounds = np.array([(wc-we).min(axis=0), (wc+we).max(axis=0)])
-            else:
-                self.packed.world_bounds = np.zeros((2, 3))
+        old_count = len(self.world_boxes)
+        if len(self.packed.instances) != old_count or self.changed:
+            counts = np.bincount(self.packed.instances['info'][:, 0], minlength=len(self.packed.commands))
+            self.packed.commands['start'] = self.packed.edge_commands['start'] = np.cumsum(counts)-counts
+            extra = np.empty((len(self.packed.instances)-old_count, 2, 3), np.float32)
+            extra[:, 0] = np.inf
+            extra[:, 1] = -np.inf
+            self.world_boxes = np.concatenate((self.world_boxes, extra))
+        touched = set(ids.tolist()) | set(self.removed)
+        if self.changed:
+            codes = [code for _, _, code in self.changed]
+            touched.update(np.flatnonzero(np.isin(self.packed.instances['info'][:, 0], codes)).tolist())
+        touched = np.asarray(sorted(touched), np.int64)
+        if len(touched):
+            old = self.world_boxes[touched]
+            bounds = self.packed.world_bounds
+            reduce = np.any(old[:, 0] == bounds[0]) or np.any(old[:, 1] == bounds[1])
+            self.world_boxes[touched] = self._boxes(touched)
+            subset = self.world_boxes if reduce else self.world_boxes[touched]
+            low, high = subset[:, 0].min(axis=0), subset[:, 1].max(axis=0)
+            if not reduce:
+                low, high = np.minimum(low, bounds[0]), np.maximum(high, bounds[1])
+            self.packed.world_bounds = (np.array([low, high]) if np.isfinite(low).all()
+                                        else np.zeros((2, 3)))
