@@ -226,26 +226,38 @@ class WgpuView(QWidget):
         self.hovered_row = self.pick_row(x, y)
         self.last_snap = None
         self.overlay_primitives = []
+        source = self.source_viewport
+        tool = getattr(source, 'active_tool', None)
+        inference = getattr(source, 'inference', None)
+        options = dict(start_point=self.tools.start_point,
+                       acquired_point=getattr(inference, '_acquired_point', None),
+                       acquired_points=getattr(inference, '_encouraged', None),
+                       axis_lock=getattr(inference, 'axis_lock', None),
+                       shift_held=bool(modifiers & Qt.ShiftModifier),
+                       reference_edge=getattr(inference, 'reference_edge', None),
+                       reference_mode=getattr(inference, 'reference_mode', None),
+                       magnetic_axis_deg=getattr(tool, 'magnetic_axis_deg', None),
+                       screen_axis_px=getattr(tool, 'screen_axis_px', None),
+                       linear_mode=getattr(source, 'linear_inference_mode', 'all'),
+                       project_onto_line=lambda start, direction:
+                           self._project_to_lock_line(start, direction, x, y))
         if self.hovered_row is not None and self.inference_index is not None:
-            source = self.source_viewport
-            tool = getattr(source, 'active_tool', None)
-            inference = getattr(source, 'inference', None)
-            self.last_snap = snap(self.inference_index, self.hovered_row, self, x, y,
-                                  start_point=self.tools.start_point,
-                                  acquired_point=getattr(inference, '_acquired_point', None),
-                                  acquired_points=getattr(inference, '_encouraged', None),
-                                  axis_lock=getattr(inference, 'axis_lock', None),
-                                  shift_held=bool(modifiers & Qt.ShiftModifier),
-                                  reference_edge=getattr(inference, 'reference_edge', None),
-                                  reference_mode=getattr(inference, 'reference_mode', None),
-                                  linear_mode=getattr(source, 'linear_inference_mode', 'all'),
-                                  project_onto_line=lambda start, direction:
-                                      self._project_to_lock_line(start, direction, x, y))
-            if inference is not None:
-                source._note_snap(self.last_snap)
-                point = (self.last_snap.point if self.last_snap is not None
-                         and self.last_snap.kind in source._ENCOURAGING_KINDS else None)
-                inference._dwell_on(point)
+            self.last_snap = snap(self.inference_index, self.hovered_row, self, x, y, **options)
+        elif self.tools.sync() in ('tape', 'move'):
+            from core.snap import compute_snap
+            from types import SimpleNamespace
+            origin, direction = self._pixel_to_ray(x, y)
+            plane = self.tools.start_point if self.tools.start_point is not None else self.camera.target
+            normal = self.camera.forward()
+            denominator = QVector3D.dotProduct(direction, normal)
+            if abs(denominator) > 1e-9:
+                point = origin + direction * (QVector3D.dotProduct(plane-origin, normal)/denominator)
+                self.last_snap = compute_snap(point, (x, y), SimpleNamespace(edges=[]),
+                                              self._world_to_pixel, 12., **options)
+        if inference is not None and self.last_snap is not None:
+            source._note_snap(self.last_snap)
+            point = (self.last_snap.point if self.last_snap.kind in source._ENCOURAGING_KINDS else None)
+            inference._dwell_on(point)
         if self.last_snap is not None:
             pixel = self._world_to_pixel(self.last_snap.point)
             if pixel is not None:
@@ -353,7 +365,12 @@ class WgpuView(QWidget):
         self.update()
 
     def mouseDoubleClickEvent(self, event):
-        if self.tools.sync() != 'select':
+        mode = self.tools.sync()
+        if mode in ('tape', 'move'):
+            self.hover(event.position().x(), event.position().y(), event.modifiers())
+            self.tools.click(event)
+            return
+        if mode != 'select':
             return
         row = self.pick_row(event.position().x(), event.position().y())
         resolved = self.resolve(row)

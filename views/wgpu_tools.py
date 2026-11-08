@@ -40,6 +40,8 @@ class NativeTools:
         self.cancel()
         self.tool = tool
         self.mode = TOOL_DISPATCH.get(type(tool).__name__, 'select' if tool is None else 'inert')
+        if self.mode == 'tape':
+            self.tool.on_cancel(self)
         if self.mode == 'inert':
             source.flash_status('not yet available on the Metal renderer')
         return self.mode
@@ -163,7 +165,12 @@ class NativeTools:
 
     def measurements(self):
         source = self.view.source_viewport
-        source.measurementChanged.emit(source._measurement_text())
+        measured = getattr(self.tool, '_measured', None)
+        if self.mode == 'tape' and self.start_point is None and measured is not None:
+            from core.units import fmt_len_fine
+            source.measurementChanged.emit(fmt_len_fine(measured))
+        else:
+            source.measurementChanged.emit(source._measurement_text())
 
     def flash_status(self, *args):
         self.view.source_viewport.flash_status(*args)

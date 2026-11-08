@@ -79,7 +79,7 @@ class InstanceUpdates:
         for root in (self.pending if local else scene.groups):
             hidden = not state(root)[0]
             placements.extend((g, matrix, hidden) for g, matrix in iter_placements(root))
-        seen, ids, values, changed = (set(self.active) if local else set()), [], [], {}
+        seen, ids, values, changed = (self.active if local else set()), [], [], {}
         additions = []
         for group, matrix, hidden in placements:
             mesh = group.mesh if group is not None else scene.loose_mesh
@@ -118,7 +118,7 @@ class InstanceUpdates:
         self.journal_valid = True
         self.roots = set(scene.groups) if not local else self.roots
         self.changed = list(changed.values())
-        self.removed = [self.rows[uid] for uid in self.active - seen]
+        self.removed = [] if local else [self.rows[uid] for uid in self.active - seen]
         self.active = seen
         if additions:
             self.packed.instances = np.concatenate((self.packed.instances, np.zeros(len(additions), INSTANCE)))
