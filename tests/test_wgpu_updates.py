@@ -133,3 +133,19 @@ def test_new_prototype_preserves_resident_ids():
 def test_dispatch_is_explicit():
     assert TOOL_DISPATCH == {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move'}
     assert TOOL_DISPATCH.get('RotateTool', 'inert') == 'inert'
+
+
+def test_history_journal_limits_move_discovery(monkeypatch):
+    from core.history import History, TagGroupsCommand
+    scene, updates = fixture_scene()
+    history = History(scene)
+    updates.observe(history)
+    history.execute(MoveGroupCommand(scene.groups[0], QVector3D(1, 0, 0)))
+    ids, rows = updates.diff(scene)
+    assert ids.tolist() == [0]
+    updates.apply(ids, rows)
+    monkeypatch.setattr('views.wgpu_updates.iter_placements', lambda *a: (_ for _ in ()).throw(AssertionError('scan')))
+    history.execute(TagGroupsCommand(scene.groups, 'IfcWall'))
+    renderer = Renderer()
+    updates.apply(*updates.diff(scene), renderer)
+    assert renderer.calls == []

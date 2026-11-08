@@ -10,6 +10,8 @@ import numpy as np
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QMatrix4x4
 from core.scene import Scene
+from core.history import History, MoveGroupCommand, TagGroupsCommand
+from PySide6.QtGui import QVector3D
 from core.group import Group
 from formats.igz import load_into
 from views.wgpu_view import WgpuView
@@ -22,7 +24,10 @@ view.resize(1000, 700)
 view.set_scene(scene)
 view.show()
 app.processEvents()
+view._inference_future.result()
 view.draw_frame()
+history = History(scene)
+view._instance_updates.observe(history)
 
 
 class Counted:
@@ -42,18 +47,17 @@ renderer = Counted(view.renderer)
 view.renderer = renderer
 result = {'placements': len(view.packed.instances)}
 g = next(g for g in scene.groups if g.xform is not None)
-g.xform = QMatrix4x4(g.xform)
-g.xform.translate(.01, 0, 0)
-scene.version += 1
 start = time.perf_counter()
+history.execute(MoveGroupCommand(g, QVector3D(.01, 0, 0)))
+command_end = time.perf_counter()
 view.set_scene(scene)
+result['move_history_ms'] = (command_end-start)*1000
+result['move_submission_ms'] = (time.perf_counter()-command_end)*1000
 result['move_update_ms'] = (time.perf_counter()-start)*1000
 result['move_calls'] = dict(renderer.calls)
 renderer.calls.clear()
-for g in scene.groups[:1000]:
-    g.ifc = {'class': 'IfcBuildingElementProxy'}
-scene.version += 1
 start = time.perf_counter()
+history.execute(TagGroupsCommand(scene.groups[:1000], 'IfcBuildingElementProxy'))
 view.set_scene(scene)
 result['record_update_ms'] = (time.perf_counter()-start)*1000
 result['record_calls'] = dict(renderer.calls)
@@ -69,6 +73,7 @@ result['add_calls'] = dict(renderer.calls)
 ids = np.arange(min(1000, len(view.packed.instances)))
 original = view.packed.instances[ids].copy()
 # Preparation is excluded from this isolated matrix-path diagnostic.
+app.processEvents()
 future = getattr(view, '_inference_future', None)
 if future is not None:
     future.result()
@@ -87,5 +92,41 @@ for i in range(50):
     app.processEvents()
     time.sleep(.016)
 result['matrix_preview_frames'] = frames
+# Exercise the dispatched Move hover, resident preview, overlay and frame.
+from types import SimpleNamespace
+from PySide6.QtCore import QPointF, Qt
+from tools.move import MoveTool
+source = SimpleNamespace(camera=view.camera, active_tool=MoveTool(), history=history,
+    view_tint={}, inference=None, linear_inference_mode='all',
+    flash_status=lambda *a: None, measurementChanged=SimpleNamespace(emit=lambda *a: None),
+    _measurement_text=lambda: '', _effective_style=lambda: SimpleNamespace(face_mode='shaded', edges=True))
+view.source_viewport = source
+selected = [g for g in view.packed.groups if g is not None and not g.children][:1000]
+scene.select(selected)
+view.draw_frame()
+pixel = None
+for y in range(100, 601, 100):
+    for x in range(100, 901, 100):
+        if view.pick_row(x, y) is not None:
+            pixel = (x, y)
+            break
+    if pixel is not None:
+        break
+if pixel is not None:
+    event = SimpleNamespace(position=lambda: QPointF(*pixel), modifiers=lambda: Qt.NoModifier)
+    view.hover(*pixel)
+    view.tools.click(event)
+    result['drag_placements'] = len(view.tools.ids)
+    drag_frames = []
+    for i in range(30):
+        pixel = (pixel[0] + (1 if i % 2 else -1), pixel[1])
+        start = time.perf_counter()
+        view.hover(*pixel)
+        view.tools.hover(event)
+        frame = view.draw_frame()
+        drag_frames.append({'wall_ms': (time.perf_counter()-start)*1000, 'gpu_ms': frame[1]})
+        time.sleep(.016)
+    result['dispatched_drag_frames'] = drag_frames
+    view.tools.cancel()
 print(json.dumps(result, indent=2))
 view.close()

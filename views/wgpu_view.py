@@ -1,7 +1,7 @@
 """Native Metal input and presentation sharing the document camera and selection."""
 import time
 import numpy as np
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QVector3D
 from PySide6.QtWidgets import QWidget
 from core.camera import OrbitCamera
@@ -49,18 +49,32 @@ class WgpuView(QWidget):
         if token == getattr(self, "_content_token", None):
             self.update()
             return
+        previous_token = getattr(self, "_content_token", None)
         self._content_token = token
         start = time.perf_counter()
         tracker = getattr(self, '_instance_updates', None)
+        if tracker is not None:
+            if previous_token is not None and (previous_token[1][1:], previous_token[2]) != (token[1][1:], token[2]):
+                tracker.journal_valid = False
+            tracker.observe(getattr(self.source_viewport, 'history', None))
         delta = tracker.diff(scene) if tracker is not None and len(self.packed.instances) else None
         if delta is not None:
             ids, rows = delta
             tracker.apply(ids, rows, self.renderer)
             if len(ids) or tracker.changed or tracker.removed:
-                self.uid_rows = {uid: [row] for uid, row in tracker.rows.items() if uid in tracker.active}
-                self._selection_signature = None
-                self._tint_signature = None
-                self._prepare_inference()
+                if len(self.packed.instances) != getattr(self, '_resident_count', len(self.packed.instances)) or tracker.removed:
+                    self.uid_rows = {uid: [row] for uid, row in tracker.rows.items() if uid in tracker.active}
+                    self._selection_signature = None
+                    self._tint_signature = None
+                self._resident_count = len(self.packed.instances)
+                self.inference_index = None
+                previous = getattr(self, '_inference_future', None)
+                if previous is not None:
+                    previous.cancel()
+                    self._inference_future = None
+                if not getattr(self, '_inference_queued', False):
+                    self._inference_queued = True
+                    QTimer.singleShot(0, self._refresh_inference)
             self.build_seconds = time.perf_counter() - start
             self.update()
             return
@@ -72,7 +86,11 @@ class WgpuView(QWidget):
         for row, uid in enumerate(self.packed.uids):
             self.uid_rows.setdefault(uid, []).append(row)
         from views.wgpu_updates import InstanceUpdates
+        if tracker is not None and tracker.unsubscribe is not None:
+            tracker.unsubscribe()
+        self._resident_count = len(self.packed.instances)
         self._instance_updates = InstanceUpdates(scene, self.packed)
+        self._instance_updates.observe(getattr(self.source_viewport, 'history', None))
         self._prepare_inference()
         self.build_seconds = time.perf_counter()-start
         lo, hi = self.packed.world_bounds
@@ -80,6 +98,12 @@ class WgpuView(QWidget):
             self.camera.target = QVector3D(*((lo+hi)/2))
             self.camera.distance = max(float(np.linalg.norm(hi-lo))*1.4, 1.)
         self._upload()
+
+    def _refresh_inference(self):
+        self._inference_queued = False
+        if getattr(self, "_closed", False):
+            return
+        self._prepare_inference()
 
     def _prepare_inference(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -425,6 +449,10 @@ class WgpuView(QWidget):
         return [self.packed.uids[i] for i in self.rect_rows(x0, y0, x1, y1)]
 
     def closeEvent(self, event):
+        self._closed = True
+        tracker = getattr(self, '_instance_updates', None)
+        if tracker is not None and tracker.unsubscribe is not None:
+            tracker.unsubscribe()
         self.renderer = None
         if hasattr(self, '_inference_worker'):
             self._inference_worker.shutdown(wait=False, cancel_futures=True)

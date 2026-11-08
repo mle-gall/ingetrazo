@@ -27,17 +27,44 @@ class InstanceUpdates:
         self.active = set(self.rows)
         self.changed = []
         self.removed = []
+        self.version = scene.content_version
+        self.pending = set()
+        self.journal_valid = True
+        self.unsubscribe = None
+        self.roots = set(scene.groups)
+
+    def observe(self, history):
+        """Use History's existing journal callbacks to avoid scanning known edits."""
+        if self.unsubscribe is not None or history is None:
+            return
+        def before(command, phase, ran):
+            if self.scene.content_version != self.version:
+                self.journal_valid = False
+
+        def after(command, phase, ran):
+            from core.history import MoveGroupCommand, CompoundCommand, SetRecordCommand, SetRegistryCommand
+            def visit(command):
+                if isinstance(command, CompoundCommand):
+                    return all(visit(c) for c in command.commands)
+                if isinstance(command, MoveGroupCommand) and command.group in self.roots:
+                    self.pending.add(command.group)
+                    return True
+                return isinstance(command, (SetRecordCommand, SetRegistryCommand))
+            self.journal_valid = self.journal_valid and ran and visit(command)
+            self.version = self.scene.content_version
+        self.unsubscribe = history.add_listener(before=before, after=after)
 
     def diff(self, scene):
         """Return changed resident rows, retaining prototype and placement IDs."""
         if scene is not self.scene:
             return None
-        placements = [(None, None, False)]
+        local = self.unsubscribe is not None and self.journal_valid and scene.content_version == self.version
+        placements = [] if local else [(None, None, False)]
         state = _placement_state(scene)
-        for root in scene.groups:
+        for root in (self.pending if local else scene.groups):
             hidden = not state(root)[0]
             placements.extend((g, matrix, hidden) for g, matrix in iter_placements(root))
-        seen, ids, values, changed = set(), [], [], {}
+        seen, ids, values, changed = (set(self.active) if local else set()), [], [], {}
         additions = []
         for group, matrix, hidden in placements:
             mesh = group.mesh if group is not None else scene.loose_mesh
@@ -71,6 +98,10 @@ class InstanceUpdates:
             if row >= len(self.packed.instances) or value.tobytes() != self.packed.instances[row].tobytes():
                 ids.append(row)
                 values.append(value)
+        self.pending.clear()
+        self.version = scene.content_version
+        self.journal_valid = True
+        self.roots = set(scene.groups) if not local else self.roots
         self.changed = list(changed.values())
         self.removed = [self.rows[uid] for uid in self.active - seen]
         self.active = seen
@@ -120,6 +151,8 @@ class InstanceUpdates:
             if renderer is not None:
                 renderer.remove_instances(self.removed)
             self.packed.instances['info'][self.removed, 2] = 1
+        if not len(ids) and not self.changed and not self.removed:
+            return
         counts = np.bincount(self.packed.instances['info'][:, 0], minlength=len(self.packed.commands))
         self.packed.commands['start'] = self.packed.edge_commands['start'] = np.cumsum(counts)-counts
 
