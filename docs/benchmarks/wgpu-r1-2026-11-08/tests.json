@@ -1,0 +1,37 @@
+{
+  "core_rust_tests": 2,
+  "renderer_rust_tests": 4,
+  "focused_python_tests": 11,
+  "full_suite": "22 failed, 7099 passed, 138 skipped, 2 xfailed, 805 deselected, 56 warnings in 1263s (6 batches)",
+  "baseline_failures": 19,
+  "failures": [
+    "tests/test_dimensions.py::test_world_under_cursor_uses_cached_pick",
+    "tests/test_extension_manager.py::test_long_author_tags_and_license_wrap_within_preview_width",
+    "tests/test_panel_refresh_deferred.py::test_hidden_panels_let_the_previous_document_go",
+    "tests/test_single_instance.py::TestSingleInstanceSocket::test_second_launch_delivers_the_path_to_the_first",
+    "tests/test_single_instance.py::TestSingleInstanceSocket::test_stale_socket_is_reclaimed",
+    "tests/test_single_instance.py::TestSingleInstanceSocket::test_unresponsive_peer_gives_no_ack",
+    "tests/test_style_editor.py::test_a_swatch_tooltip_keeps_the_tooltip_colours",
+    "tests/test_tooltips_wrap.py::test_an_extensions_toolbar_added_after_start_up_shows_names_in_bold",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ar]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[de]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[id]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[it]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ja]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ko]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[lo]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[pl]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[pt-BR]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ru]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[th]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[uk]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[vi]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[zh-CN]"
+  ],
+  "additional_failures": [
+    "tests/test_single_instance.py::TestSingleInstanceSocket::test_second_launch_delivers_the_path_to_the_first",
+    "tests/test_single_instance.py::TestSingleInstanceSocket::test_stale_socket_is_reclaimed",
+    "tests/test_single_instance.py::TestSingleInstanceSocket::test_unresponsive_peer_gives_no_ack"
+  ],
+  "socket_recheck": "4 passed in 0.65s; shorter worktree-local TMPDIR; no code changes"
+}

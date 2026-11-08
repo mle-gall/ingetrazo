@@ -540,3 +540,131 @@ comment was made. Build commands and ABI are in the renderer README linked
 above. This spike demonstrates the current authorized input; the input size
 and nonempty-placement discrepancy must be resolved before claiming the
 brief's exact 86,757-placement result.
+
+## R1 — resident display development (2026-11-08, incomplete)
+
+This work does **not** meet the R1 acceptance criteria yet. It adds native
+face packing, hard edges, instance highlight/override APIs, rectangle picking,
+five display modes and asynchronous timestamp collection. The default GL
+path remains unchanged. Profiles/silhouettes, textures and section planes are
+out of scope. Tools remain disabled on the native stand-in.
+
+The native bake lives in ingetrazo_core to reuse facegeom.rs directly and
+avoid copying the triangulator. Rayon parallelizes faces within each mesh.
+Python still constructs Plans, iterates prototypes, allocates indices and
+concatenates buffers. Native edge packing returns bounds, but the scene
+assembler still computes its own bounds. Consequently this is not the
+requested complete parallel scene bake; startup remains the primary blocker.
+Upload now borrows contiguous NumPy buffers instead of duplicating geometry
+with tobytes(). Intermediate packing allocations remain.
+
+### Measurements
+
+Same input files and M1 Max as P7; 1000×673 logical, 2× physical. Warm filesystem
+caches. Four paced runs use a 16 ms Qt timer; unpaced runs are recorded
+separately. GPU timing is the last completed ring sample, potentially repeated;
+it is not paired with the CPU frame in the same row. Brief build/test work
+overlapped some measurements, so these are exploratory rather than controlled
+performance acceptance results. All native subprocesses had a 240 s deadline.
+
+| Startup metric | P7 ride | R1 ride | P7 track | R1 track |
+| --- | ---: | ---: | ---: | ---: |
+| Load, s | 8.09 | 7.84 | 24.37 | 23.90 |
+| Build, s | 40.89 | 38.02 | 18.44 | 18.01 |
+| Device + upload, s | 0.259 | 0.336 | 0.098 | 0.119 |
+| First picture after load, s | 41.27 | 38.73 | 18.66 | 18.56 |
+| Startup process CPU, s (includes load) | — | 63.16 | — | 46.00 |
+| Peak process RSS, GiB | — | 4.55 | — | 5.71 |
+| Owned buffers, MiB | 783.97 | 974.52 | 317.30 | 352.96 |
+| Depth + ID, MiB | 20.54 | 20.54 | 20.54 | 20.54 |
+
+CPU/GPU/render-call milliseconds, min/average/max, single sample:
+
+| Model and passes | CPU | GPU | Render call |
+| --- | ---: | ---: | ---: |
+| ride, faces + edges | 1.74/2.13/42.17 | 10.41/11.97/16.50 | 1.84/2.25/42.37 |
+| ride, faces | 0.98/3.05/41.15 | 5.91/8.65/22.10 | 1.05/3.30/41.31 |
+| track, faces + edges | 0.60/2.12/36.91 | 4.08/8.47/13.76 | 0.68/2.39/37.36 |
+| track, faces | 0.41/1.62/34.88 | 3.04/6.84/17.38 | 0.52/1.90/35.03 |
+
+The under-10-second target is missed. MSAA 4× is **not implemented or measured**;
+integer ID attachment resolution needs a separate picking pass or another
+explicit strategy. Edges remain resident when their pass is disabled, so
+GPU buffer memory is the same in the with/without-edge comparisons.
+Memory excludes swapchain/driver allocations and transient staging.
+
+### Worst frames and timing
+
+The four-slot timestamp ring uses nonblocking polling and map callbacks.
+A full ring skips sampling; render never explicitly waits for mapping.
+Point/rectangle picking still synchronizes intentionally.
+
+Unpaced ride saw 305.07 ms worst render call (GPU max 31.21 ms). Unpaced track
+saw 82.20 ms, with acquisition/polling max 77.96 ms versus GPU max 13.15 ms.
+This localizes the track spike to the CPU acquisition/poll phase rather than
+culling/raster duration, but does not isolate native acquisition from polling
+or prove the cause of the historical 98 ms spike. GC was not instrumented.
+At 16 ms pacing, ride's worst call was 42.37 ms. Pacing avoids feeding the
+presentation queue continuously; it is not an equivalent throughput comparison
+and does not guarantee a nonblocking swapchain. More phase-specific telemetry
+and controlled reruns remain necessary.
+
+### Embedding and remaining work
+
+The stand-in shares the document camera, so menu camera changes become visible.
+A 33 ms update timer, physical-size checks and status timing line are present.
+Middle/shift-middle gestures are supported; cursor-anchored zoom/orbit,
+zoom-window, full keyboard navigation and custom edge-style colours still
+need parity work. Face material, container colour and view-tint buffers are
+separate; per-face by-layer and layer-effect parity remains incomplete.
+X-ray uses unsorted 40% alpha faces without depth writes and edges on top.
+Highlights use the GL orange selection/light-blue hover colours.
+
+The reproducible native API/overlay check is scripts/wgpu_r1_smoke.py.
+The benchmark JSON files are in
+[wgpu-r1-2026-11-08](benchmarks/wgpu-r1-2026-11-08/).
+
+The macOS sibling experiment created a transparent native QWidget above the
+Metal view and painted a red badge. The captured test pixel was black rather
+than red: **the sibling strategy was not validated** (capture limitations
+were not independently ruled out). The same native smoke run successfully
+rendered all five styles, updated highlights and returned the expected
+rectangle ID. For R2, prefer wgpu-drawn overlays provisionally: they share
+the scene's compositor and avoid native sibling stacking. A positive
+clip-space overlay experiment is still required before accepting that choice.
+The failing sibling evidence is retained in smoke.json; it must not be
+reported as a successful overlay proof.
+
+### Reproduction and validation
+
+Builds used the worktree's Python 3.13 venv and CARGO_HOME=.cargo-work:
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_core/Cargo.toml
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_scene.py
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'
+```
+
+Native unit tests: core 2 passed (concavity/hole triangulation, edge flags/AABB);
+renderer 4 passed. Focused Python handoff tests: 11 passed. The requested
+cube-with-hole fixture and comprehensive GPU/style regression tests remain
+missing. The license audit includes the added BSD NumPy and MIT/Apache
+transitive dependencies. No push, PR, issue or external comment was made.
+
+The full-suite environment used a worktree-local TMPDIR whose socket path
+exceeds macOS's Unix-domain socket name limit. Three additional failures in
+`test_single_instance.py` all occurred at QLocalServer.listen. A direct probe
+with that path returned `QLocalServer::listen: Name error`; a focused rerun
+using the shorter worktree-local `.r1-tmp` passed **4/4** without code changes.
+Use a short local TMPDIR when reproducing the suite. The original full-suite
+failure count is retained separately from that successful recheck.
+
+Final bounded suite (one invocation): **22 failed, 7099 passed, 138 skipped, 2 xfailed, 805 deselected, 56 warnings in 1263s (6 batches)**.
+The 19 baseline failures are unchanged; the three additional socket
+failures and their 4/4 passing focused recheck are described above.
+Exact test IDs and counts: [tests.json](benchmarks/wgpu-r1-2026-11-08/tests.json).

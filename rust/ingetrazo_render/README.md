@@ -107,3 +107,41 @@ It counts raw deferred positions/faces/edges without building plans or creating
 a device. On the supplied ride file it confirms 76,029 geometric placements;
 the 86,757 figure from the brief was not reproduced. See P7 for the complete
 inventory and the limits of the comparison.
+
+## R1 development update (2026-11-08)
+
+The historical spike description above remains the baseline. These ABI/API
+changes supersede it:
+
+- Upload accepts contiguous NumPy uint8 views, borrowing their storage through
+  synchronous buffer creation. No Python `tobytes()` geometry copy is made.
+- Commands contain P face commands followed by P hard-edge commands. Each pair
+  shares a survivor range and both instance counts are reset/updated together.
+- `ingetrazo_core.bake_vertices` uses the existing facegeom kernel and rayon
+  across faces; `bake_edges` filters soft/hidden flags and computes local bounds.
+  Plan construction, prototype iteration, index generation and final buffer
+  concatenation still happen in Python. This is not a completed parallel
+  whole-scene bake.
+- Four independent map buffers collect timestamps asynchronously. A busy ring
+  skips collection; `last_timings()` returns CPU ms, last completed GPU ms and
+  acquire/poll ms. GPU values can be stale and belong to earlier frames.
+  There is no explicit GPU wait in render. Native surface acquisition can block.
+- `set_highlight(indices, hovered_index=None)` updates instance flags.
+  `set_overrides(packed_rgba)` sets per-instance overrides (alpha zero disables).
+  `set_style` accepts shaded/xray/hidden_line/monochrome/wireframe.
+  `set_edges(bool)` controls the edge pass.
+- `pick_rect(x0,y0,x1,y1)` returns sorted unique visible placement indices from
+  a clamped, half-open physical-pixel rectangle. Like point picking it waits;
+  it does not select occluded geometry.
+- The current path is single-sample. MSAA, silhouette/profile edges, textures,
+  section planes and sorted transparency remain unimplemented. X-ray is
+  unsorted alpha blending without face depth writes and with edges on top.
+- The stand-in shares the source camera, tracks physical size changes and
+  provides a status line. Navigation parity is incomplete: middle/shift-middle
+  gestures work, but cursor-anchored pivots, all keyboard navigation, and
+  zoom-window behavior still require integration.
+
+Use `scripts/wgpu_r1_smoke.py` for the bounded native API/overlay experiment.
+Use `scripts/wgpu_spike.py MODEL --measure --interval 16 [--no-edges]` for
+paced measurements; `--interval 0` retains the unpaced spike methodology.
+The direct/transitive NumPy dependency licenses are included in licenses.txt.

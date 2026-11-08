@@ -6172,6 +6172,17 @@ class MainWindow(QMainWindow):
         from views.wgpu_view import WgpuView
         from PySide6.QtCore import QTimer
         display = WgpuView(self._doc_stack)
+        display.source_viewport = doc.viewport
+        display.camera = doc.viewport.camera
+        display.frameReady.connect(lambda cpu, gpu, wall:
+            self.statusBar().showMessage(f"wgpu CPU {cpu:.2f} ms | GPU {gpu or 0:.2f} ms")
+            if doc is self._doc else None)
+        # Menu presets mutate the shared camera. A light repaint timer also
+        # presents changes made by document actions while the GL view is hidden.
+        repaint = QTimer(display)
+        repaint.timeout.connect(display.update)
+        repaint.start(33)
+        display._repaint_timer = repaint
         doc.stand_in = display
         self._doc_stack.addWidget(display)
         refresh = QTimer(display)

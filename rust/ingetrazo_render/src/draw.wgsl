@@ -8,8 +8,15 @@ struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f, @loc
  let id = survivors[index]; let i = inst[id];
  let n = normalize((i.world * vec4f(normal,0)).xyz);
  var o: Out; o.position = camera.vp*i.world*vec4f(pos,1);
- o.color = select(color.rgb, color.rgb * unpack4x8unorm(i.info.y).rgb, color.a < 0.5) * (0.62+0.38*abs(dot(n,normalize(vec3f(0.3,-0.5,0.8)))));
+ o.color = select(color.rgb, unpack4x8unorm(i.info.y).rgb, color.a < 0.5) * (0.62+0.38*abs(dot(n,normalize(vec3f(0.3,-0.5,0.8)))));
+ if camera.size.z == 2 { o.color = vec3f(1); }
+ if camera.size.z == 3 { o.color = vec3f(0.82)*(0.62+0.38*abs(dot(n,normalize(vec3f(0.3,-0.5,0.8))))); }
+ if (i.info.w >> 24u) != 0u { o.color = unpack4x8unorm(i.info.w).rgb; }
+ if (i.info.z & 2u) != 0u { o.color = mix(o.color, vec3f(0.95,0.45,0.16), 0.65); }
+ if (i.info.z & 4u) != 0u { o.color = mix(o.color, vec3f(0.30,0.55,0.95), 0.5); }
  o.id = id+1u; return o;
 }
 struct Pixel { @location(0) color: vec4f, @location(1) id: u32 }
-@fragment fn fs(i: Out) -> Pixel { var p: Pixel; p.color=vec4f(i.color,1); p.id=i.id; return p; }
+@fragment fn fs(i: Out) -> Pixel { var p: Pixel; p.color=vec4f(i.color,select(1.,0.4,camera.size.z == 1)); p.id=i.id; return p; }
+
+@fragment fn edge_fs(i: Out) -> Pixel { var p: Pixel; p.color=vec4f(0.13,0.17,0.23,1); p.id=i.id; return p; }
