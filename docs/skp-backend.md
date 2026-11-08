@@ -151,3 +151,95 @@ of the 2022 version):
 
 These gaps are the concrete contribution targets for OpenSKP (see
 `docs/openskp-collaboration.md`). Geometry — the hard part — already works.
+
+## OpenSKP 1.5 import update (2026-11-08)
+
+The runtime dependency is pinned to `902ca8027efbe9faf1d31fcec4fea485a2f5fd1c`,
+upstream tag `python-v1.5.0`. `git ls-remote --tags` verified that tag;
+`git merge-base --is-ancestor` verified that the previous pin
+`291700bc213655a00461838de71e5f206311e619` is its ancestor. The intervening
+Python history includes analytic arcs (#463), group kinds (#461), legacy
+annotation fixes (#384, #473, #484), and placement scalar handling (#451).
+The adapter now treats matrix element 12 as OpenSKP's scale factor (1/w),
+multiplying both the linear part and translation.
+
+Compatibility audit:
+
+- Removed the legacy dimension/path and anchored-text replacements: 1.5
+  already handles them. Replacing its text reader would lose inline anchors.
+- Retained the definition-list tail fix, preserving 1.5's new `inline_stack`
+  completion check and removal of consumed inline records.
+- Retained the 2019 layer tail fix. An unrelated upstream version check for
+  SketchUp 3 is not evidence that the two extra 2019 bytes are handled;
+  the previous capability check incorrectly skipped the fix on 1.5.
+- Retained the layer table bridge and numeric face-layer resolution: the
+  public model still omits the table. The `full_parse` wrapper also keeps
+  instance persistent IDs now.
+- Retained the `iter_top_level_lazy` tag-folder bridge: `F801/9B3A` remains
+  opaque. Its signature and lazy-node payload access still work in 1.5.
+- Retained group-kind observation for the classic `CGroup` distinction and
+  raw definition records; also consume public `Definition.is_group`.
+
+### Curves
+
+`Edge.curve_id` associates segments with both analytic arcs and ordinary
+polyline curves. Each placed curve contributes transformed endpoint pairs to
+its mesh payload. After faces and loose edges are built, the importer resolves
+those endpoints through the mesh weld and assigns one `Mesh.next_curve_id()`
+to the surviving segments. Different flattened placements get different IDs;
+shared component meshes keep their shared curve topology. Existing soft,
+smooth and hidden display flags remain authoritative.
+
+No analytic parameters are stored in the IngeTrazo document. For a later
+phase, `Definition.arcs[curve_id]` exposes:
+
+- `center`: three coordinates in inches, definition-local space.
+- `normal`: dimensionless unit plane normal.
+- `x_axis`, `y_axis`: parameter vectors in inches, definition-local space.
+- `start_angle`, `end_angle`: radians.
+- `radius`: computed length of `x_axis`, in inches.
+- `is_full_circle`: computed Boolean, covering equal endpoints in classic
+  files and a full 2π sweep in modern files.
+
+The parameterization is `center + cos(t)*x_axis + sin(t)*y_axis`. Nonuniformly
+scaled arcs can have unequal, nonperpendicular parameter vectors; radius alone
+cannot represent those arcs.
+
+### Persistent identities
+
+The 1.5 Python `Instance` dataclass has no persistent-ID field. Its `guid`
+comes from `6819` (`ref_guid`), and is not used as a placement identity.
+Modern definitions expose their entity ID as `Definition.id` and definition
+GUID as `Definition.guid`; no model GUID is exposed.
+
+Modern instance records (`6419`) retain the entity-info subtree:
+`D007 → DC05 → DE05`. Records have a two-byte tag and a little-endian u32
+length; `DE05` contains OpenSKP's variable integer. The compatibility bridge
+reads that ID from each retained subtree before the public model drops it,
+then attaches `persistent_id` to the matching instance by definition/order.
+It never substitutes the referenced definition's ID for an instance ID.
+
+Classic 2017+ entity preambles already decode a PID: a byte mask followed by
+one byte for each set bit, contributing that byte at `8*bit` in the integer.
+The bridge retains the instance reader's own preamble ID through
+`_fill_builder`. Older classic files have no such ID; those placements retain
+random UIDs. Legacy Image records currently also fall back to random UIDs.
+Classic definition IDs are archive slots, not persistent IDs.
+
+The file namespace is SHA-256 of the sorted definition name/GUID pairs
+(including multiplicity), because no model GUID is exposed. UUID5 over that
+namespace and the placement's PID path is truncated to 16 hexadecimal digits.
+The ancestor PID path distinguishes a nested entity placed through multiple
+copies of its enclosing component. Root loose geometry uses a reserved root
+identity. Missing IDs or collisions with existing groups use a random UID;
+importing twice into one scene therefore does not create duplicate UIDs.
+Renaming definitions changes this fallback namespace, and files with identical
+definition lists share it (including empty lists). A future model-GUID decoder
+would improve identity across edits and between such files.
+
+Regression fixtures `tests/data/skp_arcs_2017.skp`, `skp_arcs_2021.skp` and
+`skp_instances_2021.skp` come unchanged from OpenSKP tag `python-v1.5.0`,
+`packages/python/tests/fixtures/{arcs_2017,arcs_2021,instance_scale_term_2021}.skp`.
+They were authored with SketchUp's library upstream. License attribution is
+in `tests/data/openskp-LICENSE.txt`. Tests exercise face-bounded and loose arcs,
+polyline copies, real modern and classic IDs, and collision fallback.

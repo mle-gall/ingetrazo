@@ -97,15 +97,13 @@ def _matrix(m) -> QMatrix4x4:
     """An OpenSKP instance ``matrix`` (row-major 3×3 + translation, in inches)
     as a ``QMatrix4x4`` whose translation is already in metres.
 
-    Element 12 is the placement's homogeneous scalar (SketchUp's w): when
-    it is not 1, the 3×3 AND the translation are stored multiplied by it
-    and the real transform divides them back out. Ignoring it brought a
-    component scaled through w = 100 in 100x large and 100x away (#865)."""
-    w = float(m[12]) if len(m) > 12 and m[12] else 1.0
+    OpenSKP 1.5 exposes element 12 as a scale factor (1/w), applied to
+    both the linear part and translation, in the definition's inches."""
+    scale = float(m[12]) if len(m) > 12 else 1.0
     return QMatrix4x4(
-        m[0] / w, m[1] / w, m[2] / w, m[9] / w * _INCH,
-        m[3] / w, m[4] / w, m[5] / w, m[10] / w * _INCH,
-        m[6] / w, m[7] / w, m[8] / w, m[11] / w * _INCH,
+        m[0] * scale, m[1] * scale, m[2] * scale, m[9] * scale * _INCH,
+        m[3] * scale, m[4] * scale, m[5] * scale, m[10] * scale * _INCH,
+        m[6] * scale, m[7] * scale, m[8] * scale, m[11] * scale * _INCH,
         0.0, 0.0, 0.0, 1.0)
 
 
@@ -794,10 +792,33 @@ def _loose_edge_segments(defn, xform, out) -> None:
         out.append(((a[0], a[1], a[2]), (b[0], b[1], b[2])))
 
 
+def _instance_identity(parent, instance):
+    pid = getattr(instance, "persistent_id", None)
+    return (*parent, str(pid)) if parent is not None and pid else None
+
+
+def _curve_segments(defn, xform, out):
+    """Keep each placed curve separate, including ordinary polyline curves."""
+    import numpy as np
+    curves = {}
+    for edge in getattr(defn, "edges", {}).values():
+        cid = getattr(edge, "curve_id", None)
+        if cid is None:
+            continue
+        a = defn.vertices.get(edge.v1_id)
+        b = defn.vertices.get(edge.v2_id)
+        if a is not None and b is not None:
+            curves.setdefault(cid, []).extend(((a.x, a.y, a.z), (b.x, b.y, b.z)))
+    for points in curves.values():
+        world = _world_points(np.asarray(points) * _INCH, xform)
+        out.append([(a, b) for a, b in zip(world[::2], world[1::2])])
+
+
 def _collect(defn, xform, by_id, attr_map, out, depth, stack,
              proto_ids=frozenset(), proto_uses=None, inherited=None,
              image_uses=None, edges_out=None, layer=None,
-             layer_uses=None, group_layer=None, loose_out=None) -> None:
+             layer_uses=None, group_layer=None, loose_out=None, curves_out=None,
+             identity=()) -> None:
     """Append ``(outer, holes, attrs)`` faces for ``defn`` (transformed by
     ``xform``) and, recursively, for every definition its instances place.
 
@@ -820,7 +841,7 @@ def _collect(defn, xform, by_id, attr_map, out, depth, stack,
     NOT flattened here — the composed placement matrix is recorded in
     ``proto_uses[(def_id, inherited)]`` instead, so the shared prototype is
     built once per inherited material and every copy becomes an O(1) instance
-    (``Group.xform``); the entry is ``(matrix, layer, instance name)``.
+    (``Group.xform``); each entry carries matrix, layer, name and PID path.
 
     ``loose_out`` collects the loose edges (lines on no face), like
     ``edges_out`` the soft ones."""
@@ -836,6 +857,8 @@ def _collect(defn, xform, by_id, attr_map, out, depth, stack,
                                 inherited, layer, mirrored)
             if entry is not None:
                 out.append(entry)
+    if curves_out is not None:
+        _curve_segments(defn, xform, curves_out)
     if edges_out is not None:
         _soft_edge_segments(defn, xform, edges_out)
     if loose_out is not None:
@@ -846,6 +869,7 @@ def _collect(defn, xform, by_id, attr_map, out, depth, stack,
         if child is None:
             continue
         placed = xform * _matrix(ins.matrix)
+        child_identity = _instance_identity(identity, ins)
         child_inherited = getattr(ins, "material_id", None) or inherited
         child_layer = getattr(ins, "layer", "") or layer
         # What leaves the group as an object of its own carries the group's
@@ -858,7 +882,7 @@ def _collect(defn, xform, by_id, attr_map, out, depth, stack,
                 # its parent so it can become its own group — cutout images
                 # turn to face the camera (billboard), like the DAE import.
                 image_uses.append((child, placed, child_inherited,
-                                   out_layer))
+                                   out_layer, child_identity))
             else:
                 # Inside a face-me component being flattened: the image
                 # stays part of it, with its whole-picture UVs.
@@ -869,19 +893,20 @@ def _collect(defn, xform, by_id, attr_map, out, depth, stack,
                 getattr(child, "always_faces_camera", False):
             # An "always face camera" component (2D people like
             # Susan): extracted as its own billboard group.
-            image_uses.append((child, placed, child_inherited, out_layer))
+            image_uses.append((child, placed, child_inherited, out_layer, child_identity))
             continue
         if proto_uses is not None and cid in proto_ids:
             proto_uses.setdefault((cid, child_inherited), []).append(
-                (placed, out_layer, getattr(ins, "name", "") or None))
+                (placed, out_layer, getattr(ins, "name", "") or None, child_identity))
             continue
         if layer_uses is not None and getattr(ins, "layer", ""):
             # Tagged nested instance → its own group carrying the layer.
-            layer_uses.append((child, placed, child_inherited, ins.layer))
+            layer_uses.append((child, placed, child_inherited, ins.layer, child_identity))
             continue
         _collect(child, placed, by_id, attr_map, out, depth + 1, stack,
                  proto_ids, proto_uses, child_inherited, image_uses,
-                 edges_out, child_layer, layer_uses, group_layer, loose_out)
+                 edges_out, child_layer, layer_uses, group_layer, loose_out,
+                 curves_out, child_identity)
 
 
 def _subtree_polys(defn, by_id, memo, stack) -> int:
@@ -1008,7 +1033,7 @@ def _merge_equal_protos(protos):
             for i in bucket:
                 e = protos[i]
                 sig = repr((e["faces"], e["soft_edges"], e["children"],
-                            e.get("loose_edges"), e.get("component", True)))
+                            e.get("loose_edges"), e.get("curves"), e.get("component", True)))
                 first = seen.setdefault(sig, i)
                 if first != i:
                     remap[i] = first
@@ -1019,7 +1044,7 @@ def _merge_equal_protos(protos):
             src, dst = protos[i], protos[keep]
             if not src["instances"]:
                 continue
-            for key in ("instance_layers", "instance_names"):
+            for key in ("instance_layers", "instance_names", "instance_identities"):
                 if key in src or key in dst:
                     dst.setdefault(key, [None] * len(dst["instances"])).extend(
                         src.get(key) or [None] * len(src["instances"]))
@@ -1302,13 +1327,16 @@ def _adapt(model, name: str, skp_path=None):
                 entry = _face_entry(face, wl, raw_l, s0, s1, hs, attr_map)
                 if entry is not None:
                     loose.append(entry)
+        curves = []
+        _curve_segments(r, ident, curves)
         lines: list = []
         _loose_edge_segments(r, ident, lines)
         if loose or lines:
             loose_edges: list = []
             _soft_edge_segments(r, ident, loose_edges)
             groups.append({"name": name, "faces": loose,
-                           "soft_edges": loose_edges, "loose_edges": lines})
+                           "soft_edges": loose_edges, "loose_edges": lines, "curves": curves,
+                           "identity": ("root",)})
         # Each top-level instance → its own group (or a shared-proto use).
         # The instance's layer (tag) rides on the whole group; nested tagged
         # instances land as per-face layers inside it.
@@ -1317,30 +1345,33 @@ def _adapt(model, name: str, skp_path=None):
             if child is None:
                 continue
             placed = _matrix(ins.matrix)
+            identity = _instance_identity((), ins)
             inh = getattr(ins, "material_id", None)
             lay = getattr(ins, "layer", "") or None
             if getattr(child, "is_image", False) or \
                     getattr(child, "always_faces_camera", False):
-                image_uses.append((child, placed, inh, lay))
+                image_uses.append((child, placed, inh, lay, identity))
                 continue
             ins_name = getattr(ins, "name", "") or None
             if getattr(child, "id", None) in proto_ids:
                 proto_uses.setdefault((child.id, inh), []).append(
-                    (placed, lay, ins_name))
+                    (placed, lay, ins_name, identity))
                 continue
             sub: list = []
             sub_edges: list = []
             sub_lines: list = []
+            sub_curves = []
             _collect(child, placed, by_id, attr_map, sub, 0, set(),
                      proto_ids, proto_uses, inh, image_uses, sub_edges,
                      layer_uses=layer_uses, group_layer=lay,
-                     loose_out=sub_lines)
+                     loose_out=sub_lines, curves_out=sub_curves, identity=identity)
             if sub or sub_lines:
                 # The name the user gave the group or copy, else its
                 # definition's («Group#3» is all a .skp names a group).
                 gp = {"name": ins_name or getattr(child, "name", None) or name,
                       "faces": sub, "soft_edges": sub_edges,
-                      "loose_edges": sub_lines,
+                      "loose_edges": sub_lines, "curves": sub_curves,
+                      "identity": identity,
                       # The instance's own axes (issue #44): flattened into
                       # world coordinates, it still faces the way it did.
                       "axes": [float(x) for x in placed.data()]}
@@ -1354,16 +1385,21 @@ def _adapt(model, name: str, skp_path=None):
     # instance extracts recursively.
     i = 0
     while i < len(layer_uses):
-        child, placed, inh, lay = layer_uses[i]
+        child, placed, inh, lay, identity = layer_uses[i]
         i += 1
         sub = []
         sub_edges = []
+        sub_curves = []
+        sub_lines = []
         _collect(child, placed, by_id, attr_map, sub, 0, set(),
                  proto_ids, proto_uses, inh, image_uses, sub_edges,
-                 layer_uses=layer_uses, group_layer=lay)
-        if sub:
+                 layer_uses=layer_uses, group_layer=lay,
+                 loose_out=sub_lines, curves_out=sub_curves, identity=identity)
+        if sub or sub_lines:
             groups.append({"name": getattr(child, "name", None) or name,
                            "faces": sub, "soft_edges": sub_edges,
+                           "curves": sub_curves, "loose_edges": sub_lines,
+                           "identity": identity,
                            "layer": lay,
                            "axes": [float(x) for x in placed.data()]})
 
@@ -1395,18 +1431,19 @@ def _adapt(model, name: str, skp_path=None):
         local: list = []
         local_edges: list = []
         local_lines: list = []
+        local_curves = []
         local_images: list = []
         child_uses: dict = {}
         _collect(d, QMatrix4x4(), by_id, attr_map, local, 0, set(),
                  proto_ids, child_uses, inh, local_images,
-                 edges_out=local_edges, loose_out=local_lines)
+                 edges_out=local_edges, loose_out=local_lines, curves_out=local_curves)
         children: list = []
         for (cid, cinh), places in child_uses.items():
             ci = _build_proto(cid, cinh)
             if ci is None:
                 continue
-            for xf, ly, nm in places:
-                kid = {"proto": ci, "xform": xf}
+            for xf, ly, nm, identity in places:
+                kid = {"proto": ci, "xform": xf, "identity": identity}
                 if ly:
                     kid["layer"] = ly
                 if nm:
@@ -1414,7 +1451,7 @@ def _adapt(model, name: str, skp_path=None):
                 children.append(kid)
         protos[idx] = {"name": getattr(d, "name", None) or name,
                        "faces": local, "soft_edges": local_edges,
-                       "loose_edges": local_lines,
+                       "loose_edges": local_lines, "curves": local_curves,
                        # A GROUP placed once is a group. Copies of a group
                        # share its definition in the file; they stay
                        # components here, so editing one cannot reach into
@@ -1432,32 +1469,39 @@ def _adapt(model, name: str, skp_path=None):
         idx = _build_proto(did, inh)
         if idx is None:
             continue
-        protos[idx]["instances"] = [xf for xf, _ly, _nm in uses]
-        if any(ly for _xf, ly, _nm in uses):
+        protos[idx]["instances"] = [xf for xf, _ly, _nm, _pid in uses]
+        protos[idx]["instance_identities"] = [pid for _, _, _, pid in uses]
+        if any(ly for _xf, ly, _nm, _pid in uses):
             # Layer (tag) per PLACEMENT — copies of one component can sit on
             # different layers.
-            protos[idx]["instance_layers"] = [ly for _xf, ly, _nm in uses]
-        if any(nm for _xf, _ly, nm in uses):
+            protos[idx]["instance_layers"] = [ly for _xf, ly, _nm, _pid in uses]
+        if any(nm for _xf, _ly, nm, _pid in uses):
             # Name per PLACEMENT too: each copy can carry its own.
-            protos[idx]["instance_names"] = [nm for _xf, _ly, nm in uses]
+            protos[idx]["instance_names"] = [nm for _xf, _ly, nm, _pid in uses]
 
     # The face-me pieces a prototype holds turn toward the camera from
     # their own WORLD spot, so they leave it like the ones outside any
     # prototype: one per placement, its matrix composed down the tree, its
     # tag the nearest one above it.
-    def _expand_images(idx, world, tag, depth=0):
+    def _expand_images(idx, world, tag, depth=0, parent_identity=()):
         pr = protos[idx]
-        for child, placed, inh, lay in pr["_images"]:
-            image_uses.append((child, world * placed, inh, lay or tag))
+        for child, placed, inh, lay, identity in pr["_images"]:
+            image_uses.append((child, world * placed, inh, lay or tag,
+                               (*parent_identity, *identity)
+                               if parent_identity is not None and identity is not None else None))
         if depth < 32:      # a malformed file must not spin
             for kid in pr["children"]:
                 _expand_images(kid["proto"], world * kid["xform"],
-                               kid.get("layer") or tag, depth + 1)
+                               kid.get("layer") or tag, depth + 1,
+                               (*parent_identity, *kid["identity"])
+                               if parent_identity is not None and kid.get("identity") is not None
+                               else None)
 
     for idx, pr in enumerate(protos):
         lays = pr.get("instance_layers") or []
         for i, xf in enumerate(pr["instances"]):
-            _expand_images(idx, xf, lays[i] if i < len(lays) else None)
+            _expand_images(idx, xf, lays[i] if i < len(lays) else None,
+                           parent_identity=pr["instance_identities"][i])
     for pr in protos:
         del pr["_images"]
 
@@ -1467,7 +1511,10 @@ def _adapt(model, name: str, skp_path=None):
     # always shows the WHOLE picture once (see _image_quad_faces). An
     # "always faces camera" component (Susan) flattens its whole subtree
     # into one billboard group — the flag decides, no heuristic needed.
-    for child, placed, inh, lay in image_uses:
+    for child, placed, inh, lay, identity in image_uses:
+        curves = []
+        soft_edges = []
+        lines = []
         if getattr(child, "is_image", False):
             faces = _image_quad_faces(child, placed, attr_map, inh)
             tex = next((a["texture"]["path"] for _o, _h, a in faces
@@ -1481,12 +1528,14 @@ def _adapt(model, name: str, skp_path=None):
         else:
             faces = []
             _collect(child, placed, by_id, attr_map, faces, 0, set(),
-                     inherited=inh)
+                     inherited=inh, curves_out=curves, edges_out=soft_edges,
+                     loose_out=lines)
             billboard = True
-        if not faces:
+        if not faces and not lines:
             continue
         gp = {"name": getattr(child, "name", None) or name,
-              "faces": faces, "billboard": billboard}
+              "faces": faces, "billboard": billboard, "identity": identity,
+              "curves": curves, "soft_edges": soft_edges, "loose_edges": lines}
         if lay:
             gp["layer"] = lay
         groups.append(gp)
@@ -1497,7 +1546,14 @@ def _adapt(model, name: str, skp_path=None):
     # places nothing.
     protos = _merge_equal_protos(protos)
 
-    payload = {"backend": "openskp", "groups": groups, "protos": protos}
+    import hashlib
+    import json
+    # No model GUID is exposed. Definition GUIDs distinguish files with the
+    # same names; sorting keeps the namespace independent of parse order.
+    signature = sorted((str(d.name), str(getattr(d, "guid", ""))) for d in defs.values())
+    namespace = hashlib.sha256(json.dumps(signature).encode()).hexdigest()
+    payload = {"backend": "openskp", "groups": groups, "protos": protos,
+               "identity_namespace": namespace}
     if not groups and not any(e["faces"] or e["children"]
                               or e.get("loose_edges") for e in protos):
         # Nothing to draw. Either the parser missed the geometry (→ None,

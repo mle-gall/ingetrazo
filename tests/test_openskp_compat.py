@@ -53,6 +53,13 @@ class _Archive:
     """Just enough of the legacy reader's archive for one layer record: no
     attribute container, no persistent ids."""
     has_pid = False
+    current_obj_slot = None
+
+    def _skip_clayer_colour_ext(self, r):
+        pass
+
+    def _skip_clayer_parent_ref(self, r, slot):
+        pass
 
     def __init__(self, ver):
         self.ver = ver

@@ -235,14 +235,8 @@ def test_openskp_adapter_places_instances_with_transform():
     assert placed.x() == pytest.approx(2.54, abs=1e-4)  # +100 in on X
 
 
-def test_openskp_adapter_divides_an_instance_matrix_by_its_w():
-    # Issue #865: SketchUp sometimes stores a placement scaled through the
-    # matrix's own scalar (element 12, the homogeneous w): the 3x3 AND the
-    # translation are stored multiplied by it, and the real transform
-    # divides them back out. Reading the stored values raw brought the
-    # reported component in 100x large and 100x away. This matrix is the
-    # w=1 placement of the test above (identity, +100 in on X) stored with
-    # w = 100, so it must land exactly where that one lands.
+def test_openskp_adapter_applies_the_openskp_scale_factor():
+    # OpenSKP 1.5 exposes 1/w as the final scalar, including translation.
     child = _fake_definition(
         id=5, name="Child",
         verts={1: (0, 0, 0), 2: (10, 0, 0), 3: (10, 10, 0)},
@@ -250,7 +244,7 @@ def test_openskp_adapter_divides_an_instance_matrix_by_its_w():
         faces={20: [[(10, 1), (11, 1), (12, 1)]]},
     )
     inst = NS(ref_idx=5, matrix=[100, 0, 0, 0, 100, 0, 0, 0, 100,
-                                 10000, 0, 0, 100])
+                                 10000, 0, 0, 0.01])
     root = _fake_definition(
         id=0, name="ROOT_MODEL", verts={}, edges={}, faces={}, instances=[inst])
     model = NS(definitions={0: root, 5: child})

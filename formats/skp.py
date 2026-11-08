@@ -216,9 +216,17 @@ def _apply_payload_inner(scene, payload, progress=None) -> str:
             except ValueError:      # endpoints weld to one vertex
                 continue
 
-    def _build_mesh(faces, soft_edges=None, loose_edges=None):
+    def _build_mesh(faces, soft_edges=None, loose_edges=None, curves=None):
         mesh = _build_faces(faces, soft_edges)
         _add_lines(mesh, loose_edges)
+        for segments in curves or ():
+            cid = Mesh.next_curve_id()
+            for a, b in segments:
+                va, vb = mesh.vertex_at(_q(a)), mesh.vertex_at(_q(b))
+                if va is not None and vb is not None:
+                    edge = mesh.find_edge(va, vb)
+                    if edge is not None:
+                        edge.curve = cid
         return mesh
 
     def _build_faces(faces, soft_edges=None):
@@ -421,12 +429,33 @@ def _apply_payload_inner(scene, payload, progress=None) -> str:
             scene.text_labels.append(TextLabel(
                 anchor, label - anchor, raw["text"]))
 
+    import uuid
+    used_uids = set()
+
+    def remember(group):
+        used_uids.add(group.uid)
+        for child in group.children:
+            remember(child)
+    for group in scene.groups:
+        remember(group)
+
+    def assign_uid(group, identity):
+        if identity is not None and payload.get("identity_namespace"):
+            key = repr((payload["identity_namespace"], identity))
+            candidate = uuid.uuid5(uuid.NAMESPACE_URL, key).hex[:16]
+            if candidate not in used_uids:
+                group.uid = candidate
+        while group.uid in used_uids:
+            group.uid = uuid.uuid4().hex[:16]
+        used_uids.add(group.uid)
+
     for gp in groups:
         _tick(1)
         mesh = _build_mesh(gp["faces"], gp.get("soft_edges"),
-                           gp.get("loose_edges"))
+                           gp.get("loose_edges"), gp.get("curves"))
         if mesh.faces or mesh.edges:        # a group of lines is one too
             g = Group(mesh, name=gp.get("name"))
+            assign_uid(g, gp.get("identity"))
             if gp.get("layer"):
                 g.layer = gp["layer"]
             axes = gp.get("axes")
@@ -454,13 +483,14 @@ def _apply_payload_inner(scene, payload, progress=None) -> str:
     for pr in protos:
         _tick(1)
         proto_meshes.append(_build_mesh(pr["faces"], pr.get("soft_edges"),
-                                        pr.get("loose_edges")))
+                                        pr.get("loose_edges"), pr.get("curves")))
 
-    def _place(idx, xf, layer=None, depth=0, name=None):
+    def _place(idx, xf, layer=None, depth=0, name=None, identity=None):
         pr = protos[idx]
         # The placement's own name (what the user called the group or
         # copy), else the definition's.
         g = Group(proto_meshes[idx], name=name or pr.get("name"))
+        assign_uid(g, identity)
         g.xform = xf
         # A .skp GROUP stays a group: only a component definition is one.
         g.component = bool(pr.get("component", True))
@@ -468,7 +498,10 @@ def _apply_payload_inner(scene, payload, progress=None) -> str:
             g.layer = layer
         if depth < 32:      # a malformed file must not spin
             g.adopt(_place(kid["proto"], kid["xform"], kid.get("layer"),
-                           depth + 1, kid.get("name"))
+                           depth + 1, kid.get("name"),
+                           (*identity, *kid["identity"])
+                           if identity is not None and kid.get("identity") is not None
+                           else None)
                     for kid in pr.get("children", []) or [])
         return g
 
@@ -479,9 +512,11 @@ def _apply_payload_inner(scene, payload, progress=None) -> str:
         _tick(1)
         layers = pr.get("instance_layers") or []
         names = pr.get("instance_names") or []
+        identities = pr.get("instance_identities") or []
         for i, xf in enumerate(pr.get("instances", []) or []):
             g = _place(idx, xf, layers[i] if i < len(layers) else None,
-                       name=names[i] if i < len(names) else None)
+                       name=names[i] if i < len(names) else None,
+                       identity=identities[i] if i < len(identities) else None)
             scene.groups.append(g)
     back = payload.get("back_color")
     if back and getattr(scene, "back_face_color", None) is None:
