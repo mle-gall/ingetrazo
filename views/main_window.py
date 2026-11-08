@@ -265,6 +265,11 @@ class MainWindow(QMainWindow):
 
     def __init__(self, defer_extensions: bool = False) -> None:
         super().__init__()
+        # macOS 26+: Liquid Glass chrome needs a translucent native window,
+        # so the attribute goes on before anything below creates it; the
+        # glass itself is installed at the end (views/mac_glass.py).
+        from views import mac_glass
+        mac_glass.prepare(self)
         # main.py passes True: the plugins' setup runs once the window is up
         # (see load_extensions). Set first — the menu bar is built below.
         self._defer_extensions = bool(defer_extensions)
@@ -436,6 +441,11 @@ class MainWindow(QMainWindow):
         if autosave.pending_untitled():
             from PySide6.QtCore import QTimer
             QTimer.singleShot(0, self, self._offer_untitled_recovery)
+        # macOS 26+: the chrome on Liquid Glass (views/mac_glass.py); a
+        # no-op elsewhere. Before the first show — it needs a translucent
+        # native window.
+        from views import mac_glass
+        mac_glass.install(self)
 
     def showEvent(self, event) -> None:  # noqa: N802 — Qt override
         super().showEvent(event)
@@ -531,6 +541,9 @@ class MainWindow(QMainWindow):
                 self.addToolBar(area, tb)
                 tb.setVisible(shown)
         self._wrap_toolbar_rows()
+        # macOS glass: the traffic lights' room stays first in the top row.
+        from views import mac_glass
+        mac_glass.seat_lights(self)
         if was_maximized and sys.platform == "win32":
             # Re-seating the bars can raise the window's minimum height above
             # the normal size Qt still holds when Windows has just maximized
@@ -715,6 +728,9 @@ class MainWindow(QMainWindow):
         if act is not None:
             menu.addSeparator()
             menu.addAction(act)
+        custom = getattr(self, "_act_customize_toolbars", None)
+        if custom is not None and custom.isVisible():
+            menu.addAction(custom)
         return menu
 
     def _place_new_toolbars(self, st) -> None:
@@ -1762,6 +1778,18 @@ class MainWindow(QMainWindow):
         self._act_reset_toolbars.setStatusTip(tr(_RESET_TOOLBARS_TIP))
         self._act_reset_toolbars.triggered.connect(
             self.restore_default_toolbars)
+        # macOS glass: the toolbars are locked and grip-less; they are
+        # rearranged in a mode of their own, as in AppKit apps.
+        from views import mac_glass
+        self._act_customize_toolbars = window_menu.addAction(
+            tr("Customize Toolbars…"))
+        self._act_customize_toolbars.setStatusTip(tr(
+            "Rearrange the toolbars: drag them by their grips, then click "
+            "Done."))
+        self._act_customize_toolbars.triggered.connect(
+            lambda: mac_glass.set_customizing(self, True))
+        self._act_customize_toolbars.setVisible(
+            self.testAttribute(Qt.WA_TranslucentBackground))
 
         toggle_profile = self.profile_dock.toggleViewAction()
         toggle_profile.setText(tr("Terrain profile"))
@@ -2172,10 +2200,16 @@ class MainWindow(QMainWindow):
         btn.setToolTip(act.toolTip())
         btn.setCursor(Qt.PointingHandCursor)
         btn.setAutoRaise(True)
+        from views import mac_glass
         from views.theme import style as theme_style
         theme_style(btn,             # {accent_rgb}: Preferences ▸ Accent colour
             "QToolButton {{ background: palette(mid); border: none;"
             " border-radius: 4px; }}"
+            "QToolButton:hover {{ background: rgb({accent_rgb}); }}"
+            if not mac_glass.enabled() else
+            # On glass: a translucent tab of the chrome, like the drawer's.
+            "QToolButton {{ background: rgba({ink_rgb}, 30); border: none;"
+            " border-radius: 6px; }}"
             "QToolButton:hover {{ background: rgb({accent_rgb}); }}")
         btn.clicked.connect(lambda: act.setChecked(not act.isChecked()))
         self._sidebar_handle = btn
@@ -2445,6 +2479,10 @@ class MainWindow(QMainWindow):
                 d.setTitleBarWidget(title)
                 if current is not None:
                     current.deleteLater()
+        # macOS glass: the tab bars as an inspector's segmented control
+        # (views/mac_inspector.py); a no-op elsewhere.
+        from views import mac_inspector
+        mac_inspector.dress(self)
 
     #: The «+» after the tray tabs, and the gap it keeps from the arrows.
     _PLUS_PX = 20

@@ -130,10 +130,25 @@ class _Section(QWidget):
         # Clean, light header (QGIS-style): plain bold title on the panel
         # background with a subtle underline — no dark bar. Uses palette() roles
         # so it adapts to light and dark themes.
-        self._btn.setStyleSheet(
-            "QToolButton { font-weight: bold; padding: 6px 4px; border: none;"
-            " border-bottom: 1px solid palette(mid); text-align: left; }"
-            "QToolButton:hover { background: palette(midlight); }")
+        from views import mac_glass
+        if mac_glass.enabled():
+            # On the macOS glass chrome: an inspector's section — the whole
+            # width, a hairline between sections instead of an underline
+            # under the title, no hover bar.
+            from PySide6.QtWidgets import QSizePolicy
+            from views.theme import style
+            self._btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            style(self._btn,
+                  "QToolButton {{ font-weight: 600; padding: 9px 6px 5px 6px;"
+                  " border: none; border-top: 1px solid rgba({ink_rgb}, 24);"
+                  " background: transparent; text-align: left; }}"
+                  "QToolButton:hover {{ color: rgb({accent_rgb}); }}")
+        else:
+            self._btn.setStyleSheet(
+                "QToolButton { font-weight: bold; padding: 6px 4px;"
+                " border: none; border-bottom: 1px solid palette(mid);"
+                " text-align: left; }"
+                "QToolButton:hover { background: palette(midlight); }")
         self._btn.toggled.connect(self._on_toggle)
         self._content = content
         lay.addWidget(self._btn)

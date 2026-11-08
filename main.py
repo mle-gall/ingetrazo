@@ -542,6 +542,9 @@ def main() -> int:
     # (Preferences ▸ General ▸ Theme pins one). See views/theme.py.
     from views.theme import apply_theme
     apply_theme(app)
+    # macOS 26+: menus on the AppKit menu material (views/mac_glass.py).
+    from views import mac_glass
+    mac_glass.install_menus(app)
     _init_language()
     # Long hints wrap into a box instead of a strip across the window.
     from views.tooltips import WrappingToolTips

@@ -5655,7 +5655,10 @@ class ComposerWindow(QMainWindow):
         """The desk behind the sheet: slate on the dark chrome, a soft grey
         on the light one — slate there glared against the white paper
         (Marco, 2026-09-22)."""
-        dark = self.palette().color(QPalette.Window).lightness() < 128
+        # The application's palette: on glass the window's own Window colour
+        # is transparent (views/mac_glass.py) and would always read dark.
+        from PySide6.QtWidgets import QApplication
+        dark = QApplication.palette().color(QPalette.Window).lightness() < 128
         self._view.setBackgroundBrush(QColor(70, 76, 84) if dark
                                       else QColor(200, 204, 210))
 
@@ -5675,6 +5678,9 @@ class ComposerWindow(QMainWindow):
         # monitor as any program does. The model window closes it on quit.
         super().__init__(None)
         self.setWindowFlag(Qt.Window, True)
+        # macOS 26+: the same Liquid Glass chrome as the model window.
+        from views import mac_glass
+        mac_glass.prepare(self)
         self._window = main_window
         from views.floating_toolbar import watch_toolbars
         watch_toolbars(self)        # a torn-off bar gets a title and a ×
@@ -5858,6 +5864,7 @@ class ComposerWindow(QMainWindow):
                   activated=lambda: self.step_sheet(1))
 
         self._rebuild_canvas()
+        mac_glass.install(self)
 
     def save_document(self) -> None:
         """Ctrl+S here saves the whole document — model and sheets."""

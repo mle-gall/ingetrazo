@@ -30,6 +30,27 @@ _KEY = "theme"          # a General setting: core.general_settings (#266)
 # The one accent both themes share — selection and the IngeTrazo blue.
 _HIGHLIGHT = QColor(42, 93, 143)
 
+
+def brand_tint(dark: bool) -> QColor:
+    """The IngeTrazo blue as a translucent wash over a see-through chrome
+    (views.mac_glass). On the dark theme a deep, nearly black navy of that
+    blue: the blue itself lightened the chrome to a slate, and a lighter
+    navy still read too light (Maxence, 07-11). On the light theme only a
+    trace of it — the light chrome stays neutral."""
+    if dark:
+        return QColor(3, 10, 22, 175)
+    c = QColor(_HIGHLIGHT)
+    c.setAlphaF(0.035)
+    return c
+
+
+def glass_tint(dark: bool) -> QColor:
+    """The tint of the Liquid Glass panels (views.mac_glass): on the dark
+    theme the chrome's navy, so the panels stay as dark as the bar under
+    them; none on the light one."""
+    return QColor(6, 14, 28, 150) if dark else QColor(0, 0, 0, 0)
+
+
 # ---- accent colour of the icons and toolbars --------------------------------
 # Preferences ▸ General ▸ Accent colour (#393, Peter Mican by e-mail; Marco
 # 12-10: «the orange suits Ubuntu, maybe not other systems»). It paints the
@@ -177,8 +198,30 @@ def tokens() -> dict[str, str]:
             or app.palette().color(QPalette.Window).lightness() < 128)
     accent = accent_color()
     return {"muted": "#8a94a0" if dark else "#5a6472",
+            # The text colour as an rgb triple, for veils: rgba({ink_rgb}, 30).
+            "ink_rgb": "255, 255, 255" if dark else "0, 0, 0",
+            "tab_close": _glyph("close", dark),
+            "combo_arrow": _glyph("updown", dark),
+            "spin_up": _glyph("up", dark),
+            "spin_down": _glyph("down", dark),
+            # The desktop's own accent: what macOS menus highlight with.
+            "system_accent_rgb": _rgb(_system_accent
+                                      if _system_accent is not None
+                                      and _system_accent.isValid()
+                                      else _HIGHLIGHT),
             "accent_rgb": f"{accent.red()}, {accent.green()}, "
                           f"{accent.blue()}"}
+
+
+def _rgb(c: QColor) -> str:
+    return f"{c.red()}, {c.green()}, {c.blue()}"
+
+
+def _glyph(kind: str, dark: bool) -> str:
+    """A glyph of the glass chrome (views.mac_glass), as a path a
+    stylesheet can name; empty where that chrome is not in use."""
+    from views import mac_glass
+    return mac_glass.glyph(kind, dark) if mac_glass.enabled() else ""
 
 
 # ---- stylesheet templates that follow the theme ----------------------------
@@ -294,6 +337,9 @@ def apply_theme(app, mode: str | None = None) -> bool:
     if app.style().name().lower() != "fusion":
         app.setStyle("Fusion")
     app.setPalette(dark_palette() if dark else light_palette())
+    from views import mac_glass
+    for top in app.topLevelWidgets():
+        mac_glass.apply_palette(top)
     _restyle()
     _repolish(app)
     _redraw_icons(app)

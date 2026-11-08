@@ -117,6 +117,19 @@ class PreferencesDialog(QDialog):
             "Applies at once."))
         form.addRow(tr("Accent colour:"), self._accent)
 
+        # macOS 26+: the Liquid Glass chrome (views/mac_glass.py), on by
+        # default. Elsewhere the row is not there at all.
+        from views import mac_glass
+        self._glass = None
+        if mac_glass.supported():
+            self._glass = QCheckBox(tr("Liquid Glass window chrome"))
+            self._glass.setChecked(mac_glass.enabled())
+            self._glass.setToolTip(tr(
+                "Toolbars, panels and menus on macOS's translucent glass, "
+                "with the toolbars in the title bar. Off: the opaque look "
+                "IngeTrazo has on every system. Applies after a restart."))
+            form.addRow("", self._glass)
+
         self._rest = QComboBox()
         for key, label in _REST_MODES:
             self._rest.addItem(tr(label), key)
@@ -891,6 +904,8 @@ class PreferencesDialog(QDialog):
 
         pick(self._theme, DARK)
         pick(self._accent, ORANGE)
+        if self._glass is not None:
+            self._glass.setChecked(True)
         pick(self._rest, "fade")
         from views.viewport import EDIT_REST_FADE
         self._rest_fade.setValue(round(EDIT_REST_FADE * 100))
@@ -979,6 +994,14 @@ class PreferencesDialog(QDialog):
             save_theme(theme)
             from PySide6.QtWidgets import QApplication
             apply_theme(QApplication.instance(), theme)
+
+        from views import mac_glass
+        if self._glass is not None \
+                and self._glass.isChecked() != mac_glass.enabled():
+            mac_glass.set_enabled(self._glass.isChecked())
+            QMessageBox.information(
+                self, tr("Window chrome changed"),
+                tr("Restart IngeTrazo to apply the new window chrome."))
 
         from views.theme import apply_accent, save_accent, saved_accent
         accent = self._accent.currentData()

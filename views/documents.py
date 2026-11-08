@@ -167,7 +167,30 @@ class ProjectTabBar(QWidget):
         row.addWidget(plus, 0)
         row.addStretch(1)
         self._quiet = False
+        from views import mac_glass
         from views.theme import style as theme_style
+        if mac_glass.enabled():
+            # On glass (macOS 26+): the tabs as rounded pills, like
+            # Safari's and Finder's, the strip see-through.
+            theme_style(self,
+                "#project_tabs {{ background: transparent; }}"
+                "QTabBar#project_tab_bar::tab {{ padding: 3px 12px;"
+                " max-width: 260px; border: none; border-radius: 7px;"
+                " margin: 3px 2px; background: transparent; }}"
+                "QTabBar#project_tab_bar::tab:selected {{"
+                " background: rgba({ink_rgb}, 36); }}"
+                "QTabBar#project_tab_bar::tab:!selected:hover {{"
+                " background: rgba({ink_rgb}, 16); }}"
+                "QTabBar#project_tab_bar::close-button {{"
+                " image: url({tab_close}); border-radius: 4px;"
+                " subcontrol-position: right; margin: 2px; }}"
+                "QTabBar#project_tab_bar::close-button:hover {{"
+                " background: rgba({ink_rgb}, 40); }}"
+                "QToolButton#project_tab_new {{ padding: 0px 8px;"
+                " font-weight: bold; border: none; border-radius: 7px; }}"
+                "QToolButton#project_tab_new:hover {{"
+                " background: rgba({ink_rgb}, 16); }}")
+            return
         theme_style(self,
             "#project_tabs {{ background: palette(window); }}"
             "QTabBar#project_tab_bar::tab {{ padding: 3px 10px;"
