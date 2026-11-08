@@ -255,8 +255,9 @@ namespace's codes or `search` for a substring in code/title, with `offset` and
 
 Use `tag`, `set_record` and `add_classification` to classify batches of placements.
 Each successful write is one undo step. Unknown uids fail before editing;
-validation rejection returns `applied=false`, current records, and proposed
-problems keyed by uid. `force=true` on `set_record` permits invalid records.
+validation rejection returns `applied=false`, current records, and the
+problems keyed by uid (only uids with messages appear; an empty map means
+every target is valid). `force=true` on `set_record` permits invalid records.
 Patches replace top-level fields (including whole lists and psets); a null patch
 removes the record. Classification helpers preserve each object's other codes.
 An omitted classification name uses the registry title, or the code itself when

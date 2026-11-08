@@ -166,7 +166,10 @@ class RecordTools:
                 if group.ifc and group.ifc.get('guid'):
                     value['guid'] = group.ifc['guid']
             problems[group.uid] = record.validate(value, registry, schema) if value is not None else []
-        if any(problems.values()) and not force:
+        # Only the uids with something to say: a 241-uid batch answering
+        # with 241 empty lists read like 241 failures to the agent.
+        problems = {uid: messages for uid, messages in problems.items() if messages}
+        if problems and not force:
             return json_value(dict(applied=False, problems=problems, records=[
                 self._record_view(g, registry, schema) for g in targets]))
         if targets:
