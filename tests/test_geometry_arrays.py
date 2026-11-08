@@ -250,7 +250,7 @@ def test_separately_closed_placements_skip_weld(monkeypatch):
 
 @pytest.mark.parametrize('geometry', ['brep', 'polygonal'])
 def test_mapped_instances_world_readback(tmp_path, geometry):
-    import ifcopenshell
+    ifcopenshell = pytest.importorskip('ifcopenshell')
     import ifcopenshell.geom
     import ifcopenshell.validate
     from formats.ifc import save_ifc
@@ -309,7 +309,7 @@ def test_step_writer_streams_in_order():
 
 
 def test_mapped_ownership_excludes_tagged_and_opening_children(tmp_path):
-    import ifcopenshell
+    ifcopenshell = pytest.importorskip('ifcopenshell')
     from formats.ifc import save_ifc
     scene = Scene()
     host = cube()
@@ -334,7 +334,7 @@ def test_loose_edges_do_not_open_closed_solid():
 
 
 def test_mapping_tiny_scales_preserve_uniformity_and_scale(tmp_path):
-    import ifcopenshell
+    ifcopenshell = pytest.importorskip('ifcopenshell')
     from formats.ifc import save_ifc
     scene = Scene()
     prototype = cube()

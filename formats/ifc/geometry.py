@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""World-space faceted geometry, shared by both export schemas."""
+"""Faceted bodies and local prototype maps without allocating Python faces."""
 from core.bim import face_set_volume
 from .step import _f
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Small dependency-free ISO 10303-21 literal and entity writer."""
+"""Stream STEP entities so memory does not grow with the complete file text."""
 import uuid
 import tempfile
 
