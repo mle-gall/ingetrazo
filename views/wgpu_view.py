@@ -71,8 +71,11 @@ class WgpuView(QWidget):
         if self.source_viewport is not None:
             self.camera = self.source_viewport.camera
             style = self.source_viewport._effective_style()
-            mode = style.face_mode
-            self.renderer.set_style('shaded' if mode == 'textures' else mode)
+            from views.wgpu_style import style_payload
+            mvp = self.camera.projection_matrix() * self.camera.view_matrix()
+            self.renderer.set_style(style_payload(
+                self.source_viewport.scene, style,
+                horizon=self.source_viewport._horizon_ndc_y(mvp)))
             self.renderer.set_edges(style.edges)
             tint = getattr(self.source_viewport, 'view_tint', None) or {}
             signature = tuple(sorted(tint.items()))

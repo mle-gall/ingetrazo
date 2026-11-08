@@ -1,5 +1,9 @@
 //! A resident Metal scene: compute compaction precedes native indirect draws.
 mod overlay;
+// R-look: isolated style and background passes.
+mod style;
+mod background;
+mod antialias;
 use numpy::PyReadonlyArray1;
 use pyo3::{exceptions::PyValueError, prelude::*};
 use raw_window_handle::{
@@ -38,6 +42,11 @@ struct Scene {
 }
 #[pyclass(unsendable)]
 struct Renderer {
+    antialias: bool,
+    aa: antialias::Antialias,
+    look: style::Style,
+    background: background::Background,
+    look_groups: Vec<wgpu::BindGroup>,
     capture_next: bool,
     captured: Option<Vec<u8>>,
     overlay: overlay::Overlay,
@@ -186,7 +195,7 @@ impl Renderer {
         });
         let vs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("draw"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("draw.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shading.wgsl").into()),
         });
         let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
         let pipeline = |topology, fragment, compare, write, bias| {
@@ -286,7 +295,14 @@ impl Renderer {
             &[0; 256],
             wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         );
+        let look = style::Style::new(&device);
+        let background = background::Background::new(&device, format, &look.buffer, 1);
+        let look_groups = [&draw, &xray, &edge, &xray_edge].iter().map(|p|
+            bind(&device, &p.get_bind_group_layout(1), &[&look.buffer])).collect();
         Ok(Self {
+            antialias: true,
+            aa: antialias::Antialias::new(&device, format, &look.buffer, w, h),
+            look, background, look_groups,
             capture_next: false,
             captured: None,
             overlay: overlay::Overlay::new(&device, format),
@@ -437,6 +453,7 @@ impl Renderer {
             &self.xray_edge.get_bind_group_layout(0),
             &[&self.camera, &inst, &survivors],
         );
+        self.aa.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer);
         self.gpu_memory =
             (v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 416)
                 as u64;
@@ -501,16 +518,18 @@ impl Renderer {
         }
         Ok(())
     }
-    fn set_style(&mut self, style: &str) -> PyResult<()> {
-        self.style = match style {
-            "shaded" => 0,
-            "xray" => 1,
-            "hidden_line" => 2,
-            "monochrome" => 3,
-            "wireframe" => 4,
-            _ => return Err(PyValueError::new_err("unknown display style")),
-        };
+    // R-look: retain string compatibility for existing diagnostic scripts.
+    fn set_style(&mut self, style: &Bound<'_, PyAny>) -> PyResult<()> {
+        let (mode, edges) = self.look.update(style, &self.queue)?;
+        self.style = mode;
+        if let Some(enabled) = edges { self.edges = enabled; }
         Ok(())
+    }
+    fn set_antialias(&mut self, enabled: bool) { self.antialias = enabled; }
+    fn read_pixels(&mut self) -> PyResult<Vec<u8>> {
+        self.capture_next = true;
+        self.render()?;
+        Ok(self.captured.take().unwrap_or_default())
     }
     fn set_edges(&mut self, enabled: bool) {
         self.edges = enabled;
@@ -541,6 +560,7 @@ impl Renderer {
         self.config.width = ((w as f64 * scale) as u32).max(1);
         self.config.height = ((h as f64 * scale) as u32).max(1);
         self.surface.configure(&self.device, &self.config);
+        self.aa.resize(&self.device, self.config.width, self.config.height);
         self.depth = texture(
             &self.device,
             self.config.width,
@@ -590,6 +610,7 @@ impl Renderer {
         let depth = self.depth.create_view(&Default::default());
         let ids = self.ids.create_view(&Default::default());
         let mut e = self.device.create_command_encoder(&Default::default());
+        self.background.draw(&mut e, &color);
         e.copy_buffer_to_buffer(&s.template, 0, &s.commands, 0, s.p as u64 * 40);
         {
             let mut pass = e.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -615,12 +636,7 @@ impl Renderer {
                         view: &color,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.12,
-                                g: 0.15,
-                                b: 0.2,
-                                a: 1.,
-                            }),
+                            load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         },
                     }),
@@ -647,7 +663,7 @@ impl Renderer {
                     .map(|q| wgpu::RenderPassTimestampWrites {
                         query_set: q,
                         beginning_of_pass_write_index: Some(2),
-                        end_of_pass_write_index: Some(3),
+                        end_of_pass_write_index: if self.antialias { None } else { Some(3) },
                     }),
                 occlusion_query_set: None,
             });
@@ -665,6 +681,7 @@ impl Renderer {
                 },
                 &[],
             );
+            pass.set_bind_group(1, &self.look_groups[if self.style == 1 { 1 } else { 0 }], &[]);
             pass.set_vertex_buffer(0, s.vertex.slice(..));
             pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
             if self.style != 4 {
@@ -682,6 +699,7 @@ impl Renderer {
                 } else {
                     &self.edge
                 });
+                pass.set_bind_group(1, &self.look_groups[if self.style == 1 { 3 } else { 2 }], &[]);
                 // Auto-layout pipelines have separate bind-group identities.
                 pass.set_bind_group(
                     0,
@@ -700,6 +718,9 @@ impl Renderer {
                     }
                 }
             }
+        }
+        if self.antialias {
+            self.aa.draw(&mut e, &color, s, self.style, self.edges, self.multi, self.queries.as_ref());
         }
         self.overlay
             .draw(&mut e, &color, self.config.width, self.config.height);
