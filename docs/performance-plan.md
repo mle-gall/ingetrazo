@@ -958,3 +958,76 @@ in batch 6; the process group was terminated. Completed batches 1–5:
 panels, swatch tooltip, and toolbar bold. Batch 6 has no completed summary;
 this is **not a complete full-suite pass or a complete regression comparison**.
 The suite was not rerun. The focused native tests completed separately.
+
+## R2b — 2026-11-09: resident updates and first native tools
+
+This is an implementation increment, **not full R2b acceptance**. The measured
+end-to-end move and dispatched drag gates remain unresolved; isolated matrix
+submission is insufficient to establish interactive tool performance.
+
+`InstanceUpdates` retains mesh identity/serial and uid-to-row tables. It bakes
+a changed prototype set in one R1b call and appends replacement geometry while
+retaining prototype IDs. Added placements reuse prototypes; removed rows become
+hidden tombstones. Empty containers have serial sentinels instead of GPU rows.
+The native APIs are `update_instances(ids, rows)`, `remove_instances(ids)` and
+`replace_prototype(id, vertices, indices, bounds, face_count)`. Instance and
+geometry allocations grow to power-of-two capacity. New prototype tables and
+indirect-command tables are rebuilt when their schema grows; these allocations
+are not yet amortized by doubling. Highlight and override state survives row
+updates and allocation growth. Replacement geometry is append-only and still
+needs reclamation for sustained mesh editing.
+
+History's existing listener API identifies root-placement Move commands and
+record/registry commands, including compound commands and undo/redo. Known
+record edits do not scan placements or submit GPU work. Untracked edits use a
+conservative full placement scan, without rebaking unchanged prototypes. Bounds
+reduction and some bookkeeping remain proportional to the resident table.
+Exact inference is invalidated immediately after changes and prepared again
+in the background, scheduled after the input event. Its prototype BVHs are
+still rebuilt; incremental inference preparation remains an R2b gap.
+
+The dispatch adapter invokes the existing Tape tool with snapped world points;
+rubber lines, labels and inference markers use the overlay. It does not acquire
+GL edges to create parallel guides. Move previews write instance matrices only,
+then restore those matrices before committing `MoveGroupCommand` (or the same
+`CompoundCommand` wrapper as GL). Esc restores the preview; numeric Move input
+accepts Enter. The production GL viewport implementation is unchanged. Select
+and existing navigation retain their native paths. Other tools flash
+"not yet available on the Metal renderer" and receive no native spatial input.
+Full keyboard/inference parity, guide modes, nested-placement preview semantics
+and renderer-switch GUI parity still need acceptance coverage.
+
+### Validation and measurements
+
+The private Python 3.13 environment and Cargo cache were built with:
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2b-tmp .venv-work/bin/python -m pytest -q tests/test_wgpu_updates.py tests/test_wgpu_interaction.py tests/test_wgpu_scene.py tests/test_wgpu_overlay.py
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_core/Cargo.toml
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2b-tmp .venv-work/bin/python scripts/pytest_batches.py -m 'not slow' --batches 60
+.venv-work/bin/python scripts/wgpu_r2b_measure.py /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz
+```
+
+Both release builds passed. Focused Python: **39 passed**. Rust: **4 core,
+6 renderer passed**. Device-free tests cover record-only no-ops, changed/shared
+prototypes, new prototypes, stable row IDs, additions/removals, History command
+identity and undo, direct Tape versus native adapter measurement, dispatch, and
+History-guided discovery. Rust tests cover capacity growth and flag preservation;
+they do not exercise a device-backed reallocation in the unit test harness.
+
+The ride diagnostic is externally bounded to 290 seconds per process and loads
+the input read-only. It records command/submission timings, renderer calls,
+1,000-row matrix frames and actual dispatched Move hover/overlay frames. It uses
+the same History record command as the bridge, but does not measure bridge
+transport. Measurements run concurrently with other agents' test workloads, so
+contention is uncontrolled. Raw samples are in
+[ride.json](benchmarks/wgpu-r2b-2026-11-09/ride.json).
+
+R3 remains live mesh tools (push/pull, line and erase), loose-face transforms,
+and sheets. The unfinished R2b acceptance items above are prerequisites, not
+features silently deferred to R3.

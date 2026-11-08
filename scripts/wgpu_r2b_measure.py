@@ -34,11 +34,14 @@ class Counted:
     def __init__(self, renderer):
         self.renderer = renderer
         self.calls = {}
+        self.rows = []
 
     def __getattr__(self, name):
         method = getattr(self.renderer, name)
         def invoke(*args):
             self.calls[name] = self.calls.get(name, 0) + 1
+            if name == "update_instances":
+                self.rows.append(len(args[0]))
             return method(*args)
         return invoke
 
@@ -46,7 +49,8 @@ class Counted:
 renderer = Counted(view.renderer)
 view.renderer = renderer
 result = {'placements': len(view.packed.instances)}
-g = next(g for g in scene.groups if g.xform is not None)
+g = next(g for g in scene.groups if g.xform is not None and not g.children
+         and view._instance_updates.meshes[id(g.mesh)][2] >= 0)
 start = time.perf_counter()
 history.execute(MoveGroupCommand(g, QVector3D(.01, 0, 0)))
 command_end = time.perf_counter()
@@ -55,6 +59,8 @@ result['move_history_ms'] = (command_end-start)*1000
 result['move_submission_ms'] = (time.perf_counter()-command_end)*1000
 result['move_update_ms'] = (time.perf_counter()-start)*1000
 result['move_calls'] = dict(renderer.calls)
+result['move_row_counts'] = list(renderer.rows)
+renderer.rows.clear()
 renderer.calls.clear()
 start = time.perf_counter()
 history.execute(TagGroupsCommand(scene.groups[:1000], 'IfcBuildingElementProxy'))
@@ -69,6 +75,8 @@ start = time.perf_counter()
 view.set_scene(scene)
 result['add_update_ms'] = (time.perf_counter()-start)*1000
 result['add_calls'] = dict(renderer.calls)
+result['add_row_counts'] = list(renderer.rows)
+renderer.rows.clear()
 # Isolate the resident matrix preview and paced frame cost from scene scanning.
 ids = np.arange(min(1000, len(view.packed.instances)))
 original = view.packed.instances[ids].copy()
