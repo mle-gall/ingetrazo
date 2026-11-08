@@ -21,6 +21,15 @@ from tools.base import Tool, ToolContext
 _MAX_PREVIEW_EDGES = 2000
 
 
+def _edge_count(mesh):
+    """How many edges ``mesh`` has, or None for a deferred mesh (it is
+    previewed by its box, and counting would build it)."""
+    from core.mesh import DeferredMesh
+    if type(mesh) is DeferredMesh:
+        return None
+    return len(mesh.edges)
+
+
 class PlaceGroupTool(Tool):
     name = "Place component"
     uses_snap = True
@@ -57,6 +66,8 @@ class PlaceGroupTool(Tool):
         # preview that costs nothing.
         if getattr(group, "children", None):
             self._segments = self._placement_segments(group)
+        elif _edge_count(group.mesh) is None:
+            self._segments = []         # deferred: the box, nothing built
         else:
             self._segments = [
                 (QVector3D(e.a) - self._anchor, QVector3D(e.b) - self._anchor)
@@ -70,8 +81,18 @@ class PlaceGroupTool(Tool):
         the preview cap, so the caller falls back to the box."""
         from core.group import iter_placements
         placements = list(iter_placements(group))
-        if sum(len(g.mesh.edges) for g, _m in placements) > _MAX_PREVIEW_EDGES:
-            return []
+        # Counted without building a deferred mesh (core.mesh.DeferredMesh):
+        # ``len(mesh.edges)`` builds it, and a linked or imported model of
+        # millions of faces sat 60 s in the preview's head count before the
+        # box fallback was chosen anyway. A deferred one is drawn as the box.
+        total = 0
+        for g, _m in placements:
+            n = _edge_count(g.mesh)
+            if n is None:
+                return []
+            total += n
+            if total > _MAX_PREVIEW_EDGES:
+                return []
         out = []
         for g, m in placements:
             for e in g.mesh.edges:

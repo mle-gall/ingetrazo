@@ -17379,6 +17379,40 @@ class Viewport(QOpenGLWidget):
         return True
 
     # ---- Group-edit context (Groups v2) --------------------------------------
+    def _offer_link_source(self, group) -> None:
+        """«“Site.igz” is linked: open it to edit it?» — and open it in a
+        tab of its own (or bring that tab forward) on yes."""
+        from pathlib import Path
+        from PySide6.QtWidgets import QMessageBox
+        from core import links
+        path = Path(links.link_of(group)["path"])
+        if not path.is_file():
+            QMessageBox.warning(
+                self, tr("Linked document"),
+                tr("“{name}” is a linked document, and its file was not "
+                   "found:\n{path}", name=path.name, path=str(path)))
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle(tr("Linked document"))
+        box.setText(tr("“{name}” is linked from another file.",
+                       name=path.name))
+        box.setInformativeText(tr(
+            "It is edited in its own document; every change saved there "
+            "shows here. Open it now?"))
+        opener = box.addButton(tr("Open {name}", name=path.name),
+                               QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(opener)
+        box.exec()
+        if box.clickedButton() is not opener:
+            return
+        window = getattr(self, "window", None)
+        window = window() if callable(window) else None
+        opener_fn = getattr(window, "open_path", None)
+        if callable(opener_fn):
+            opener_fn(path)
+
     def begin_group_edit(self, group) -> None:
         """Enter a group for editing (double-click-into-group). A
         component instance opens on a world copy of its definition; the
@@ -17391,6 +17425,13 @@ class Viewport(QOpenGLWidget):
         from core.outliner import locked_on_path
         if locked_on_path(self.scene.groups, group):
             self.flash_status(tr("Unlock it first"), 3000)
+            return
+        # A linked document (core/links.py) is edited in its own file: going
+        # into it offers to open that file instead.
+        from core import links
+        linked = links.linked_ancestor(group)
+        if linked is not None:
+            self._offer_link_source(linked)
             return
         parent = self.scene.edit_group
         in_definition = (parent is not None

@@ -645,14 +645,21 @@ def prepare_scene_steps(scene, mesh_steps=None):
         proto_index: dict = {}
         protos: list = []
 
+        from core import links as _links
+
         def _entry(g):
             xf = getattr(g, "xform", None)
+            # A linked file (unpacked) is saved as an empty placement with
+            # its link: the source holds the geometry (core/links.py).
+            placeholder = xf is not None and _links.save_as_placeholder(
+                g, scene)
             if xf is not None:
-                idx = proto_index.get(id(g.mesh))
+                mesh = _empty_mesh() if placeholder else g.mesh
+                idx = proto_index.get(id(mesh))
                 if idx is None:
-                    idx = proto_index[id(g.mesh)] = len(protos)
+                    idx = proto_index[id(mesh)] = len(protos)
                     protos.append(None)          # reserve: recursion is depth
-                    protos[idx] = yield from block(g.mesh)
+                    protos[idx] = yield from block(mesh)
                 entry = {"proto": idx,
                          "xform": [float(x) for x in xf.data()]}
                 # Group or component (issue #90): a group of groups and a
@@ -707,7 +714,7 @@ def prepare_scene_steps(scene, mesh_steps=None):
                 entry["exploded"] = dict(g.exploded)
             if getattr(g, "explode_offset", None):
                 entry["explode_offset"] = list(g.explode_offset)
-            kids = getattr(g, "children", None)
+            kids = None if placeholder else getattr(g, "children", None)
             if kids:
                 entry["children"] = []
                 for c in kids:
@@ -1076,6 +1083,17 @@ def _unpack_photo_mesh(payload: dict, archive):
     return unpack_mesh(meta, read_blob)
 
 
+_EMPTY = []
+
+
+def _empty_mesh():
+    """The one empty mesh every linked placeholder is written with."""
+    if not _EMPTY:
+        from core.mesh import Mesh
+        _EMPTY.append(Mesh())
+    return _EMPTY[0]
+
+
 def load_into(scene, path: Path, progress=None) -> None:
     """Replace ``scene`` contents with what's stored at ``path``.
 
@@ -1093,6 +1111,16 @@ def load_into(scene, path: Path, progress=None) -> None:
     finally:
         if _gc_was_enabled:
             gc.enable()
+    # Linked files: the copies are filled in from their sources. A source
+    # that cannot be read leaves its copies empty — the document still opens
+    # (scene.link_errors says which, for the window to report).
+    from core import links
+    scene.link_errors = {}
+    if links.linked_groups(scene):
+        try:
+            links.resolve(scene, Path(path))
+        except Exception as exc:  # noqa: BLE001 — never fail the open
+            scene.link_errors = {"": str(exc)}
 
 
 #: Entities left out of the document being opened because a coordinate

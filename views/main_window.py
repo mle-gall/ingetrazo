@@ -3200,6 +3200,26 @@ class MainWindow(QMainWindow):
 
         actions.append(self._separator())
 
+        # Linking is not an import — the file stays a document of its own —
+        # so it has its own place in File, next to its management menu
+        # (built further down, after Import). Maxence, 2026-11-07: «should
+        # there be a File ▸ Link option?».
+        link_action = QAction(tr("Link Document…"), self)
+        link_action.setStatusTip(tr(
+            "Place another IngeTrazo document as a live link: it stays its "
+            "own file, and every change saved to it shows here."))
+        link_action.setShortcut(QKeySequence("Ctrl+Shift+L"))
+        link_action.triggered.connect(self._on_link_igz)
+        actions.append(link_action)
+        self._act_link_document = link_action
+        # Linked documents (core/links.py): built when it opens, one entry
+        # per source — open, reload, pack, tags as the source has them.
+        links_menu = QMenu(tr("Linked Documents"), self)
+        links_menu.aboutToShow.connect(
+            lambda m=links_menu: self._fill_links_menu(m))
+        actions.append(links_menu)
+        actions.append(self._separator())
+
         # One home for everything that comes in, one for everything that
         # goes out — the flat list had import/export items scattered.
         import_menu = QMenu(tr("Import"), self)
@@ -3266,6 +3286,7 @@ class MainWindow(QMainWindow):
         clear_tex.triggered.connect(self._on_clear_texture_cache)
         import_menu.addAction(clear_tex)
         actions.append(import_menu)
+
 
         export_menu = QMenu(tr("Export"), self)
         for label, tip, handler in (
@@ -6826,6 +6847,7 @@ class MainWindow(QMainWindow):
             self._apply_camera_home()
             self._current_path = path
             self._remember_recent(path)
+            self._after_links_loaded()
             self._import_name = None
             self._autosaved_version = None
             # A recovered drawing is NOT the file on disk yet: keep it dirty so
@@ -6956,6 +6978,9 @@ class MainWindow(QMainWindow):
                     tr("Could not write the backup copy."), 4000)
         try:
             self.viewport.scene.camera_home = self._camera_dict()
+            # Linked files: their paths relative to where this is saved.
+            from core import links as _links
+            _links.refresh_paths(self.viewport.scene, path)
             stats = igz_format.save_scene(self.viewport.scene, path) or {}
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, tr("Save failed"), str(exc))
@@ -7748,6 +7773,156 @@ class MainWindow(QMainWindow):
         key = keys[labels.index(label)]
         QSettings().setValue("import/obj_unit", key)
         return OBJ_UNITS[key]
+
+    # ---- linked documents (core/links.py) ------------------------------------
+    def _link_watcher(self):
+        watcher = self.__dict__.get("_links_watch")
+        if watcher is None:
+            from views.link_watcher import LinkWatcher
+            watcher = self._links_watch = LinkWatcher(self)
+        return watcher
+
+    def _after_links_loaded(self) -> None:
+        """A document was opened: watch its sources, and say which could
+        not be read (their copies stay in place, empty, until found)."""
+        self._link_watcher().refresh()
+        errors = getattr(self.viewport.scene, "link_errors", None) or {}
+        if errors:
+            QMessageBox.warning(
+                self, tr("Linked files"),
+                tr("Some linked documents could not be loaded; their copies "
+                   "stay in place, empty, until the files are found:")
+                + "\n\n" + "\n".join(f"• {e}" for e in errors.values()))
+
+    def _on_link_igz(self) -> None:
+        """Place another document as a live link (core/links.py)."""
+        from core import links
+        start = (str(self._current_path.parent)
+                 if self._current_path is not None else "")
+        path_str, _ = file_dialogs.getOpenFileName(
+            self, tr("Link IngeTrazo document"), start, IGZ_FILE_FILTER)
+        if not path_str:
+            return
+        try:
+            self.link_igz_path(path_str)
+        except links.LinkError as exc:
+            QMessageBox.warning(self, tr("Link IngeTrazo document"),
+                                str(exc))
+
+    def link_igz_path(self, path, at=None):
+        """Place the document at ``path`` as a linked copy — following the
+        cursor (``at=None``) or at once at ``at``. Raises LinkError."""
+        from PySide6.QtCore import Qt as _Qt
+        from PySide6.QtGui import QVector3D
+        from PySide6.QtWidgets import QApplication
+        from core import links
+        self.viewport.end_group_edit()
+        # A big document takes seconds to read: say so, or the window looks
+        # frozen (Maxence, 2026-11-07: «didn't work»).
+        self.statusBar().showMessage(
+            tr("Linking {name}…", name=Path(path).name))
+        QApplication.setOverrideCursor(_Qt.WaitCursor)
+        QApplication.processEvents()
+        try:
+            comp = links.make_link(self.viewport.scene, Path(path),
+                                   host_path=self._current_path)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.statusBar().showMessage(
+            tr("Click to place {name}", name=Path(path).name), 5000)
+        origin = QVector3D(0.0, 0.0, 0.0)
+        if at is None:
+            self._start_place(comp, anchor=origin)
+        else:
+            from tools.place_group import PlaceGroupTool
+            point = at if isinstance(at, QVector3D) else QVector3D(*at)
+            PlaceGroupTool(comp, anchor=origin).place_at(self.viewport, point)
+        self._link_watcher().refresh()
+        self._refresh_layer_views()
+        return comp
+
+    def _refresh_layer_views(self) -> None:
+        dock = getattr(self, "layers_dock", None)
+        refresh = getattr(getattr(dock, "panel", None), "refresh", None)
+        if callable(refresh):
+            refresh()
+
+    def _fill_links_menu(self, menu) -> None:
+        """File ▸ Linked Files: one submenu per source — open it, reload
+        it, pack it into this document, show its tags as it has them."""
+        from core import links
+        menu.clear()
+        scene = self.viewport.scene
+        paths = links.sources(scene)
+        if not paths:
+            act = menu.addAction(tr("No linked documents"))
+            act.setEnabled(False)
+            return
+        for path in paths:
+            name = Path(path).name
+            sub = menu.addMenu(name if Path(path).is_file()
+                               else tr("{name} (missing)", name=name))
+            sub.setToolTipsVisible(True)
+            sub.addAction(tr("Open"), lambda p=path: self.open_path(Path(p)))
+            sub.addAction(tr("Reload"), lambda p=path: self._reload_link(p))
+            pack = sub.addAction(tr("Pack into this document"))
+            pack.setCheckable(True)
+            pack.setChecked(links.is_packed(scene, path))
+            pack.setToolTip(tr(
+                "Keep the linked geometry inside this file, so it opens "
+                "without the source. Unchecked, only the link is saved."))
+            pack.toggled.connect(lambda on, p=path: self._pack_link(p, on))
+            sub.addAction(tr("Show tags as the source has them"),
+                          lambda p=path: self._reset_link_tags(p))
+        menu.addSeparator()
+        menu.addAction(tr("Reload all"), self._reload_all_links)
+
+    def _relink_done(self, note: str) -> None:
+        from core.history import _dirty_group_chunks
+        _dirty_group_chunks(self.viewport.scene)
+        self.viewport.notify_scene_changed()
+        self.viewport.update()
+        self._refresh_layer_views()
+        self._link_watcher().refresh()
+        if note:
+            self.statusBar().showMessage(note, 4000)
+
+    def _reload_link(self, path) -> None:
+        from core import links
+        try:
+            links.reload(self.viewport.scene, path, self._current_path)
+        except links.LinkError as exc:
+            QMessageBox.warning(self, tr("Linked files"), str(exc))
+            return
+        self._relink_done(tr("Reloaded {names}", names=Path(path).name))
+
+    def _reload_all_links(self) -> None:
+        from core import links
+        errors = links.resolve(self.viewport.scene, self._current_path)
+        self._relink_done(tr("Linked documents reloaded"))
+        if errors:
+            QMessageBox.warning(self, tr("Linked files"),
+                                "\n".join(errors.values()))
+
+    def _pack_link(self, path, on: bool) -> None:
+        from core import links
+        links.set_packed(self.viewport.scene, path, on)
+        self.viewport.scene.version += 1          # the file changes
+        if not on and Path(path).is_file():
+            self._reload_link(path)
+        else:
+            self._relink_done(tr("{name} will be saved inside this document",
+                                 name=Path(path).name) if on else "")
+
+    def _reset_link_tags(self, path) -> None:
+        from core import links
+        try:
+            links.clear_overrides(self.viewport.scene, path,
+                                  self._current_path)
+        except links.LinkError as exc:
+            QMessageBox.warning(self, tr("Linked files"), str(exc))
+            return
+        self._relink_done("")
 
     def _on_import_igz(self) -> None:
         """Bring another IngeTrazo document in as ONE component, placed
