@@ -86,6 +86,13 @@ cuerpo nunca llega a leerse. Aun así, **detén el puente cuando no lo uses**.
 | `query_layers` / `set_layer_visibility` | Capas, carpetas y visibilidad (usa el historial de estados de capas). |
 | `query_camera` / `set_camera` / `zoom_to` | Consulta y dirige la cámara; encuadra grupos o la selección. |
 | `query_changes` / `query_status` | Cambios desde una revisión y variables JSON publicadas. |
+| `query_record` / `query_records` | Fichas, tipos resueltos, problemas de validación y grupos sin clasificar; paginación y totales. |
+| `query_vocabulary` / `query_registry` | Clases, propiedades comunes y vocabulario del registro del proyecto. |
+| `set_record` / `tag` / `untag` | Edita las fichas de varios grupos en un paso de undo; valida antes de aplicar. |
+| `add_classification` / `remove_classification` | Combina o elimina clasificaciones por objeto en un paso de undo. |
+| `set_registry` / `add_classification_system` / `import_classification_codes` | Sustituye el registro, añade un espacio de clasificación o importa códigos CSV. |
+| `set_type` / `set_system` | Crea o sustituye tipos y sistemas del proyecto. |
+| `delete_type` / `delete_system` / `delete_classification_system` | Elimina entradas; rechaza referencias activas salvo con `force=true`. |
 | `list_tools` | Catálogo vivo, incluidas las herramientas de extensiones. |
 | `screenshot` | Renderiza el viewport real; `uids` encuadra grupos antes de capturar y devuelve la cámara usada. |
 | `undo` / `redo` | La historia de siempre. |
@@ -235,3 +242,35 @@ otherwise the selection, otherwise the model. An explicit empty uid list is
 a no-op. Screenshots render synchronously through `render_image`; optional
 uids frame first, and the response includes the camera used. MCP returns the
 image with camera metadata as an additional text content block.
+
+## Classifying a model with an agent
+
+Start with `query_records(untagged=True)` and inspect each page using
+`query_entity(uid=...)` and `screenshot(uids=[...])`. Learn the available
+classes, predefined types and common property templates with `query_vocabulary`.
+Its default response gives code counts; request `classification_system` for a
+namespace's codes or `search` for a substring in code/title, with `offset` and
+`limit` (default 200, maximum 1000).
+
+Use `tag`, `set_record` and `add_classification` to classify batches of placements.
+Each successful write is one undo step. Unknown uids fail before editing;
+validation rejection returns `applied=false`, current records, and proposed
+problems keyed by uid. `force=true` on `set_record` permits invalid records.
+Patches replace top-level fields (including whole lists and psets); a null patch
+removes the record. Classification helpers preserve each object's other codes.
+An omitted classification name uses the registry title, or the code itself when
+no title is registered. An omitted tag name preserves the current record name.
+
+Read `query_records` again and inspect rows whose `problems` count is nonzero;
+`query_record` gives the messages and resolved type defaults. Totals always cover
+the entire model, regardless of filters; rows follow outliner order and `path`
+contains ancestor names. Filters use stored records; name matches the outliner
+name by case-insensitive substring. `schema` defaults to IFC4 (`validate_schema`
+for `set_record`). Classification conveniences validate against IFC4.
+
+Maintain types and systems with the registry tools. Delete operations return
+referencing uids and `applied=false` unless forced. A forced deletion leaves those
+references for later repair; the resulting registry must still pass its own
+validator. `set_registry` is a validated whole-document replacement.
+Use `query_changes` to see what the agent did, then have a human review the
+classification in the BIM panel.
