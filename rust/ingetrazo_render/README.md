@@ -145,3 +145,37 @@ Use `scripts/wgpu_r1_smoke.py` for the bounded native API/overlay experiment.
 Use `scripts/wgpu_spike.py MODEL --measure --interval 16 [--no-edges]` for
 paced measurements; `--interval 0` retains the unpaced spike methodology.
 The direct/transitive NumPy dependency licenses are included in licenses.txt.
+
+## R1b whole-scene bake (2026-11-08)
+
+`ingetrazo_core.bake_scene` takes contiguous concatenated position float32,
+corner/ring-size/ring-count int64, RGBA uint8 palette, per-face hidden bool,
+edge int64 pairs, edge uint8 flags, `(P+1,5)` int64 prefix offsets, and
+per-face int64 palette indices. Offset columns address positions, corners,
+ring sizes, faces, and edges respectively. Corner and edge indices remain
+local to their prototype; palette indices address the concatenated palette.
+
+The returned arrays are vertex bytes, uint32 local indices, float32 padded
+AABBs, and uint32 prototype triples `(first_index, face_count, edge_count)`.
+Base vertex equals first index because every emitted vertex has one index.
+Faces precede edges inside each prototype. `PyArray1::from_vec` transfers
+ownership of each Rust allocation to NumPy without copying output storage.
+Inputs are borrowed/copied during the synchronous call and must not be mutated
+by another thread until it returns. The GIL is released for parallel work.
+
+The count pass retains triangle indices/normals and deduplicated boundary
+edges. Prefix offsets partition the final allocations into disjoint mutable
+slices; Rayon fills them across meshes without a packed-buffer concatenation.
+Deferred source positions/rings are used without welding or constructing a
+Plan. Source edge flags are accumulated for duplicate index pairs, and absent
+ring boundary edges are appended. Geometrically coincident *distinct* source
+indices are intentionally not welded. Built meshes use `arrays_of` once and
+append their edge/unused positions for bounds. Legacy `bake_mesh` remains a
+parity reference, not the production scene path.
+
+Large resident polygons use an x-sorted bounding-box candidate index for ear
+clipping. Candidate filtering preserves the original ear choices and triangle
+order. The ordinary GL triangulation keeps its original unindexed path.
+`PackedScene.timings` exposes Python handoff, native-call and finishing times,
+plus process peak RSS at build completion (bytes on macOS). The spike script
+reports first picture both including load and measured from load completion.
