@@ -7,14 +7,15 @@ from collections import defaultdict
 from pathlib import Path
 
 from core import bim_registry, record
-from core.bim import collect_objects, class_quantities, _placed_groups, _tagged_group_faces, _compose
+from core.bim import collect_objects, class_quantities, class_quantities_arrays, _placed_groups, _compose
 from core.ifc_identity import object_guid, stable_guid
 from core.ifc_tables import TABLES, predefined_types
 from core.version import __version__
 from .entities import Builder
 from core.ifc_tables_data import SCHEMA_DATA
 from .relationships import Appearance
-from .geometry import _brep
+from .geometry import _brep, array_body
+from core.geometry_arrays import world_arrays, merged, faces_arrays, quantities, measurements
 from .step import _s, _f
 from .ids import check_ids
 
@@ -44,6 +45,9 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
     config = registry.get('export_profiles', {}).get(profile, {}) if profile else {}
     if profile and profile not in registry.get('export_profiles', {}):
         raise ValueError('Unknown export profile: ' + profile)
+    geometry = config.get('geometry', 'brep')
+    if geometry not in ('brep', 'polygonal'):
+        raise ValueError('Unsupported geometry: ' + geometry)
     schema = config.get('schema', 'IFC4')
     if schema not in ('IFC4', 'IFC4X3_ADD2'):
         raise ValueError('Unsupported schema: ' + schema)
@@ -199,15 +203,26 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
             cls = 'IfcFacilityPartCommon'
             r['object_type'] = r.get('object_type') or original
         excluded = {o['group_uid'] for o in r.get('openings', []) if o.get('group_uid')}
-        faces = _tagged_group_faces(group, bases[id(group)], excluded) if group is not None else obj['faces']
+        if group is not None:
+            arrays = merged(world_arrays(group, bases[id(group)], excluded))
+            # Appearance needs attributes only, never geometric face objects.
+            from core.mesh import face_attrs
+            from core.bim import _untagged_part
+            from core.group import iter_placements
+            attributes = [attrs for placed, _ in iter_placements(_untagged_part(group, excluded))
+                          for attrs in face_attrs(placed.mesh)]
+            faces = []
+        else:
+            faces = obj['faces']
+            arrays = faces_arrays(faces)
         eg = object_guid(scene, obj)
         attrs = dict(GlobalId=_s(eg), OwnerHistory=owner,
                      Name=_s(raw.get('name') or (group.name if group is not None else obj['name']) or cls),
                      Description=_s(r.get('description', '')), ObjectType=_s(r.get('object_type', '')),
                      ObjectPlacement=ref(placement))
         rep, item = None, None
-        if faces:
-            rep = _brep(w, faces, body)
+        if len(arrays.ring_counts):
+            rep = array_body(w, arrays, body, geometry)
             item = w.last_shape_item
             attrs['Representation'] = ref(w.add('IFCPRODUCTDEFINITIONSHAPE', '$', '$', refs([rep])))
         available = w.attributes(cls)
@@ -226,7 +241,7 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
             from PySide6.QtGui import QVector3D
             matrix = _compose(bases[id(group)], group.xform) if group is not None else None
             attrs['Elevation'] = _f(matrix.map(QVector3D()).z() if matrix is not None else 0)
-        qname, qentries, _ = class_quantities(original, faces)
+        qname, qentries, _ = class_quantities_arrays(original, arrays) if group is not None else class_quantities(original, faces)
         dims = {name: value for kind, name, value in qentries}
         if cls in ('IfcDoor', 'IfcWindow'):
             for attr, dim in [('OverallHeight', 'Height'), ('OverallWidth', 'Width')]:
@@ -240,7 +255,12 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
                 attrs['BarLength'] = _f(dims['Length'])
         attrs = {k: v for k, v in attrs.items() if k in available}
         node = w.entity(cls, **attrs)
-        appearance.apply(r, group, faces, node, eg, rep, item)
+        if group is not None:
+            data = measurements(arrays)
+            appearance.apply(r, group, faces, node, eg, rep, item,
+                             attributes, data[0] if data is not None else [])
+        else:
+            appearance.apply(r, group, faces, node, eg, rep, item)
         for index, opening in enumerate(r.get('openings', [])):
             from core.mesh import Mesh
             from core.ifc_identity import ensure_guid
@@ -249,13 +269,13 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
             for face in opening.get('faces', []):
                 mesh.add_face([QVector3D(*p) for p in face['outer']],
                               [[QVector3D(*p) for p in hole] for hole in face.get('holes', [])] or None)
-            ofaces = list(mesh.faces)
+            oarrays = faces_arrays(mesh.faces)
             if opening.get('group_uid'):
                 child = next((g for g, _ in _placed_groups(group.children) if g.uid == opening['group_uid']), None)
                 if child is not None:
-                    ofaces = _tagged_group_faces(child, bases[id(child)])
+                    oarrays = merged(world_arrays(child, bases[id(child)]))
             from core.bim import face_set_volume
-            if not ofaces or face_set_volume(ofaces) is None:
+            if quantities(oarrays)[2] is None:
                 problems.append({'uid': getattr(group, 'uid', ''), 'name': opening.get('name', ''),
                                  'messages': ['Opening requires a closed face set or a valid closed child group']})
                 continue
@@ -270,8 +290,8 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
             og = stored['guid']
             oa = dict(GlobalId=_s(og), Name=_s(opening.get('name', 'Opening')),
                       ObjectPlacement=ref(placement), PredefinedType='.OPENING.')
-            if ofaces:
-                orep = _brep(w, ofaces, body)
+            if len(oarrays.ring_counts):
+                orep = array_body(w, oarrays, body, geometry)
                 oa['Representation'] = ref(w.entity('IfcProductDefinitionShape', Representations=refs([orep])))
             onode = w.entity('IfcOpeningElement', **oa)
             opening_nodes[og] = onode
