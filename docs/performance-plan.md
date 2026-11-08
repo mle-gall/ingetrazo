@@ -130,3 +130,108 @@ P0 is half a session. P1 and P3 are a session each and pay the most
 "feel" per line. P2 is the big one (touches chunks, picks, move/rotate
 paths) — a full session with the regression suite as the net. P4 rides
 wherever the telemetry points. P5 only on evidence.
+
+## P6 — array geometry for takeoff and export (2026-11-08)
+
+`core.geometry_arrays` reads deferred Plans directly and caches built-mesh
+extraction by mutation serial. Owned placements exclude tagged descendants and
+opening groups. Their world positions are welded before ring-edge occurrence
+counting, so separately placed open pieces can form one watertight object.
+Newell vectors measure gross/net area and anchored float64 volume; hole winding
+is normalized for the volume sum to match triangulation's treatment of holes.
+
+Takeoff, class quantities, CSV, the BIM tray, spatial bodies and openings now
+consume arrays. Face tags inside group definitions also stay deferred, including
+persistent IFC identity updates. Only legacy scene-level loose-face objects
+retain the face-based quantity path. Existing explicit face consumers are
+unchanged. IFC material weighting reads face metadata in face order without
+constructing faces. The default remains BRep; an export profile can select
+`"geometry": "polygonal"` for IFC4 or IFC4X3_ADD2. Polygonal bodies contain one
+point list and face set, with indexed faces and indexed faces with voids.
+
+Reproduce with Python 3.13, NumPy 2.5.4, PySide6 6.11.3 and ifcopenshell
+0.9.0.post1, without the Rust wheel:
+
+```sh
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/benchmark_array_geometry.py \
+  /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz \
+  --output .array-benchmark
+```
+
+The input is read-only; outputs go to the worktree. The run found 1,482 tagged
+objects and retained all 15,906 deferred group meshes after each export. Baseline
+numbers below are the supplied earlier measurements, not a rerun that would
+materialize the entire model. The new run overlapped the bounded test suite;
+wall times are subject to contention (cold runs ranged from 45.9 to 86.0 s).
+
+| Operation | Earlier Python-face path | Arrays |
+| --- | ---: | ---: |
+| Load | approximately 10–16 s | 14.95 s |
+| Cold takeoff | 951 s | 85.97 s |
+| Warm takeoff, no memo | — | 54.82 s |
+| Unchanged-scene memo takeoff | — | 0.54 s |
+| BRep export (including takeoff) | 781 s | 153.61 s |
+| BRep file | approximately 1.37 GB | 1,367,097,328 bytes |
+| Polygonal export (including takeoff) | — | 109.79 s |
+| Polygonal file | — | 654,530,304 bytes |
+
+BRep is 5.1× faster than the supplied baseline; polygonal export is 7.1× faster
+and produces a file 52.1% smaller than the new BRep. Process peak RSS was
+1,954,168,832 bytes after warm takeoff and 11,783,258,112 bytes after BRep.
+The two exports share a process, so its polygonal-stage RSS high-water mark
+still includes the preceding BRep. BRep's in-memory STEP lines and final text
+remain a substantial allocation; this change does not introduce a streaming
+STEP writer. `--geometry polygonal` measures that profile in isolation.
+
+A separate fresh process using the same command with `--geometry polygonal`
+measured a **5,325,602,816-byte peak RSS**, 110.77 s export time and the identical
+654,530,304-byte output. In that run, cold/warm/memo takeoff took
+45.87 / 32.93 / 0.30 s, with 3,462,086,656-byte peak RSS before export.
+All deferred group meshes remained deferred in both runs.
+
+Cold and non-memoized takeoff remain above five seconds, so
+`LIVE_TAKEOFF_LIMIT` stays at 2,000. The array path removes Python geometry
+allocation, but NumPy planning, welding, and edge counting are still significant.
+
+Twenty small tagged leaf objects from the ride were compared with the old
+Python path (at most 100 faces each). Areas, net areas and volumes agreed within
+2e-5 relative / 1e-7 absolute tolerance; maximum observed relative error was
+1.805725e-6. Bit-for-bit equality is not promised: Qt's float32 geometry and
+NumPy's float64 reductions round differently. Regression cases also cover
+holes with either winding, nested transforms, large-coordinate anchored volume,
+a closed shell split across placements, open sheets, tagged/excluded children,
+cache invalidation, loose-face compatibility, deferred face tags and GUID
+persistence, deferred material weighting, and IFC4/IFC4X3_ADD2 readback with
+EXPRESS-rule validation for both geometry profiles.
+
+Final focused validation:
+
+```sh
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest \
+  tests/test_geometry_arrays.py tests/test_bim.py \
+  tests/test_bim_grouped_tags.py tests/test_bim_reinforcing_bar.py \
+  tests/test_ifc_export.py tests/test_ifc_records_export.py \
+  tests/test_ifc_vocabulary_relationships.py -q
+```
+
+Result: **72 passed, 2 skipped** (30.03 s). The standalone array test file has
+17 passing tests, including schema/profile/closure parameter combinations.
+The required bounded suite command is:
+
+```sh
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'
+```
+
+Bounded-suite result: **22 failed, 6,917 passed, 303 skipped, 2 xfailed,
+805 deselected, 56 warnings in 1,488 s** (six batches, run once).
+Nineteen failures match the supplied baseline: 14 translation cases (including
+Arabic), cursor picking, extension wrapping, hidden-panel lifetime, swatch tooltip,
+and toolbar bold text. Three additional first-batch failures were in
+`test_ifc_vocabulary_relationships.py` (both relationship round trips and the child
+opening/material fallback). They exposed a local `quantities` name collision in
+`save_ifc`; the array quantity import is now aliased. The affected file then
+passed all 16 tests, and the final combined focused run passed 72 tests with two
+skips. The bounded run was not repeated after that fix; no new failure remains
+unaddressed. Local logs are `.bounded-suite.log`, `.validation-final.log`,
+`.benchmark-final.log`, `.benchmark-polygonal.log` and `.sample-quantities.log`.
+Generated large IFC files were removed after measurement.

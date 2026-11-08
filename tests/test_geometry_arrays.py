@@ -100,7 +100,7 @@ def test_legacy_loose_faces():
 @pytest.mark.parametrize('geometry', ['brep', 'polygonal'])
 @pytest.mark.parametrize('closed', [True, False])
 def test_export_readback(tmp_path, schema, geometry, closed):
-    import ifcopenshell
+    ifcopenshell = pytest.importorskip('ifcopenshell')
     import ifcopenshell.validate
     from formats.ifc import save_ifc
     scene = Scene()
@@ -150,7 +150,7 @@ def test_loaded_takeoff_stays_deferred(tmp_path, monkeypatch):
     assert '_deferred' in mesh.__dict__
     from formats.ifc import save_ifc
     save_ifc(loaded, tmp_path / 'lazy.ifc')
-    import ifcopenshell
+    ifcopenshell = pytest.importorskip('ifcopenshell')
     model = ifcopenshell.open(str(tmp_path / 'lazy.ifc'))
     assert model.by_type('IfcMaterial')[0].Name == 'Majority'
     assert '_deferred' in mesh.__dict__
@@ -200,7 +200,7 @@ def test_untagged_loose_mesh_stays_deferred(tmp_path, monkeypatch):
 def test_deferred_face_tags_inside_group_and_identity(tmp_path, monkeypatch):
     from formats import igz
     from formats.ifc import save_ifc
-    import ifcopenshell
+    ifcopenshell = pytest.importorskip('ifcopenshell')
     import core._native as native
     monkeypatch.setattr(igz, '_LARGE_DOCUMENT', 0)
     monkeypatch.setattr(igz, '_BULK_MIN', 1)

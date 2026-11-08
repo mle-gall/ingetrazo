@@ -24,6 +24,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('input', type=Path)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--geometry', nargs='+', choices=('brep', 'polygonal'),
+                        default=['brep', 'polygonal'])
     args = parser.parse_args()
     app = QApplication([])
     scene = Scene()
@@ -59,7 +61,7 @@ def main():
         return result
 
     exporter.array_body = body
-    for geometry in ('brep', 'polygonal'):
+    for geometry in args.geometry:
         scene.plugin_data.setdefault('bim_registry', {}).setdefault('export_profiles', {})['array-benchmark'] = {'geometry': geometry}
         path = args.output / (geometry + '.ifc')
         report = measure(geometry, lambda: save_ifc(scene, path, profile='array-benchmark'))
