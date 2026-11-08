@@ -21,6 +21,8 @@ class WgpuView(QWidget):
         self.renderer = None
         self.packed = None
         self._scene_dirty = False
+        self.overlay_primitives = []
+        self.overlay_ms = 0.
         self.last = None
         self.build_seconds = self.upload_seconds = 0.
 
@@ -88,6 +90,13 @@ class WgpuView(QWidget):
             self.renderer.resize(*physical)
             self._physical_size = physical
         self.renderer.set_camera(self.camera.view_matrix().data(), self.camera.projection_matrix().data())
+        if self.overlay_primitives or getattr(self, "_had_overlay", False):
+            from views.wgpu_overlay import rasterize, pixels
+            before = time.perf_counter()
+            image = rasterize(self.overlay_primitives, self.width(), self.height(), self.devicePixelRatioF())
+            self.renderer.set_overlay(image.width(), image.height(), pixels(image))
+            self.overlay_ms = (time.perf_counter() - before) * 1000
+            self._had_overlay = bool(self.overlay_primitives)
         cpu, gpu = self.renderer.render()
         wall = (time.perf_counter()-start)*1000
         self.frameReady.emit(cpu, gpu, wall)

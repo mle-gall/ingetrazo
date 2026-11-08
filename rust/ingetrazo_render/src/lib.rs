@@ -1,4 +1,5 @@
 //! A resident Metal scene: compute compaction precedes native indirect draws.
+mod overlay;
 use numpy::PyReadonlyArray1;
 use pyo3::{exceptions::PyValueError, prelude::*};
 use raw_window_handle::{
@@ -37,6 +38,9 @@ struct Scene {
 }
 #[pyclass(unsendable)]
 struct Renderer {
+    capture_next: bool,
+    captured: Option<Vec<u8>>,
+    overlay: overlay::Overlay,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -153,7 +157,7 @@ impl Renderer {
         let w = ((width as f64 * scale) as u32).max(1);
         let h = ((height as f64 * scale) as u32).max(1);
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             format,
             width: w,
             height: h,
@@ -283,6 +287,9 @@ impl Renderer {
             wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         );
         Ok(Self {
+            capture_next: false,
+            captured: None,
+            overlay: overlay::Overlay::new(&device, format),
             depth: texture(&device, w, h, wgpu::TextureFormat::Depth32Float),
             ids: texture(&device, w, h, wgpu::TextureFormat::R32Uint),
             timings: (0..4)
@@ -694,11 +701,72 @@ impl Renderer {
                 }
             }
         }
+        self.overlay
+            .draw(&mut e, &color, self.config.width, self.config.height);
         if let (Some(q), Some(k)) = (&self.queries, timing_slot) {
             e.resolve_query_set(q, 0..4, &self.resolve, 0);
             e.copy_buffer_to_buffer(&self.resolve, 0, &self.timings[k].read, 0, 32);
         }
+        let stride = (self.config.width * 4).div_ceil(256) * 256;
+        let capture = self.capture_next.then(|| {
+            let read = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("surface capture"),
+                size: stride as u64 * self.config.height as u64,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            e.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &frame.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &read,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(stride),
+                        rows_per_image: Some(self.config.height),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: self.config.width,
+                    height: self.config.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            read
+        });
         self.queue.submit([e.finish()]);
+        if let Some(read) = capture {
+            let (tx, rx) = std::sync::mpsc::channel();
+            read.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+                let _ = tx.send(r);
+            });
+            self.device.poll(wgpu::Maintain::Wait);
+            rx.recv()
+                .map_err(|e| PyValueError::new_err(e.to_string()))?
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            let mapped = read.slice(..).get_mapped_range();
+            let mut rgba =
+                Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
+            for row in mapped.chunks_exact(stride as usize) {
+                rgba.extend_from_slice(&row[..self.config.width as usize * 4]);
+            }
+            if matches!(
+                self.config.format,
+                wgpu::TextureFormat::Bgra8UnormSrgb | wgpu::TextureFormat::Bgra8Unorm
+            ) {
+                for pixel in rgba.chunks_exact_mut(4) {
+                    pixel.swap(0, 2);
+                }
+            }
+            drop(mapped);
+            read.unmap();
+            self.captured = Some(rgba);
+            self.capture_next = false;
+        }
         frame.present();
         let cpu = start.elapsed().as_secs_f64() * 1000.;
         if let (Some(_), Some(k)) = (&self.queries, timing_slot) {
@@ -713,6 +781,31 @@ impl Renderer {
         }
         self.last_cpu = cpu;
         Ok((cpu, self.last_gpu))
+    }
+    fn request_capture(&mut self) {
+        self.capture_next = true;
+    }
+    fn take_capture(&mut self) -> Option<Vec<u8>> {
+        self.captured.take()
+    }
+    fn set_overlay(
+        &mut self,
+        width: u32,
+        height: u32,
+        rgba: PyReadonlyArray1<'_, u8>,
+    ) -> PyResult<()> {
+        let bytes = rgba.as_slice()?;
+        if width != self.config.width
+            || height != self.config.height
+            || bytes.len() as u64 != width as u64 * height as u64 * 4
+        {
+            return Err(PyValueError::new_err(
+                "overlay must match physical surface RGBA dimensions",
+            ));
+        }
+        self.overlay
+            .upload(&self.device, &self.queue, width, height, bytes);
+        Ok(())
     }
     fn last_timings(&self) -> (f64, Option<f64>, f64) {
         (self.last_cpu, self.last_gpu, self.last_acquire)

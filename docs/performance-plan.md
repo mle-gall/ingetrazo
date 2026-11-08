@@ -786,3 +786,32 @@ The batch totals and failure names are in `validation.txt`. The later small
 built-mesh remap/palette adjustments were also checked with the focused
 14-test packing suite while the full run was in progress. No GL viewport
 behavior or expected baseline tests were changed.
+
+## R2 — 2026-11-08: native overlay foundation
+
+The first overlay gate has a positive **GPU surface capture** on macOS/Metal:
+[ride plus overlays](benchmarks/wgpu-r2-2026-11-08/overlay-surface.png).
+Qt rasterizes logical-pixel primitives into a straight-alpha RGBA image at
+physical resolution; wgpu samples an sRGB texture and alpha-composites it in
+a separate pass after scene drawing. The ID attachment is untouched.
+No native sibling widget is involved.
+
+On the 76,029-placement ride model, at 1000×700 logical / 2000×1400 physical,
+120 paced frames measured CPU rasterization plus texture upload at
+2.930 / 3.430 / 5.479 ms min/average/max. This excludes GPU compositing time;
+it is not the full frame budget. The captured badge pixel is exactly
+RGBA (255, 0, 0, 255). JSON and reproduction script:
+[overlay.json](benchmarks/wgpu-r2-2026-11-08/overlay.json),
+[scripts/wgpu_r2_overlay.py](../scripts/wgpu_r2_overlay.py).
+The explicit capture reads the actual swapchain texture after compositing,
+before presentation, and waits only when requested. Normal frames do not wait
+for capture. Qt's OS window-grab API returned unrelated foreground content,
+which was deleted; OS compositor/window-stacking capture is not validated.
+
+The primitive API supports polylines, polygons, rectangles, points, text,
+snap glyphs and projected axes. Empty lists clear a previous overlay.
+Resize invalidates the texture dimensions; stale-sized overlays are skipped.
+The production GL renderer is unchanged. No new Cargo dependencies.
+
+This section records incremental R2 work, not completion of its interaction
+or performance gates.
