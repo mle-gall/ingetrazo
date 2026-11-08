@@ -130,3 +130,85 @@ def test_native_bake_rejects_invalid_ring_shape():
             np.zeros((3, 3), np.float32), np.arange(3, dtype=np.int64),
             np.array([-3], np.int64), np.array([1], np.int64),
             np.zeros((1, 4), np.uint8), np.zeros(1, bool), _native.qt_hypot())
+
+
+def test_batch_matches_reference_with_holes_concavity_and_legacy(tmp_path, monkeypatch):
+    from formats import igz
+    from views.wgpu_scene import bake_mesh
+    mesh = Mesh()
+    v = lambda x, y: QVector3D(x, y, 0)
+    face = mesh.add_face([v(0, 0), v(4, 0), v(4, 4), v(0, 4)],
+                         [[v(1, 1), v(1, 3), v(3, 3), v(3, 1)]])
+    face.attrs['color'] = (.2, .4, .8)
+    mesh.add_face([v(6, 0), v(9, 0), v(9, 1), v(7, 1), v(7, 3), v(6, 3)])
+    mesh.edges[0].soft = True
+    mesh.edges[1].hidden = True
+    monkeypatch.setattr(_native, 'wanted', lambda: True)
+    monkeypatch.setattr(igz, '_LARGE_DOCUMENT', 0)
+    path = tmp_path / 'holes.igz'
+    igz.save_scene(Scene(groups=[Group(mesh)]), path)
+    scene = Scene()
+    igz.load_into(scene, path)
+    legacy = triangle()
+    scene.groups.append(Group(legacy))
+    packed = pack_scene(scene)
+    offset = 0
+    for i, group in enumerate(scene.groups):
+        reference = bake_mesh(group.mesh)
+        np.testing.assert_array_equal(packed.vertices[offset:offset+len(reference)], reference)
+        assert packed.commands[i]['count'] == len(reference)
+        assert packed.commands[i]['first'] == packed.commands[i]['base'] == offset
+        offset += int(packed.commands[i]['count'] + packed.edge_commands[i]['count'])
+    assert offset == len(packed.indices) == len(packed.vertices)
+    assert packed.edge_commands['count'].tolist() == [24, 6]
+
+
+def test_pack_never_builds_plan_and_calls_native_once(tmp_path, monkeypatch):
+    from formats import igz
+    from core.mesh import DeferredMesh
+    import core.lazy_mesh
+    import views.wgpu_scene as packing
+    native = _native.available()
+    monkeypatch.setattr(_native, 'wanted', lambda: True)
+    monkeypatch.setattr(igz, '_LARGE_DOCUMENT', 0)
+    path = tmp_path / 'unplanned.igz'
+    igz.save_scene(Scene(groups=[Group(triangle()), Group(triangle())]), path)
+    scene = Scene()
+    igz.load_into(scene, path)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('renderer built a Plan')
+    monkeypatch.setattr(core.lazy_mesh, 'plan', forbidden)
+    monkeypatch.setattr(packing, 'plan_of', forbidden)
+    calls = []
+    original = native.bake_scene
+    def once(*args):
+        calls.append(True)
+        return original(*args)
+    monkeypatch.setattr(native, 'bake_scene', once)
+    pack_scene(scene)
+    assert calls == [True]
+    for group in scene.groups:
+        assert type(group.mesh) is DeferredMesh
+        assert '_deferred_plan' not in group.mesh.__dict__
+
+
+def test_memoised_placement_state_matches_viewport():
+    from types import SimpleNamespace
+    from views.viewport import _paint_of
+    from views.wgpu_scene import _placement_state
+    groups = [Group(triangle()) for _ in range(12)]
+    for i, g in enumerate(groups):
+        g.hidden = bool(i % 3 == 0)
+        g.layer = 'missing' if i % 2 else None
+        g.material = {'color': (i / 12, .5, .2)}
+    scene = Scene(groups=groups)
+    resolve = _placement_state(scene)
+    for g in groups:
+        visible, packed = resolve(g)
+        assert visible == scene.entity_visible(g)
+        rgb = _paint_of(SimpleNamespace(scene=scene), g)['color']
+        expected = np.array([*np.clip(np.array(rgb[:3])*255, 0, 255), 255], np.uint8).view('<u4')[0]
+        assert packed == expected
+    scene._navigator_allowed = {groups[2].uid}
+    resolve = _placement_state(scene)
+    assert [resolve(g)[0] for g in groups] == [scene.entity_visible(g) for g in groups]
