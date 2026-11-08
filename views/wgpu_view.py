@@ -52,7 +52,7 @@ class WgpuView(QWidget):
         self._content_token = token
         start = time.perf_counter()
         tracker = getattr(self, '_instance_updates', None)
-        delta = tracker.diff(scene) if tracker is not None else None
+        delta = tracker.diff(scene) if tracker is not None and len(self.packed.instances) else None
         if delta is not None:
             ids, rows = delta
             tracker.apply(ids, rows, self.renderer)
@@ -360,6 +360,9 @@ class WgpuView(QWidget):
         self.update()
 
     def keyReleaseEvent(self, event):
+        if self.tools.sync() == 'inert':
+            event.ignore()
+            return
         if self.source_viewport is not None:
             self.source_viewport.keyReleaseEvent(event)
 

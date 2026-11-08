@@ -654,6 +654,7 @@ impl Renderer {
             let flags = u32::from_le_bytes(row[72..76].try_into().unwrap());
             s.flags[id] = merge_instance_flags(s.flags[id], flags);
             value[72..76].copy_from_slice(&s.flags[id].to_le_bytes());
+            value[76..80].copy_from_slice(&s.rows[id*80+76..id*80+80]);
             s.rows[id*80..(id+1)*80].copy_from_slice(&value);
             self.queue.write_buffer(&s.inst, id as u64 * 80, &value);
         }
@@ -709,6 +710,7 @@ impl Renderer {
                     | if hovered_id == Some(i) { 4 } else { 0 };
                 if next != *flag {
                     *flag = next;
+                    s.rows[i*80+72..i*80+76].copy_from_slice(&next.to_le_bytes());
                     self.queue
                         .write_buffer(&s.inst, i as u64 * 80 + 72, &next.to_le_bytes());
                 }
@@ -716,12 +718,13 @@ impl Renderer {
         }
         Ok(())
     }
-    fn set_overrides(&self, colors: Vec<u32>) -> PyResult<()> {
-        if let Some(s) = &self.scene {
+    fn set_overrides(&mut self, colors: Vec<u32>) -> PyResult<()> {
+        if let Some(s) = &mut self.scene {
             if colors.len() != s.n as usize {
                 return Err(PyValueError::new_err("one override per instance required"));
             }
             for (i, color) in colors.iter().enumerate() {
+                s.rows[i*80+76..i*80+80].copy_from_slice(&color.to_le_bytes());
                 self.queue
                     .write_buffer(&s.inst, i as u64 * 80 + 76, &color.to_le_bytes());
             }

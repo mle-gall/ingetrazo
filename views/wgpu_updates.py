@@ -122,3 +122,16 @@ class InstanceUpdates:
             self.packed.instances['info'][self.removed, 2] = 1
         counts = np.bincount(self.packed.instances['info'][:, 0], minlength=len(self.packed.commands))
         self.packed.commands['start'] = self.packed.edge_commands['start'] = np.cumsum(counts)-counts
+
+        if len(ids) or self.changed or self.removed:
+            shown = self.packed.instances[self.packed.instances['info'][:, 2] == 0]
+            if len(shown):
+                bounds = self.packed.bounds[shown['info'][:, 0], :, :3]
+                matrix = shown['world'].transpose(0, 2, 1)
+                center = bounds.mean(axis=1)
+                extent = (bounds[:, 1]-bounds[:, 0])*.5
+                wc = np.einsum('nij,nj->ni', matrix[:, :3, :3], center)+matrix[:, :3, 3]
+                we = np.einsum('nij,nj->ni', abs(matrix[:, :3, :3]), extent)
+                self.packed.world_bounds = np.array([(wc-we).min(axis=0), (wc+we).max(axis=0)])
+            else:
+                self.packed.world_bounds = np.zeros((2, 3))
