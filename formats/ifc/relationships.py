@@ -30,7 +30,7 @@ class Appearance:
             if face.attrs.get('mat'):
                 areas[face.attrs['mat']] += face.area()
         paint = getattr(group, 'material', None) or {}
-        material = record.get('material') or paint.get('mat') or (max(areas, key=areas.get) if areas else None)
+        material = record.get('material') or (max(areas, key=areas.get) if areas else None) or paint.get('mat')
         name = material.get('name', '') if isinstance(material, dict) else material
         if name:
             mat = self.material(name)
@@ -57,7 +57,10 @@ class Appearance:
                 self.styles[key] = w.entity('IfcSurfaceStyle', Name=_s(name or 'Colour'), Side='.BOTH.', Styles=refs([render]))
             w.entity('IfcStyledItem', Item=ref(item), Styles=refs([self.styles[key]]))
         if representation is not None:
-            names = {f.attrs.get('layer') for f in faces} | {getattr(group, 'layer', None)}
+            from core.layers import DEFAULT_LAYER
+            names = {f.attrs.get('layer') or getattr(group, 'layer', None) or DEFAULT_LAYER for f in faces}
+            if group is not None:
+                names.add(group.layer or DEFAULT_LAYER)
             for layer in self.scene.layers:
                 if layer.name in names:
                     self.layers[(layer.name, layer.uid)].add(representation)

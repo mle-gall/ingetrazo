@@ -30,9 +30,13 @@ def load(path):
             datatype = prop.find('.//DataType')
             datatype = datatype.get('type', '') if datatype is not None else ''
             kind = {'IfcBoolean': 'boolean', 'IfcInteger': 'integer', 'IfcLabel': 'label',
-                    'IfcText': 'text', 'IfcLengthMeasure': 'length', 'IfcPositiveLengthMeasure': 'length',
+                    'IfcText': 'text', 'IfcIdentifier': 'label', 'IfcDate': 'text',
+                    'IfcDateTime': 'text', 'IfcTime': 'text', 'IfcURIReference': 'text',
+                    'IfcLengthMeasure': 'length', 'IfcPositiveLengthMeasure': 'length',
                     'IfcAreaMeasure': 'area', 'IfcVolumeMeasure': 'volume'}.get(datatype, 'real')
             members = [item.text for item in prop.findall('.//EnumItem') if item.text]
+            if datatype == 'IfcLogical':
+                members = ['TRUE', 'FALSE', 'UNKNOWN']
             properties[prop_name] = {'kind': 'enum' if members else kind}
             if members:
                 properties[prop_name]['members'] = members

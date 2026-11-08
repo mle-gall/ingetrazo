@@ -96,3 +96,33 @@ def test_generated_concrete_elements(schema, count):
     names = concrete(root)
     assert len(names) == count
     assert names <= SCHEMA_DATA[schema]['classes'].keys()
+
+
+def test_child_opening_and_material_fallback(tmp_path):
+    ifc = pytest.importorskip('ifcopenshell')
+    scene = Scene()
+    wall = Group(mesh_at(0), 'Wall')
+    child = Group(mesh_at(4), 'Void')
+    wall.children.append(child)
+    for face in wall.mesh.faces:
+        face.attrs['mat'] = 'Paint'
+    scene.materials['Paint'] = Material('Paint', color=(1,0,0))
+    wall.ifc = {'class': 'IfcWall', 'openings': [{'group_uid': child.uid}]}
+    scene.groups.append(wall)
+    path = tmp_path / 'child.ifc'
+    result = save_ifc(scene, path)
+    assert not result.problems
+    model = ifc.open(str(path))
+    assert model.by_type('IfcMaterial')[0].Name == 'Paint'
+    assert len(model.by_type('IfcRelVoidsElement')) == 1
+    assert len(model.by_type('IfcFacetedBrep')) == 2
+    assert len(model.by_type('IfcWall')[0].Representation.Representations[0].Items[0].Outer.CfsFaces) == 6
+
+
+@pytest.mark.parametrize('patch', [
+    {'material': {'name': 'x', 'layers': [{'name': 'x', 'thickness': -1}]}},
+    {'openings': [{'faces': [{'outer': [[0,0,0]], 'holes': None}]}]},
+    {'openings': [{'guid': 'bad'}]}, {'fills': 'bad'}, {'storey': {'name': 'x', 'elevation': float('nan')}},
+])
+def test_malformed_relationship_records(patch):
+    assert record.validate({'class': 'IfcWall', **patch}, {})
