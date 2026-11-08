@@ -6172,7 +6172,8 @@ class MainWindow(QMainWindow):
         doc._renderer_wgpu = renderer_settings.wanted()
         if doc._renderer_wgpu:
             self._install_wgpu_display(doc)
-        self._show_renderer_note(doc)
+        if doc is self._doc:
+            self._show_renderer_note(doc)
 
     def _show_renderer_note(self, doc):
         if not hasattr(self, "_renderer_label"):
