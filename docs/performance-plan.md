@@ -284,8 +284,8 @@ Implementation status: telemetry is the only implemented deliverable in this
 section. Progressive bake/upload scheduling, pending bounding-box rendering,
 eager/background pick preparation, a hybrid consolidation policy, and its edge
 pass counterpart remain unimplemented. No <2 s first-paint, <100 ms hover, or
-<100 ms orbit gate is claimed. The corresponding scheduler/split/reuse regression
-tests are also still outstanding. A renderer migration decision cannot be based
+<100 ms orbit gate is claimed. The scheduler/split regression tests are also still outstanding; a new
+camera-reuse regression verifies the existing pick cache contract (below). A renderer migration decision cannot be based
 on this partial work: cached native command replay already exists, but the
 first-frame eligibility checks and placement bounds still demand prototype
 bakes synchronously, and native replay alone does not reduce draw-call count.
@@ -324,3 +324,17 @@ has four tests, covering deferred/immediate/native/merged submission counting
 and disjoint strict-view rejection counts on a reused gather result. Existing
 offscreen GL-dependent cases remain skipped; the live benchmark supplies GL
 execution evidence. Log: `.telemetry-final.log`.
+
+The requested camera-reuse regression now verifies an existing property:
+changing yaw, pitch and perspective preserves the lazy bounds table, loose pick
+index and Rust InstanceSet by identity. Moving a placement then invalidates
+all three. This is not background preparation and does not establish ride-model
+hover latency. The repeated context cost still needs a cursor-specific profile;
+assuming every camera change rebuilds the whole scene index would be incorrect.
+
+```sh
+INGETRAZO_RUST=1 QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q \
+  tests/test_lazy_native_snap.py::test_camera_changes_reuse_pick_geometry_until_a_placement_moves
+```
+
+Result: **1 passed in 1.12 s** (`.pick-reuse-test.log`).
