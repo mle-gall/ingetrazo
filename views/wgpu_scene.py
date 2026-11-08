@@ -82,25 +82,30 @@ def pack_scene(scene):
     from views.viewport import _paint_of
     vp = SimpleNamespace(scene=scene)
     meshes, lookup, rows, uids, paints = [], {}, [], [], []
-    placements = [(None, None, scene.mesh)]
+    local_bounds = []
+    placements = [(None, None, scene.mesh, False)]
     for root in scene.groups:
-        if scene.entity_visible(root):
-            placements.extend((g, matrix, g.mesh) for g, matrix in iter_placements(root)
-                              if scene.entity_visible(g))
-    for group, matrix, mesh in placements:
+        root_hidden = not scene.entity_visible(root)
+        placements.extend((g, matrix, g.mesh, root_hidden or not scene.entity_visible(g))
+                          for g, matrix in iter_placements(root))
+    for group, matrix, mesh, hidden in placements:
         key = id(mesh)
         if key not in lookup:
             verts = bake_mesh(mesh)
-            if not len(verts):
+            plan = plan_of(mesh)
+            positions = (plan.pos if plan is not None else
+                         np.asarray([v.position.toTuple() for v in mesh.vertices]).reshape(-1, 3))
+            if not len(positions):
                 lookup[key] = -1
             else:
                 lookup[key] = len(meshes)
                 meshes.append(verts)
+                local_bounds.append((positions.min(axis=0), positions.max(axis=0)))
         code = lookup[key]
         if code < 0:
             continue
         world = np.eye(4, dtype=np.float32) if matrix is None else np.array(matrix.data(), np.float32).reshape(4, 4)
-        rows.append((code, world))
+        rows.append((code, world, hidden))
         uids.append(getattr(group, 'uid', 'loose'))
         paint = _paint_of(vp, group) or {}
         rgb = paint.get('color') or (1., 1., 1.)
@@ -108,14 +113,14 @@ def pack_scene(scene):
     bounds = np.zeros((len(meshes), 2, 4), '<f4')
     commands = np.zeros(len(meshes), COMMAND)
     instances = np.zeros(len(rows), INSTANCE)
-    for i, (code, world) in enumerate(rows):
+    for i, (code, world, hidden) in enumerate(rows):
         instances['world'][i] = world
-        instances['info'][i] = (code, paints[i], 0, 0)
+        instances['info'][i] = (code, paints[i], int(hidden), 0)
     counts = np.bincount(instances['info'][:, 0], minlength=len(meshes))
     offset, start = 0, 0
     for i, vertices in enumerate(meshes):
-        bounds[i, 0, :3] = vertices['pos'].min(axis=0)
-        bounds[i, 1, :3] = vertices['pos'].max(axis=0)
+        bounds[i, 0, :3] = local_bounds[i][0]
+        bounds[i, 1, :3] = local_bounds[i][1]
         commands[i] = (len(vertices), 0, offset, offset, start)
         offset += len(vertices)
         start += int(counts[i])
@@ -123,9 +128,12 @@ def pack_scene(scene):
     vertices = np.concatenate(meshes) if meshes else np.empty(0, VERTEX)
     world_bounds = np.zeros((2, 3))
     if len(rows):
-        b = bounds[instances['info'][:, 0], :, :3]
+        shown = instances[instances['info'][:, 2] == 0]
+        if not len(shown):
+            return PackedScene(vertices, indices, bounds, commands, instances, uids, world_bounds)
+        b = bounds[shown['info'][:, 0], :, :3]
         center, extent = (b[:, 0]+b[:, 1])/2, (b[:, 1]-b[:, 0])/2
-        mat = instances['world'].transpose(0, 2, 1)
+        mat = shown['world'].transpose(0, 2, 1)
         wc = np.einsum('nij,nj->ni', mat[:, :3, :3], center)+mat[:, :3, 3]
         we = np.einsum('nij,nj->ni', abs(mat[:, :3, :3]), extent)
         world_bounds = np.array([(wc-we).min(axis=0), (wc+we).max(axis=0)])

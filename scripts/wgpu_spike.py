@@ -63,6 +63,7 @@ def main():
                 first_picture_s=first, gpu_buffer_bytes=view.renderer.gpu_memory,
                 attachment_bytes=view.width()*view.height()*view.devicePixelRatioF()**2*8,
                 placements=len(view.packed.instances), prototypes=len(view.packed.bounds),
+                visible_placements=int((view.packed.instances["info"][:, 2] == 0).sum()),
                 triangles=len(view.packed.indices)//3, frames=len(frames), cpu_ms=summary(0),
                 gpu_ms=summary(1), wall_ms=summary(2), pick_ms=pick_ms, picked=picked,
                 logical_size=[view.width(), view.height()], scale=view.devicePixelRatioF()), indent=2), flush=True)

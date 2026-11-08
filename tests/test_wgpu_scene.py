@@ -72,3 +72,21 @@ def test_lazy_arrays_stay_deferred(tmp_path, monkeypatch):
     assert type(mesh) is DeferredMesh
     assert len(packed.indices) == 3
     np.testing.assert_array_equal(packed.bounds[0, :, :3], [[0, 0, 0], [2, 3, 0]])
+
+
+def test_edge_only_placement_keeps_its_id_and_bounds():
+    mesh = Mesh()
+    mesh.add_edge(QVector3D(0, 0, 0), QVector3D(1, 2, 3))
+    packed = pack_scene(Scene(groups=[Group(mesh), Group(triangle())]))
+    assert len(packed.instances) == 2
+    assert packed.commands['count'].tolist() == [0, 3]
+    assert packed.commands['start'].tolist() == [0, 1]
+    np.testing.assert_array_equal(packed.bounds[0, :, :3], [[0, 0, 0], [1, 2, 3]])
+
+
+def test_hidden_placements_reside_with_a_gpu_flag():
+    hidden = Group(triangle())
+    hidden.hidden = True
+    packed = pack_scene(Scene(groups=[hidden, Group(triangle())]))
+    assert len(packed.instances) == 2
+    assert packed.instances['info'][:, 2].tolist() == [1, 0]
