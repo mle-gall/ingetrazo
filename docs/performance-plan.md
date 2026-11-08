@@ -393,3 +393,150 @@ validated separately by the exact focused commands above.
 Generated drawing/texture caches (~3.3 GiB) were removed after measurement;
 benchmark scripts, logs, stack samples and the baseline source snapshot remain
 locally under the worktree. Nothing was pushed, and no PR or issue was created.
+
+## P7 — wgpu renderer spike (2026-11-08)
+
+A separate pyo3 `ingetrazo_render.Renderer` now uploads a resident scene,
+computes per-placement frustum/one-physical-pixel culling on the GPU, compacts
+survivors into bounded per-prototype ranges, and renders indexed indirect
+commands. The production GL viewport is unchanged when `INGETRAZO_WGPU` is
+unset. Build/run/API details: [renderer README](../rust/ingetrazo_render/README.md).
+
+### Method and coverage
+
+Apple M1 Max, Metal, macOS 27.2 (26B123), Rust 1.90, Python 3.13.12,
+PySide6 6.11.3, NumPy 2.5.4, wgpu 24.0.5. Bare 1000×700 logical window;
+viewport 1000×673 at 2× (2000×1346 physical). Single-sample depth and integer
+ID target, sRGB presentation; MSAA and edges deliberately omitted. Full-circle
+orbit over ten seconds, framed to visible bounds. Test processes were suspended
+during measurements. These are repeat runs with warm filesystem caches, not a
+controlled cold-cache experiment. Earlier load observations varied from 8.1 to
+34.1 seconds for ride; track consistently took about 24 seconds.
+
+CPU is acquire/encode/submit/present time, excluding timestamp-map wait.
+GPU timestamps span culling through raster, including intervening scheduling.
+Wall time includes camera update, Python/Rust crossing and synchronous timestamp
+readback. The render method waits every frame for measurement; there is no
+production asynchronous timestamp ring yet. Qt timer/event-loop gaps are not
+included in individual wall frame samples; total frames are also reported.
+Setup/upload includes adapter, device, pipelines and resident upload together;
+it is an upper bound for upload alone. First picture is the first rendered
+frame after show/processEvents, not an input-to-photon measurement.
+
+**Input discrepancy:** the supplied path currently contains a 141,384,561-byte
+archive, not the brief’s 736 MB file. SHA-256 fingerprints of both measured
+inputs are recorded in [inputs.json](benchmarks/wgpu-2026-11-08/inputs.json).
+The brief also says 86,757 own placements.
+A separate read-only inventory of the exact supplied file at this base commit
+finds 91,211 groups, 19,013 distinct mesh objects, 3,107 empty mesh objects,
+15,906 deferred nonempty prototypes, and **76,029 placements with positions**
+(the same count have edges; 70,374 have raw faces). The renderer retains all
+76,029 geometric placements, including hidden and edge-only ones; 69,116 are
+visible by scene flags before camera culling. Empty containers do not acquire
+a GPU row. This is a full geometric-scene measurement, **not a verified
+86,757-nonempty-placement benchmark**. No placements were replicated to force
+the requested number. Inventory evidence: [JSON](benchmarks/wgpu-2026-11-08/ride-inventory.json).
+
+### Results
+
+Times in milliseconds are **min/average/max**; startup times are seconds.
+The earlier GL numbers are supplied measurements, not rerun here, and include
+features omitted by this spike. They are directional comparisons, not visual
+parity or controlled cold-start comparisons.
+
+| Metric | Existing GL, ride (supplied) | wgpu ride | wgpu track |
+| --- | ---: | ---: | ---: |
+| Resident geometric placements | 86,757 reported | 76,029 | 19,622 |
+| Nonempty prototype meshes | 15,906 | 15,906 | 4,227 |
+| Unique uploaded triangles | — | 8,484,592 | 3,445,443 |
+| Load, s | ~15 | 8.09 | 24.37 |
+| Build from arrays, s | — | 40.89 | 18.44 |
+| Device setup + upload, s | — | 0.259 | 0.098 |
+| Owned GPU buffers, MiB | — | 783.97 | 317.30 |
+| Depth + ID targets, MiB | — | 20.54 | 20.54 |
+| CPU submission, ms | — | 0.93/1.16/12.53 | 0.32/1.13/13.90 |
+| GPU, ms | — | 5.59/6.70/35.41 | 2.94/5.42/29.72 |
+| Total render call, ms | 270–1,200 orbit | 7.81/9.43/98.12 | 4.00/8.16/52.25 |
+| Samples in ten-second orbit | — | 1007 | 1106 |
+| Center-pixel pick, ms | 9,400 first hover | 1.32 | 1.37 |
+| First picture after load, s | 20.9 reported | 41.27 | 18.66 |
+| First picture including load, s | — | 49.36 | 43.03 |
+
+Raw results: [ride](benchmarks/wgpu-2026-11-08/ride.json),
+[track](benchmarks/wgpu-2026-11-08/track.json). Pick is a single synchronized
+pixel read from the most recently rendered ID target; it is not the app's
+full hover/snap workflow. Both center picks hit a placement. GPU memory is
+bounded by one geometry copy, two command tables, one instance table and one
+survivor slot per placement. Numbers exclude swapchain images, driver memory,
+staging and CPU arrays. Depth/ID resize with the widget. Byte conversion at
+upload temporarily duplicates the packed CPU arrays; this needs improvement.
+
+The M1 Max advertises MULTI_DRAW_INDIRECT, but the locked wgpu Metal backend
+implements that API with a Rust loop of `draw_indexed_primitives_indirect`.
+There is one wgpu API call, not one native Metal ICB execution. The explicit
+non-multi fallback also loops in Rust and was not separately benchmarked.
+Neither path has Python per-prototype work during a frame.
+
+### Embedding findings
+
+`INGETRAZO_WGPU=1` installs a per-document native QWidget stand-in in the
+real MainWindow stack. The hidden GL viewport retains document state; tools
+are disabled. Scene-version signals coalesce resident rebuilds. A bounded
+synthetic real-window run verified direct CAMetalLayer presentation, positive
+ID picks, 2× scale, resize with docks hidden, and tab switching back to the
+same native view. No texture-to-Qt fallback was needed, so its cost is unmeasured.
+This check used a triangle, not the full ride scene inside MainWindow.
+Cross-monitor scale transitions and prolonged dock/tab stress remain untested.
+QPainter overlays cannot paint into this native layer: production needs wgpu
+overlay geometry/text or a separately composited transparent sibling widget,
+with explicit focus/hit-testing and stacking tests.
+
+### What this establishes, and what remains
+
+**Proceed with a resident wgpu backend.** On this full geometric scene the
+average CPU/GPU/wall times are below 16 ms. **Sustained 16 ms is not established:**
+GPU and wall maxima exceed it materially. First-picture latency also needs
+work: the ride's array preparation is about 41 seconds, slower than the
+supplied 20.9-second GL first-paint figure. The shader/layout approach is useful;
+the current synchronous preparation and readback scheduling are not production
+ready. Initially quadratic face-colour masks were replaced by linear palette
+gathering after timed stack traces exposed the stall.
+
+Not implemented: textures, transparency sorting/back materials, section planes,
+X-ray, selection highlight, hard/soft edges, sheets, billboards, painter overlays,
+or editing-tool integration. Per-face layers and nested hidden-parent behavior
+need parity work; normals under nonuniform transforms are approximate. The
+spike must remain opt-in. No production viewport rendering path was replaced.
+
+Production priorities: parallel/progressive scene preparation and disk-cache
+reuse; zero-copy or chunked upload and memory budgeting; asynchronous timestamp
+and pick rings; invalidation/partial instance and geometry updates; robust
+surface loss, cross-display HiDPI and teardown; feature/visual parity tests;
+then tools, overlays, materials and edges. Investigate Metal ICBs only after
+profiling the already-small native submission cost. Estimate: 2–3 engineer-weeks
+to harden this foundation, followed by several additional weeks for feature
+parity and interaction integration; this is a planning estimate, not a schedule.
+
+Dependency audit: direct dependencies are MIT/Apache-compatible. The user
+explicitly accepted permissive ISC, Zlib and CC0 transitive dependencies.
+The full locked all-target/build dependency inventory is in
+[licenses.txt](benchmarks/wgpu-2026-11-08/licenses.txt). Its complete SPDX
+expression set is MIT; Apache-2.0; MIT OR Apache-2.0 (also reverse-order and
+slash spellings); (MIT OR Apache-2.0) AND Unicode-3.0; Apache-2.0 WITH
+LLVM-exception; MIT OR Apache-2.0 OR Zlib; Zlib OR Apache-2.0 OR MIT;
+Unlicense OR MIT; ISC; Zlib; CC0-1.0. No proprietary or incompatible copyleft
+dependency was found in the locked graph. IngeTrazo and this crate remain GPL-3.
+
+### Validation and hand-over
+
+- Rust: **4 passed** (`PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_render/Cargo.toml`). Covers six frustum planes, subpixel rejection, mirrored/sheared bounds, survivor compaction/reset and 20-byte indirect layout.
+- Focused Python: **7 passed** (`QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_scene.py`). Covers ABI sizes, shared prototypes, local/world AABBs, matrix column order, palette colours, offsets, deferred meshes staying deferred, edge-only and hidden placements.
+- Required bounded suite, one invocation: `QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'` — **7,093 passed, 19 failed, 138 skipped, 2 xfailed, 805 deselected, 56 warnings**, six batches. Elapsed 1,643 seconds includes pauses during renderer measurements.
+- The 19 failures match the supplied baseline: 14 translation completeness failures (including Arabic), cached cursor pick, extension-preview wrapping, hidden panels, swatch tooltip, and late-toolbar bold tooltip. No additional failures or crashes. [Exact failed test IDs](benchmarks/wgpu-2026-11-08/tests.json).
+- Native embedding smoke passed with positive ID picks, 2× scale, docks/resize, tab return, and a hidden-tab scene update uploaded on show. Shader creation, native presentation and timestamps exercised on Metal. Python syntax compilation, Rust formatting and `git diff --check` passed.
+
+Branch: `spike/wgpu-renderer`, based on `b4d4e811`. No push, PR, issue or remote
+comment was made. Build commands and ABI are in the renderer README linked
+above. This spike demonstrates the current authorized input; the input size
+and nonempty-placement discrepancy must be resolved before claiming the
+brief's exact 86,757-placement result.

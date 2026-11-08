@@ -79,3 +79,8 @@ CLAUDE.md
 # Synthetic benchmark documents (scripts/bench_models.py regenerates them;
 # city-XL alone is ~580 MB)
 benchmarks/models/
+
+# Isolated renderer spike tooling
+/.venv-work/
+/.cargo-work/
+/.spike-results/

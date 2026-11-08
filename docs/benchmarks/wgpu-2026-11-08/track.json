@@ -1,0 +1,37 @@
+{
+  "model": "/Users/legallmaxence/code/ingetrazo-bench/track.igz",
+  "adapter": "AdapterInfo { name: \"Apple M1 Max\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }; multi_draw=true",
+  "load_s": 24.37048333400162,
+  "build_s": 18.44297758396715,
+  "upload_s": 0.09811333299148828,
+  "first_picture_s": 43.02747904200805,
+  "gpu_buffer_bytes": 332715488,
+  "attachment_bytes": 21536000.0,
+  "placements": 19622,
+  "prototypes": 4227,
+  "visible_placements": 19622,
+  "triangles": 3445443,
+  "frames": 1106,
+  "cpu_ms": {
+    "min": 0.320166,
+    "avg": 1.1296043101265822,
+    "max": 13.895207999999998
+  },
+  "gpu_ms": {
+    "min": 2.942292,
+    "avg": 5.420193377034358,
+    "max": 29.716
+  },
+  "wall_ms": {
+    "min": 3.997499996330589,
+    "avg": 8.155390016682393,
+    "max": 52.249375032261014
+  },
+  "pick_ms": 1.365375006571412,
+  "picked": 4075,
+  "logical_size": [
+    1000,
+    673
+  ],
+  "scale": 2.0
+}

@@ -10,6 +10,7 @@ from __future__ import annotations
 from views import prompts as _prompts
 
 import sys
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -446,6 +447,8 @@ class MainWindow(QMainWindow):
         # native window.
         from views import mac_glass
         mac_glass.install(self)
+        if os.environ.get("INGETRAZO_WGPU") == "1":
+            self._install_wgpu_display(self._doc)
 
     def showEvent(self, event) -> None:  # noqa: N802 — Qt override
         super().showEvent(event)
@@ -3613,6 +3616,9 @@ class MainWindow(QMainWindow):
 
     # ---- Tool routing -------------------------------------------------------
     def _activate_tool(self, key: str) -> None:
+        if os.environ.get("INGETRAZO_WGPU") == "1":
+            self.viewport.set_active_tool(None)
+            return
         if self._tool_filter is not None and key not in self._tool_filter:
             self.statusBar().showMessage(
                 tr("{name} is not available here.", name=tr(self._tools[key].name)), 3000)
@@ -6157,6 +6163,28 @@ class MainWindow(QMainWindow):
     def all_viewports(self) -> list:
         return [d.viewport for d in self._documents if d.viewport is not None]
 
+    def _install_wgpu_display(self, doc):
+        """Use a document stand-in for the opt-in, display-only Metal spike.
+
+        The hidden viewport retains document state; no tool receives native
+        view input. Scene changes coalesce before rebuilding resident arrays.
+        """
+        from views.wgpu_view import WgpuView
+        from PySide6.QtCore import QTimer
+        display = WgpuView(self._doc_stack)
+        doc.stand_in = display
+        self._doc_stack.addWidget(display)
+        refresh = QTimer(display)
+        refresh.setSingleShot(True)
+        refresh.timeout.connect(lambda: display.set_scene(doc.viewport.scene))
+        doc.viewport.sceneVersionChanged.connect(lambda *_: refresh.start(0))
+        display._refresh_timer = refresh
+        doc.viewport.set_active_tool(None)
+        doc.viewport.setEnabled(False)
+        if doc is self._doc:
+            self._doc_stack.setCurrentWidget(display)
+        refresh.start(0)
+
     def _make_viewport(self):
         """A viewport for a project, set up the way the window's first one
         always was."""
@@ -6245,6 +6273,8 @@ class MainWindow(QMainWindow):
         self._wire_viewport(doc.viewport)
         self._doc_stack.addWidget(doc.viewport)
         self._documents.append(doc)
+        if os.environ.get("INGETRAZO_WGPU") == "1":
+            self._install_wgpu_display(doc)
         bar = self._project_tabs
         bar.add(doc, bar.index_of(self._doc) + 1)
         doc.saved_content = doc.viewport.scene.content_version
