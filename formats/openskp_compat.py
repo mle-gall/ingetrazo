@@ -1,65 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
-"""Fixes to the pinned OpenSKP that are waiting upstream — applied at run
-time only while the installed OpenSKP still lacks them.
+"""Import bridges for OpenSKP 1.5: layers, folders, kinds and entity IDs.
 
-**Legacy dimensions anchored inside groups** (iamahsanmehmood/openskp#384).
-A pre-2021 ``CDimensionLinear`` follows each connection ref with an entity
-ref and two lists of refs — the instance paths of the anchored entity. The
-pinned reader skips a FIXED 42/82 bytes there, right only while the lists
-are empty (a dimension on loose geometry). Anchored to a vertex inside
-nested groups, the read slides off the record and the root entity reader,
-which stops at the first unreadable item, drops everything after it:
-Juan José Noriega's house (a .skp of the 2018 version) opened with 2 of
-its 72 root entities — walls and lawn, no upper floor, roofs, openings or
-trees (12 placements instead of 2384).
-
-**A face's own tag arrives as a number** (#700). ``Instance.layer`` is
-the tag's name, but ``Face.layer`` is the tag's id in the file, and the
-id → name table stays inside the parser (``SkpModel`` does not keep it).
-A roof tagged "Roof" landed on a layer called 11, so hiding "Roof" left it
-on screen. The table is kept from the parse and :func:`resolve_face_layers`
-turns the ids into names.
-
-**Annotations carrying their anchor in full** (a .skp of the 2017
-version). MFC writes an object in full the first time anything points
-at it, so a dimension or leader text anchored to a vertex the stream has not
-reached yet carries that ``CVertex`` inline. The dimension reader refused a
-new object as a connection point; the text reader skipped it by scanning for
-the string delimiter, so its store index went unallocated, every later
-reference landed one slot off (edges on edges, a class ref on a dimension)
-and the file did not open — silently, as :func:`formats.skp.parse_skp`
-reports any parser error as "unreadable". The text delimiter's last byte is
-also 0 on some texts, not only 1.
-
-**A definition list that ends before its count.** Edges first written in a
-face come back as entity-list back-refs; right after a text, the text
-reader takes them as leader attachments, and the list then reads its
-definition's tail as items. The tail's signature now ends a definition list
-whatever was counted (upstream checked it only after a "burn").
-
-**Groups arrive as components.** The classic reader reads a ``CGroup``
-and a ``CComponentInstance`` alike and keeps no trace of which it was, and
-the 2021+ reader drops the definition's kind. The definitions placed
-through a ``CGroup``, or marked as groups by their kind, are noted during
-the parse (:func:`group_definitions`) so the import makes them groups
-again.
-
-**A 2019 layer record two bytes longer.** From the 2019 version on, a
-layer record ends 23 bytes after its last string, not 21 (the new field is
-most likely the layer's dash pattern). The reader skips 21, so in the first
-definition the next count read two bytes early, came out at 33 million
-and the file did not open («implausible def entity count», #157). The
-2020 files still opened only because the reader already steps over zero
-words between layers and around their counts there; only 2019 files take
-the two extra bytes here.
-
-All patches are detected by BEHAVIOUR, not by version: once the upstream
-reader carries ``_connection_paths`` the first is left alone, the second
-only touches a face layer that is still a number, the anchor and list
-fixes step aside once the text reader no longer scans for the delimiter
-and the list reader no longer ties the tail check to burns, and the layer
-fix once the layer reader looks at the version itself.
+Dimension paths and anchored annotation reading are upstream now (#384,
+#473, #484); their local replacements have been removed. The definition-list
+end fix still applies, but must preserve 1.5's inline-entity bookkeeping.
+The 2019 layer-tail check must not mistake an unrelated version check for
+support of the extra two bytes.
 """
 from __future__ import annotations
 
@@ -81,15 +28,57 @@ def apply() -> bool:
     except Exception:  # noqa: BLE001 — no openskp: nothing to fix
         return False
     _applied = True
+    _keep_legacy_pids(L)
     layers = _keep_layer_table()
     folders = _keep_tag_folders()
-    texts = _fix_anchored_texts(L)
     lists = _fix_definition_list_end(L)
     groups = _note_legacy_groups(L)
     kinds = _note_definition_kinds()
     tails = _fix_layer_tail_2019(L)
-    return _fix_legacy_dimensions(L) or layers or texts or lists \
-        or groups or kinds or tails or folders
+    return layers or lists or groups or kinds or tails or folders
+
+
+def _keep_legacy_pids(L):
+    """Carry 2017+ entity IDs through the two places upstream drops them."""
+    preamble, reader, fill = L._preamble, L._read_instance, L._fill_builder
+    if getattr(reader, "_keeps_pid", False):
+        return
+
+    def read_preamble(ar, r):
+        start = r.pos
+        result = preamble(ar, r)
+        for frame in getattr(_parse_tables, "pid_frames", ()):
+            if frame[:2] == (id(r), start):
+                frame[2]["pid"] = result.get("pid")
+        return result
+
+    def read_instance(ar, r):
+        frames = getattr(_parse_tables, "pid_frames", None)
+        if frames is None:
+            frames = _parse_tables.pid_frames = []
+        captured = {}
+        frames.append((id(r), r.pos, captured))
+        try:
+            result = reader(ar, r)
+            result["persistent_id"] = captured.get("pid")
+            return result
+        finally:
+            frames.pop()
+
+    def fill_builder(builder, ents, slots):
+        start = len(builder.instances)
+        result = fill(builder, ents, slots)
+        records = [v for _, _, v in ents
+                   if isinstance(v, dict) and v.get("k") in ("instance", "image")]
+        for instance, record in zip(builder.instances[start:], records):
+            instance["persistent_id"] = record.get("persistent_id")
+        return result
+
+    read_instance._keeps_pid = True
+    L._preamble = read_preamble
+    L._read_instance = read_instance
+    L._READERS["CGroup"] = L._READERS["CComponentInstance"] = read_instance
+    L._fill_builder = fill_builder
 
 
 def _note_legacy_groups(L) -> bool:
@@ -135,10 +124,13 @@ def _note_definition_kinds() -> bool:
 
     def _extract_geometry_from_nodes(elements, builder):
         for el in elements:
-            if el.get("tag") == "8315":
-                kind = _core.parse_var_int(el["payload"], 0,
-                                           len(el["payload"]))
-                did = _core.extract_entity_id({"children": elements})
+            if (el.get("tag") if isinstance(el, dict) else el.tag) == "8315":
+                pay = el["payload"] if isinstance(el, dict) else el.payload
+                kind = _core.parse_var_int(pay, 0, len(pay))
+                from types import SimpleNamespace
+                did = (_core.extract_entity_id({"children": elements})
+                       if isinstance(el, dict) else
+                       _core._entity_id(SimpleNamespace(children=elements)))
                 if did is not None:
                     _parse_tables.kinds = True
                     if kind == 1:
@@ -196,6 +188,16 @@ def _keep_layer_table() -> bool:
         table = (parsed.get("layer_id_to_name")
                  if isinstance(parsed, dict) else None)
         _parse_tables.layers = dict(table or {})
+        # Instance dataclasses discard the retained entity-info subtree.
+        from types import SimpleNamespace
+        _parse_tables.pids = {}
+        for key, definition in parsed.get("defs_dict", {}).items():
+            instances = definition["builder"].instances
+            _parse_tables.pids[key] = [
+                i.get("persistent_id") or
+                _core._entity_id(SimpleNamespace(children=i.get("children", [])))
+                for i in instances]
+
         return parsed
 
     full_parse._keeps_layers = True
@@ -382,6 +384,17 @@ def resolve_face_layers(model) -> int:
     of the parse that built ``model``. A face on the default tag, or on an
     id the table does not know, gets no layer. Returns how many changed."""
     table = getattr(_parse_tables, "layers", None) or {}
+    definitions = dict(getattr(model, "definitions", {}) or {})
+    if getattr(model, "root", None) is not None:
+        definitions["ROOT"] = model.root
+    for key, definition in definitions.items():
+        for instance, pid in zip(getattr(definition, "instances", []),
+                                 getattr(_parse_tables, "pids", {}).get(key, [])):
+            instance.persistent_id = pid
+        if getattr(definition, "is_group", False):
+            _parse_tables.groups.add(definition.id)
+        if hasattr(definition, "is_group"):
+            _parse_tables.kinds = True
     changed = 0
     for defn in (getattr(model, "definitions", None) or {}).values():
         for face in (getattr(defn, "faces", None) or {}).values():
@@ -394,141 +407,6 @@ def resolve_face_layers(model) -> int:
     return changed
 
 
-def _fix_legacy_dimensions(L) -> bool:
-    if hasattr(L, "_connection_paths") or not hasattr(L, "_read_dimlinear"):
-        return False
-
-    def _path_ref(ar, r):
-        # MFC writes an object in full the first time anything points at it:
-        # a dimension serialized before the group it is anchored in carries
-        # that whole group here. Read it like any object then.
-        if _is_new_object(r, r.pos):
-            slot, _name, _value = ar.read_object(r)
-            return slot
-        return L._entity_ref(ar, r)
-
-    def _connection_paths(ar, r):
-        extra = L._entity_ref(ar, r)
-        lists = []
-        for _ in range(2):
-            count = r.u32()
-            if count > 1000:
-                raise L.LegacyParseError(
-                    f"implausible dimension path length {r.ctx()}")
-            lists.append([_path_ref(ar, r) for _ in range(count)])
-        return extra, lists[0], lists[1]
-
-    def _read_dimlinear(ar, r):
-        L._preamble(ar, r)
-        db = L._drawbase(ar, r)
-        text = r.utf16()
-        ar.read_object(r, expect='CSkFont')
-        b37 = r.raw(37)
-        # The connection point itself can be new too: a dimension inside a
-        # component, anchored to a vertex the stream has not reached yet,
-        # carries that CVertex in full (seen on a .skp of the 2017 version).
-        c1 = _path_ref(ar, r)
-        path1 = _connection_paths(ar, r)
-        b32 = r.raw(32)
-        c2 = _path_ref(ar, r)
-        path2 = _connection_paths(ar, r)
-        b72 = r.raw(72)
-        offset = struct.unpack_from('<d', b72, 52)[0]
-        out = {'k': 'dimension', 'db': db, 'text': text,
-               'connect': (c1, c2), 'paths': (path1, path2),
-               'offset': offset}
-        if struct.unpack_from('<I', b37, 5)[0] == 1:
-            out['a'] = struct.unpack_from('<3d', b37, 13)
-        if struct.unpack_from('<I', b32, 0)[0] == 1:
-            out['b'] = struct.unpack_from('<3d', b32, 8)
-        return out
-
-    L._path_ref = _path_ref
-    L._connection_paths = _connection_paths
-    L._read_dimlinear = _read_dimlinear
-    L._READERS['CDimensionLinear'] = _read_dimlinear
-    return True
-
-
-def _is_new_object(r, pos) -> bool:
-    """Whether the MFC tag at ``pos`` starts an object written in full (a
-    new class, a class ref, or the escaped form of one)."""
-    tag = struct.unpack_from('<H', r.data, pos)[0]
-    if tag == 0x7FFF:
-        return bool(struct.unpack_from('<I', r.data, pos + 2)[0] & 0x80000000)
-    return tag == 0xFFFF or bool(tag & 0x8000)
-
-
-#: The connection block ahead of an annotation's anchor ref:
-#: [u32 type][u32 4][point3d]; type 1 = free point, 2 = anchored.
-_CONNECTION = (b'\x01\x00\x00\x00\x04\x00\x00\x00',
-               b'\x02\x00\x00\x00\x04\x00\x00\x00')
-
-
-def _fix_anchored_texts(L) -> bool:
-    # co_names, not the source: a frozen build ships no .py to read
-    original = getattr(L, "_read_text", None)
-    if (original is None or getattr(original, "_reads_anchors", False)
-            or "_STR_MARKER" not in original.__code__.co_names):
-        return False
-
-    def _read_text(ar, r):
-        L._preamble(ar, r)
-        db = L._drawbase(ar, r)
-        ar.read_object(r, expect='CSkFont')
-        start = r.pos
-        window = r.data[start:start + 512]
-        hits = [i for i in (window.find(c) for c in _CONNECTION) if i >= 0]
-        conn = start + min(hits) if hits else None
-        after_ref = conn + 34 if conn is not None else None
-        if conn is not None and _is_new_object(r, conn + 32):
-            r.raw(conn + 32 - r.pos)
-            ar.read_object(r)
-            after_ref = r.pos
-        # variable-length variant middle, delimited by an 11-byte block
-        # `01 00 00 00 ?? 00 03 00 00 00 ??` right before the text string
-        p = r.pos
-        while True:
-            idx = r.data.find(L._STR_MARKER, p, r.pos + 512)
-            if idx < 0:
-                raise L.LegacyParseError(f"text delimiter not found {r.ctx()}")
-            blk = r.data[idx - 11:idx]
-            arrow = struct.unpack_from('<I', blk, 6)[0]
-            if (blk[:4] == b'\x01\x00\x00\x00'
-                    and arrow <= 8 and blk[10] in (0, 1)):
-                break
-            p = idx + 3
-        point = None
-        label = None
-        if conn is not None and conn + 32 <= idx:
-            if r.data[conn] == 1:
-                point = struct.unpack_from('<3d', r.data, conn + 8)
-            # placement tail: [10B ref paths][point3d LABEL]...;
-            # all-zero label = screen text
-            lo = after_ref + 10
-            if lo + 24 <= idx:
-                lp = struct.unpack_from('<3d', r.data, lo)
-                if any(abs(c) > 1e-12 for c in lp):
-                    label = lp
-        r.raw(idx - r.pos)
-        text = r.utf16()
-        r.raw(5)
-        attach = []
-        while r.peek(2) == b'\xff\x7f':
-            val = struct.unpack_from('<I', r.data, r.pos + 2)[0]
-            if val & 0x80000000:
-                break                    # new-object tag — the next entity
-            r.raw(6)
-            attach.append(val)
-        return {'k': 'text', 'text': text, 'db': db, 'attach': attach,
-                'p': point, 'lp': label}
-
-    _read_text._reads_anchors = True
-    L._read_text = _read_text
-    L._READERS['CText'] = _read_text
-    return True
-
-
 def _fix_definition_list_end(L) -> bool:
     original = getattr(L, "_read_entity_list_inner", None)
     if (original is None or getattr(original, "_ends_at_tail", False)
@@ -538,6 +416,10 @@ def _fix_definition_list_end(L) -> bool:
     def _read_entity_list_inner(ar, r, count, owner, ents):
         while len(ents) < count:
             p = r.pos
+            inline = ar.inline_stack[-1] if getattr(ar, "inline_stack", None) else {}
+            if (inline and len(ents) + len(inline) >= count
+                    and L._peek_backref(ar, r) not in inline):
+                break
             if (owner == 'def'
                     and struct.unpack_from('<I', r.data, p)[0] == 0
                     and r.data[p + 22:p + 25] == L._STR_MARKER):
@@ -559,6 +441,7 @@ def _fix_definition_list_end(L) -> bool:
                 raise
             finally:
                 ar.in_entity_list = prev_flag
+            inline.pop(s, None)
             ents.append((s, n, v))
         return ents
 
@@ -568,11 +451,10 @@ def _fix_definition_list_end(L) -> bool:
 
 
 def _fix_layer_tail_2019(L) -> bool:
-    # A reader that already tells the versions apart in its layer record
-    # has the fix: leave it alone.
+    # 1.5 checks the version for SketchUp 3, but still consumes only 21
+    # tail bytes in 2019. Only our installed wrapper is known to handle it.
     original = getattr(L, "_read_layer", None)
-    if (original is None or getattr(original, "_long_tail", False)
-            or "ver" in original.__code__.co_names):
+    if original is None or getattr(original, "_long_tail", False):
         return False
 
     def _read_layer(ar, r):

@@ -83,6 +83,20 @@ def _world_drawing_axes():
     axes.sync(None)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_skp_parse_tables():
+    """The SKP reader keeps the last parse's tables per thread (group
+    definition ids, tag ids, persistent ids: formats.openskp_compat). A
+    parse resets them first; a test that feeds the adapter a model of its
+    own, with no parse, must not inherit the previous file's."""
+    from formats import openskp_compat
+    openskp_compat.reset_group_definitions()
+    for name in ("layers", "pids", "folders", "pid_frames"):
+        if hasattr(openskp_compat._parse_tables, name):
+            delattr(openskp_compat._parse_tables, name)
+    yield
+
+
 _exit_status = [0]
 
 
