@@ -4475,9 +4475,9 @@ class BimPanel(QWidget):
         lay.setContentsMargins(8, 6, 8, 8)
 
         row = QHBoxLayout()
-        self.class_box = QComboBox()
-        from core.bim import IFC_CLASSES
-        self.class_box.addItems(IFC_CLASSES)
+        from views.ifc_picker import ClassPicker
+        from core.bim_registry import get
+        self.class_box = ClassPicker(get(window.viewport.scene))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText(tr("Name (e.g. Wall axis A)"))
         row.addWidget(self.class_box)
@@ -4750,6 +4750,8 @@ class BimPanel(QWidget):
         from PySide6.QtWidgets import QTreeWidgetItem
         from core.bim import collect_objects
         from core.bim import class_quantities
+        from core.bim_registry import get
+        self.class_box.set_registry(get(self._scene()))
         # File ▸ New (scene.clear) drops the active class — mirror it in the UI.
         if self.active_check.isChecked() and not self._scene().active_ifc:
             self.active_check.blockSignals(True)

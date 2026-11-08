@@ -660,7 +660,7 @@ def translated_attrs(attrs, delta) -> dict:
     return out
 
 
-def copy_group(group, delta=None, _in_definition=False):
+def copy_group(group, delta=None, _in_definition=False, _ifc_copy_context=None):
     """A pastable duplicate of ``group``, optionally translated by ``delta``.
 
     A component instance stays an instance: the duplicate SHARES the prototype
@@ -674,6 +674,9 @@ def copy_group(group, delta=None, _in_definition=False):
     original and the copy hold the same mesh and an edit inside either
     shares back to both."""
     from PySide6.QtGui import QMatrix4x4, QVector3D
+    copy_root = _ifc_copy_context is None
+    if copy_root:
+        _ifc_copy_context = {'groups': {}, 'openings': {}, 'copies': []}
     share = _in_definition or (group.xform is not None
                                and bool(getattr(group, "component", True)))
     if share:
@@ -707,6 +710,15 @@ def copy_group(group, delta=None, _in_definition=False):
     g.layer = group.layer
     from copy import deepcopy
     g.ifc = deepcopy({k: v for k, v in group.ifc.items() if k != "guid"}) if group.ifc else None
+    _ifc_copy_context['groups'][group.uid] = g.uid
+    _ifc_copy_context['copies'].append(g)
+    if g.ifc:
+        from core.ifc_identity import ensure_guid
+        for opening in g.ifc.get('openings', []) or []:
+            if isinstance(opening, dict):
+                previous = opening.pop('guid', None)
+                if previous:
+                    _ifc_copy_context['openings'][previous] = ensure_guid(opening)
     g.billboard = group.billboard
     g.text3d = dict(group.text3d) if group.text3d else None
     g.ext = copy.deepcopy(group.ext) if getattr(group, "ext", None) else None
@@ -718,8 +730,20 @@ def copy_group(group, delta=None, _in_definition=False):
     g.explode_offset = group.explode_offset
     # Nested placements ride along untranslated: ``delta`` already moved the
     # parent, and a child's transform is relative to it.
-    g.children = [copy_group(c, _in_definition=share)
+    g.children = [copy_group(c, _in_definition=share, _ifc_copy_context=_ifc_copy_context)
                   for c in (group.children or ())]
+    if copy_root:
+        # Resolve after the complete tree is copied: a filling can precede
+        # its host in traversal order. External references stay external.
+        for placed in _ifc_copy_context['copies']:
+            if not placed.ifc:
+                continue
+            for opening in placed.ifc.get('openings', []) or []:
+                if isinstance(opening, dict) and opening.get('group_uid') in _ifc_copy_context['groups']:
+                    opening['group_uid'] = _ifc_copy_context['groups'][opening['group_uid']]
+            filling = placed.ifc.get('fills')
+            if isinstance(filling, str) and filling in _ifc_copy_context['openings']:
+                placed.ifc['fills'] = _ifc_copy_context['openings'][filling]
     return g
 
 

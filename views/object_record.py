@@ -66,7 +66,8 @@ class RecordDialog(QDialog):
         form = QFormLayout(self)
         self.schema = QComboBox(); self.schema.addItems(['IFC4', 'IFC4X3_ADD2'])
         form.addRow('Schema for validation', self.schema)
-        self.cls = QComboBox(); self.cls.addItems(IFC_CLASSES)
+        from views.ifc_picker import ClassPicker
+        self.cls = ClassPicker(registry)
         self.cls.setCurrentText(self.initial['class']); form.addRow('Class', self.cls)
         self.predefined = QComboBox(); form.addRow('PredefinedType', self.predefined)
         self.fields = {}

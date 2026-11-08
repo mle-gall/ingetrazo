@@ -287,3 +287,9 @@ written, the records skipped with their validation messages, and, when the
 profile names IDS files and `ifctester` is installed, the pass and fail counts
 per specification. Fix the skipped records with `set_record` and export again:
 GUIDs are persistent, so the second file describes the same objects.
+
+Vocabulary entries additionally expose `domain` and the schema-specific
+`type_class`. The response includes registry `tag_sets`; the default set's
+classes come first. `set_tag_set(key, value)` and
+`delete_tag_set(key, force=false)` use the same registry transaction path as type
+edits. Tag sets are project choices, not object references.

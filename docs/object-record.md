@@ -78,8 +78,8 @@ name, tag, GUID and unknown fields.
 
 ## Schema table scope
 
-The hand-written tables are interoperability facts, not redistributed EXPRESS or
-property-set XML. Sources are the buildingSMART lexical documentation for
+The generated schema tables and hand-written common templates contain
+interoperability facts, not redistributed EXPRESS or property-set XML. Sources are the buildingSMART lexical documentation for
 [IFC4 ADD2 TC1](https://standards.buildingsmart.org/IFC/RELEASE/IFC4/ADD2_TC1/HTML/)
 and [IFC4.3 ADD2](https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/).
 IFC4 is the default. Facility and FacilityPart require IFC4X3_ADD2; these base
@@ -91,3 +91,26 @@ BendingParameters is flagged `scalar_only: false`: v1 can retain a textual note
 but cannot represent that IFC list without a future typed-value extension.
 Exporters must not export that note as an IFC list. IFC4X3-specific pset changes
 are outside this IFC4 template catalogue; exporters still need schema validation.
+
+## Materials, voids and storeys
+
+`material` is a material name, or `{"name": "Wall build-up", "layers":
+[{"name": "Concrete", "thickness": 0.2}]}`. Thickness is in metres.
+Without this field, export chooses a group material or the face material covering
+the greatest area. Scene material RGB and opacity supply the surface style.
+
+`openings` is a list of objects with optional `guid`, `name`, and `class`
+(default and currently only value: `IfcOpeningElement`). Geometry is either
+`faces: [{"outer": [[x,y,z], ...], "holes": [[[x,y,z], ...], ...]}]`,
+in world metres, matching issue #1222's attachment, or `group_uid` naming a
+child placement. Opening GUIDs are assigned to the stored record once. The
+exporter records a void relationship; it does not perform a Boolean subtraction.
+A door or window can set `fills` to that opening's compressed GUID.
+
+`storey` is a name. Registry `storeys[name].elevation` supplies its elevation,
+otherwise zero. A modelled storey/space ancestor takes precedence; a modelled
+building can own the named storey. The attachment's older `{name, elevation}`
+form is also accepted, with registry elevation taking precedence. Numeric
+quantity shorthand normalizes to `{value: number, source: "manual"}`.
+The attachment's free-text `type` remains a registry key: create its registry
+entry first; arbitrary type names are not silently turned into definitions.

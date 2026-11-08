@@ -104,7 +104,8 @@ class RecordTools:
         cls = filters.pop('class', None)
         if filters:
             raise ValueError('Unknown filters: ' + ', '.join(filters))
-        classes = [c for c in IFC_CLASSES if schema in TABLES[c]['schemas']]
+        registry = self._tool_query_registry()
+        classes = [c for c in bim_registry.ordered_classes(registry) if schema in TABLES[c]['schemas']]
         if cls is not None:
             if cls not in classes:
                 raise ValueError('Class is not supported in ' + schema)
@@ -124,10 +125,10 @@ class RecordTools:
                 if search is None or search.casefold() in (code + ' ' + entry['name']).casefold():
                     codes.append(dict(system=key, code=code, **entry))
         return json_value(dict(schema=schema, classes=[dict(
-            **{'class': c}, role=record.role({'class': c}),
+            **{'class': c}, domain=TABLES[c]['domain'], type_class=TABLES[c]['type_class'].get(schema), role=record.role({'class': c}),
             predefined_types=predefined_types(c, schema),
             common_pset=common_pset(c), properties=TABLES[c]['common']) for c in classes],
-            status=STATUS, classification_systems=summaries, codes=page(codes, offset, limit)))
+            tag_sets=registry.get('tag_sets', {}), status=STATUS, classification_systems=summaries, codes=page(codes, offset, limit)))
 
     def _record_targets(self, uids):
         if not isinstance(uids, list) or any(not isinstance(uid, str) for uid in uids):
@@ -234,6 +235,12 @@ class RecordTools:
     def _tool_import_classification_codes(self, system, csv_text):
         return self._tool_set_registry(bim_registry.import_codes_csv(self._tool_query_registry(), system, csv_text))
 
+    def _tool_set_tag_set(self, key, value):
+        return self._registry_upsert('tag_sets', key, value)
+
+    def _tool_delete_tag_set(self, key, force=False):
+        return self._registry_delete('tag_sets', key, force)
+
     def _tool_set_type(self, key, value):
         return self._registry_upsert('types', key, value)
 
@@ -247,7 +254,7 @@ class RecordTools:
         referenced = []
         for group, _, _ in self._groups():
             value = record.apply_type(group.ifc, registry) if group.ifc else {}
-            used = (value.get('type') == key if section == 'types' else
+            used = (False if section == 'tag_sets' else value.get('type') == key if section == 'types' else
                     key in value.get('systems', []) if section == 'systems' else
                     any(c.get('system') == key for c in value.get('classifications', [])))
             if used:

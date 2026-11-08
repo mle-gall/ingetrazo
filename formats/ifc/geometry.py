@@ -40,6 +40,7 @@ def _brep(w: object, faces, context_id: int) -> int:
         shell = w.add("IFCOPENSHELL", face_list)
         item = w.add("IFCSHELLBASEDSURFACEMODEL", f"(#{shell})")
         rep_type = "'SurfaceModel'"
+    w.last_shape_item = item
     return w.add("IFCSHAPEREPRESENTATION", f"#{context_id}", "'Body'",
                  rep_type, f"(#{item})")
 

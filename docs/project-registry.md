@@ -56,3 +56,20 @@ registry untouched. Parent strings are preserved; external or incomplete
 hierarchies are allowed. No Uniclass code tables are bundled: users must supply
 licensed data. The registry dialog includes namespace creation and CSV import;
 its JSON editor exposes all sections, including types and systems.
+
+## Project vocabulary
+
+`tag_sets` maps a key to `{name, description, classes, default}`. Each class
+entry has `class`, optional `predefined_type`, and optional `kinds` (a list of
+ride-kind codes). At most one set is default. Its classes precede the baseline
+list in vocabulary queries and class pickers. “All classes…” opens a searchable
+list ordered by domain.
+
+`storeys` maps names to `{elevation: metres}`. `pset_library: {path: directory}`
+selects locally downloaded PSD XML files. Obtain the property-set definition
+archive from the official buildingSMART IFC4 ADD2 TC1 or IFC4.3 release download,
+extract it outside the repository, and point this setting at that directory.
+No downloaded definitions are bundled or copied into project source. The reader
+extracts names, scalar kinds, enumerations and applicable classes; it caches by
+directory and file modification times. Available library templates validate
+property names and enum members, otherwise baseline validation applies.
