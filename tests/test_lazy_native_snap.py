@@ -391,3 +391,35 @@ def test_rays_the_static_engine_leaves_open_are_settled_as_before(pair,
             assert va._occluded_many(pts) == want, (view, p)
         hidden += sum(want)
     assert 0 < hidden < 4 * 300
+
+
+def test_camera_changes_reuse_pick_geometry_until_a_placement_moves():
+    """Camera-dependent candidate cuts must not rebuild scene geometry.
+
+    Keep the loose index, placement bounds and native instance set across
+    orbit/projection changes; moving a placement must still invalidate them.
+    """
+    win, vp = _window(lazy=True)
+    try:
+        _set_view(vp, VIEWS[0])
+        table = vp._pick_lazy_table()
+        index = vp._pick_index(near="skip")
+        instances = vp._pick_instance_set(table)
+        assert instances is not None
+        for view in VIEWS[1:]:
+            _set_view(vp, view)
+            assert vp._pick_lazy_table() is table
+            assert vp._pick_index(near="skip") is index
+            assert vp._pick_instance_set(table) is instances
+        group = next(g for g in vp.scene.groups if g.xform is not None)
+        moved = QMatrix4x4(group.xform)
+        moved.translate(5, 0, 0)
+        group.xform = moved
+        vp.scene.version += 1
+        vp._tick += 1
+        changed = vp._pick_lazy_table()
+        assert changed is not table
+        assert vp._pick_instance_set(changed) is not instances
+        assert vp._pick_index(near="skip") is not index
+    finally:
+        _close(win)

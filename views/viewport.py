@@ -535,6 +535,8 @@ class _GlTape:
     replay runs the raw list natively when the engine is there, else the
     wrapper calls."""
 
+    perf = None  # Current paint only; retained tapes never retain frame counters.
+
     DRAW, VAO, U1I, U1F, U4F, ENABLE, DISABLE, CULL, FRONT, ACTIVE, TEX, \
         STENCIL = range(12)
 
@@ -544,6 +546,7 @@ class _GlTape:
         self.vals: list = []
         self.arrays = None
         self.execute = execute
+        self.draw_count = 0
 
     def _op(self, code, ints=(), floats=()):
         self.ops.append((code, *ints, *(0,) * (4 - len(ints))))
@@ -552,9 +555,15 @@ class _GlTape:
     def call(self, fn, *args):
         self.calls.append((fn, args))
         if self.execute:
+            start = _time_mod.perf_counter() if self.perf is not None else 0.0
             fn(*args)
+            if self.perf is not None:
+                self.perf["submit_ms"] += (_time_mod.perf_counter() - start) * 1000
 
     def draw(self, fn, mode, first, count, n):
+        self.draw_count += 1
+        if self.execute and self.perf is not None:
+            self.perf["draws"] += 1
         self.call(fn, mode, first, count, n)
         self._op(self.DRAW, (mode, first, count, n))
 
@@ -604,12 +613,24 @@ class _GlTape:
                            np.asarray(self.vals, dtype=np.float32).reshape(-1, 4))
         return self.arrays
 
+    @classmethod
+    def submit_native(cls, native, ops, vals, draws):
+        start = _time_mod.perf_counter() if cls.perf is not None else 0.0
+        native.run(ops, vals)
+        if cls.perf is not None:
+            cls.perf["draws"] += draws
+            cls.perf["submit_ms"] += (_time_mod.perf_counter() - start) * 1000
+
     def replay(self, native) -> None:
         if native is not None:
-            native.run(*self.array_data())
+            self.submit_native(native, *self.array_data(), self.draw_count)
             return
+        start = _time_mod.perf_counter() if self.perf is not None else 0.0
         for fn, args in self.calls:
             fn(*args)
+        if self.perf is not None:
+            self.perf["draws"] += self.draw_count
+            self.perf["submit_ms"] += (_time_mod.perf_counter() - start) * 1000
 
 
 def _callable_proc(addr: int) -> bool:
@@ -2437,6 +2458,11 @@ class Viewport(QOpenGLWidget):
                 self._gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
             return
         self._sync_depth_reach()
+        if _PERF:
+            self._inst_perf = dict(draws=0, submit_ms=0.0, gather_ms=0.0,
+                                   prototypes=0, placements=0, frustum=0, pixel=0,
+                                   batches=0, pass_ms=0.0, faces_draws=0, edges_draws=0)
+            _GlTape.perf = self._inst_perf
         _pt0 = _time_mod.perf_counter() if _PERF else 0.0
 
         # Render the 3D scene into our own FBO (which has a real depth buffer)
@@ -2663,6 +2689,7 @@ class Viewport(QOpenGLWidget):
             # Hi-res export: the scene stays in the FBO for render_image to
             # read back; the widget blit and its QPainter overlay don't apply.
             self._scene_fbo.release()
+            _GlTape.perf = None
             return
 
         # The depth this frame just drew, read ONCE for the overlay's
@@ -2724,7 +2751,8 @@ class Viewport(QOpenGLWidget):
                 segs = " ".join(f"{k}={v:.0f}ms" for k, v in _fseg.items())
                 _plog("frame", _dt,
                       extra=f"{segs} cull={cf//1000}k/{tf//1000}k"
-                            f" tris +{ce//1000}k edges{lat}", floor=0.0)
+                            f" tris +{ce//1000}k edges{lat}"
+                            + self._inst_perf_summary(), floor=0.0)
             self._input_t = None
             st = getattr(self, "_perf_stat", None) or \
                 [_time_mod.perf_counter(), 0, 0.0]
@@ -2733,10 +2761,12 @@ class Viewport(QOpenGLWidget):
             now = _time_mod.perf_counter()
             if now - st[0] >= 1.0:
                 _plog("frames/s", st[2] / max(st[1], 1),
-                      extra=f"{st[1]} paints en {now-st[0]:.1f}s (avg ms)",
+                      extra=f"{st[1]} paints en {now-st[0]:.1f}s (avg ms); last"
+                            + self._inst_perf_summary(),
                       floor=0.0)
                 st = [now, 0, 0.0]
             self._perf_stat = st
+            _GlTape.perf = None
 
     def _paint_static(self, mvp, w, h, style, mode, _fmark, hover) -> None:
         """paintGL's passes of the model and what sits in it — faces,
@@ -4272,7 +4302,54 @@ class Viewport(QOpenGLWidget):
         (``gl_FrontFacing``, the culled back-tint pass) by winding."""
         self._gl.glFrontFace(GL_CW if mirrored else GL_CCW)
 
+    def _inst_perf_summary(self):
+        """CPU submission timing and allocated prototype VBO bytes.
+
+        Submission can stall in the driver, but is not a GPU timer query.
+        Strict-view rejects differ from submissions because the existing
+        guard band deliberately keeps some offscreen placements in tapes.
+        """
+        st = self._inst_perf
+        gpu_bytes = sum(e.get("gpu_static_bytes", 0)
+                        + e.get("gpu_matrix_bytes", 64)
+                        + (e["mirror"].get("gpu_matrix_bytes", 64)
+                           if "mirror" in e else 0)
+                        for e in (getattr(self, "_proto_draw", None) or {}).values())
+        return (f" inst_proto={st['prototypes']} inst_place={st['placements']}"
+                f" inst_frustum={st['frustum']} inst_pixel={st['pixel']}"
+                f" inst_batches={st['batches']} inst_draws={st['draws']}"
+                f" face_draws={st['faces_draws']} edge_draws={st['edges_draws']}"
+                f" gather={st['gather_ms']:.1f}ms"
+                f" inst_python={max(0, st['pass_ms'] - st['submit_ms']):.1f}ms"
+                f" inst_gl_submit={st['submit_ms']:.1f}ms"
+                f" inst_vbo={gpu_bytes / 1048576:.1f}MiB")
+
+    def _perf_instanced_draw(self, extra, *args):
+        if not _PERF:
+            return extra.glDrawArraysInstanced(*args)
+        start = _time_mod.perf_counter()
+        extra.glDrawArraysInstanced(*args)
+        st = self._inst_perf
+        st['draws'] += 1
+        st['submit_ms'] += (_time_mod.perf_counter() - start) * 1000
+
     def _gather_instanced(self):
+        start = _time_mod.perf_counter() if _PERF else 0.0
+        result = Viewport._gather_instanced_impl(self)
+        if _PERF:
+            st = self._inst_perf
+            st['gather_ms'] += (_time_mod.perf_counter() - start) * 1000
+            memo = getattr(self, '_inst_perf_counts', None)
+            key = (id(result), self.scene.version, self.edit_rest_fade)
+            if memo is None or memo[0] != key or memo[1] is not result:
+                counts = (len(result), sum(len(v[2]) for v in result.values()),
+                          sum(sum(bool(b) for b, _ in self._instanced_batches(v[2]))
+                              for v in result.values()))
+                memo = self._inst_perf_counts = (key, result, counts)
+            st['prototypes'], st['placements'], st['batches'] = memo[2]
+        return result
+
+    def _gather_instanced_impl(self):
         """Visible, eligible instances grouped by prototype mesh — computed
         once per frame (faces pass), reused by the edges pass. Instances are
         frustum-culled by their baked chunk's world AABB.
@@ -4314,7 +4391,13 @@ class Viewport(QOpenGLWidget):
             # array it used to build was most of a frame's gather, #158);
             # the same products and sums, in the same order.
             keep = self._instances_in_frustum(lo, hi, planes)
-            keep &= ~self._instances_below_a_pixel(pool)
+            below = self._instances_below_a_pixel(pool)
+            if _PERF:
+                # Strict-view rejection counts; submitted batches may retain
+                # the existing wider guard band for stable command tapes.
+                self._inst_perf['frustum'] = int((~keep).sum())
+                self._inst_perf['pixel'] = int((keep & below).sum())
+            keep &= ~below
         if pv:
             keep &= ~self._inst_pool_previewed(pool, pv)
         # One pool per (prototype, container paint): a painted instance
@@ -4711,7 +4794,11 @@ class Viewport(QOpenGLWidget):
             n = len(raw) // 20
             tex_runs.append((tkey, start, n))
             start += n
-        entry = {"key": key,
+        static_bytes = sum(max(len(raw), 4) for raw in
+                           (vcol_raw, edges_raw, dback_raw, b"".join(tex_parts)))
+        if base.get("smooth_vcol"):
+            static_bytes += max(len(base["smooth_vcol"]), 4)
+        entry = {"key": key, "gpu_static_bytes": static_bytes,
                  "vcol_vbo": static_vbo(vcol_raw),
                  "vcol_count": len(vcol_raw) // 24,
                  "normal_vbo": (static_vbo(base["smooth_vcol"])
@@ -4856,6 +4943,7 @@ class Viewport(QOpenGLWidget):
             raw = groups.mats[groups.idx].tobytes()
             entry["mat_vbo"].bind()
             entry["mat_vbo"].allocate(raw, len(raw))
+            entry["gpu_matrix_bytes"] = len(raw)
             entry["mat_vbo"].release()
             entry["mat_sig"] = (sig, groups.idx)
             entry["mat_batch"] = groups
@@ -4871,6 +4959,7 @@ class Viewport(QOpenGLWidget):
                              dtype=np.float32).tobytes()
             entry["mat_vbo"].bind()
             entry["mat_vbo"].allocate(raw, len(raw))
+            entry["gpu_matrix_bytes"] = len(raw)
             entry["mat_vbo"].release()
             entry["mat_sig"] = sig
             entry["mat_batch"] = None
@@ -4945,7 +5034,7 @@ class Viewport(QOpenGLWidget):
         fast = getattr(self, slot + "_fast", None)
         if (defer and fast is not None and fast[0] is by_proto
                 and fast[1] == serial and fast[2] == state_key):
-            native.run(fast[3][1], fast[3][2])
+            _GlTape.submit_native(native, fast[3][1], fast[3][2], fast[3][3])
             return
         self._defer_inst_tapes = defer
         try:
@@ -4963,9 +5052,10 @@ class Viewport(QOpenGLWidget):
                 import numpy as np
                 arrays = [tape.array_data() for tape in tapes]
                 merged = (tapes, np.concatenate([a[0] for a in arrays]),
-                          np.concatenate([a[1] for a in arrays]))
+                          np.concatenate([a[1] for a in arrays]),
+                          sum(tape.draw_count for tape in tapes))
                 setattr(self, slot + "_merged", merged)
-            native.run(merged[1], merged[2])
+            _GlTape.submit_native(native, merged[1], merged[2], merged[3])
             setattr(self, slot + "_fast", (by_proto,
                     getattr(self, "_inst_matrix_serial", 0), state_key, merged))
         else:
@@ -5126,6 +5216,17 @@ class Viewport(QOpenGLWidget):
         self._lean_faces_rec = (key, by_proto, serial, tape, pairs) if cacheable else None
 
     def _draw_instanced_faces(self, mode, style) -> None:
+        if not _PERF:
+            return Viewport._draw_instanced_faces_impl(self, mode, style)
+        before = self._inst_perf['draws']
+        start = _time_mod.perf_counter()
+        try:
+            return Viewport._draw_instanced_faces_impl(self, mode, style)
+        finally:
+            self._inst_perf['faces_draws'] += self._inst_perf['draws'] - before
+            self._inst_perf['pass_ms'] += (_time_mod.perf_counter() - start) * 1000
+
+    def _draw_instanced_faces_impl(self, mode, style) -> None:
         by_proto = self._gather_instanced()
         if not by_proto or mode == "wireframe":
             return
@@ -5165,7 +5266,7 @@ class Viewport(QOpenGLWidget):
                         self._program.setUniformValue(self._loc_use_vcolor, 1)
                         self._set_back_face_color()
                     entry["vcol_vao"].bind()
-                    extra.glDrawArraysInstanced(
+                    Viewport._perf_instanced_draw(self, extra,
                         GL_TRIANGLES, 0, entry["vcol_count"], n)
                     entry["vcol_vao"].release()
                     self._program.setUniformValue(self._loc_use_vcolor, 0)
@@ -5175,7 +5276,7 @@ class Viewport(QOpenGLWidget):
                         self._set_color(fr[0], fr[1], fr[2], 1.0)
                         entry["tex_vao"].bind()
                         for _tk, s0, cnt in entry["tex_runs"]:
-                            extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
+                            Viewport._perf_instanced_draw(self, extra, GL_TRIANGLES, s0, cnt, n)
                         entry["tex_vao"].release()
                     elif mode == "shaded":
                         entry["tex_vao"].bind()
@@ -5184,7 +5285,7 @@ class Viewport(QOpenGLWidget):
                             self._program.setUniformValue1f(
                                 self._loc_shade, float(shade))
                             self._set_color(r, g, b, 1.0)
-                            extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
+                            Viewport._perf_instanced_draw(self, extra, GL_TRIANGLES, s0, cnt, n)
                         entry["tex_vao"].release()
                         self._program.setUniformValue1f(self._loc_shade, 1.0)
                     else:            # textures / xray
@@ -5198,7 +5299,7 @@ class Viewport(QOpenGLWidget):
                                 self._loc_shade, float(shade))
                             self._set_cutout(getattr(tex, "_cutout", False))
                             tex.bind(0)
-                            extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
+                            Viewport._perf_instanced_draw(self, extra, GL_TRIANGLES, s0, cnt, n)
                             tex.release(0)
                         entry["tex_vao"].release()
                         self._set_cutout(False)
@@ -5211,7 +5312,7 @@ class Viewport(QOpenGLWidget):
                     self._gl.glCullFace(GL_FRONT)
                     self._program.setUniformValue(self._loc_use_vcolor, 0)
                     entry["dback_vao"].bind()
-                    extra.glDrawArraysInstanced(
+                    Viewport._perf_instanced_draw(self, extra,
                         GL_TRIANGLES, 0, entry["dback_count"], n)
                     entry["dback_vao"].release()
                     self._gl.glDisable(GL_CULL_FACE)
@@ -5235,13 +5336,13 @@ class Viewport(QOpenGLWidget):
             n = self._update_inst_matrices(entry, groups)
             if entry["vcol_count"]:
                 entry["vcol_vao"].bind()
-                extra.glDrawArraysInstanced(
+                Viewport._perf_instanced_draw(self, extra,
                     GL_TRIANGLES, 0, entry["vcol_count"], n)
                 entry["vcol_vao"].release()
             if entry["tex_runs"]:
                 entry["tex_vao"].bind()
                 for _tk, s0, cnt in entry["tex_runs"]:
-                    extra.glDrawArraysInstanced(GL_TRIANGLES, s0, cnt, n)
+                    Viewport._perf_instanced_draw(self, extra, GL_TRIANGLES, s0, cnt, n)
                 entry["tex_vao"].release()
 
     def _draw_back_edges(self, color, w: int, h: int) -> None:
@@ -5365,6 +5466,17 @@ class Viewport(QOpenGLWidget):
         return replay
 
     def _draw_instanced_edges(self) -> None:
+        if not _PERF:
+            return Viewport._draw_instanced_edges_impl(self)
+        before = self._inst_perf['draws']
+        start = _time_mod.perf_counter()
+        try:
+            return Viewport._draw_instanced_edges_impl(self)
+        finally:
+            self._inst_perf['edges_draws'] += self._inst_perf['draws'] - before
+            self._inst_perf['pass_ms'] += (_time_mod.perf_counter() - start) * 1000
+
+    def _draw_instanced_edges_impl(self) -> None:
         by_proto = getattr(self, "_frame_instanced", None)
         if not by_proto:
             return
@@ -5383,7 +5495,7 @@ class Viewport(QOpenGLWidget):
                 n = self._update_inst_matrices(entry, lote)
                 self._program.setUniformValue1f(self._loc_fade, fade)
                 entry["edges_vao"].bind()
-                extra.glDrawArraysInstanced(GL_LINES, 0,
+                Viewport._perf_instanced_draw(self, extra, GL_LINES, 0,
                                             entry["edge_count"], n)
                 entry["edges_vao"].release()
         self._program.setUniformValue1f(self._loc_fade, 0.0)
@@ -6049,7 +6161,7 @@ class Viewport(QOpenGLWidget):
                      "_lean_faces_rec_chunks", "_lean_edges_rec_chunks",
                      "_lean_faces_rec_merged", "_lean_edges_rec_merged",
                      "_lean_faces_rec_fast", "_lean_edges_rec_fast",
-                     "_inst_chunks_memo",
+                     "_inst_chunks_memo", "_inst_perf_counts",
                      "_gl_replay_memo", "_inst_frame_memo",
                      "_frame_instanced"):
             if getattr(self, name, None) is not None:
