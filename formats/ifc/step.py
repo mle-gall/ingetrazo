@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Small dependency-free ISO 10303-21 literal and entity writer."""
 import uuid
+import tempfile
 
 def ifc_guid() -> str:
     """A 22-character IFC compressed GUID (base-64 over the IFC alphabet)."""
@@ -36,8 +37,8 @@ def _f(v: float) -> str:
 
 
 class _Writer:
-    def __init__(self, stream) -> None:
-        self.stream = stream
+    def __init__(self, stream=None) -> None:
+        self.stream = stream if stream is not None else tempfile.TemporaryFile(mode="w+", encoding="ascii")
         self._next = 1
 
     def add(self, entity: str, *attrs) -> int:

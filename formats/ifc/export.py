@@ -15,7 +15,7 @@ from core.version import __version__
 from .entities import Builder
 from core.ifc_tables_data import SCHEMA_DATA
 from .relationships import Appearance
-from .geometry import array_body
+from .geometry import array_body, mapped_body
 from core.geometry_arrays import (world_arrays, merged, faces_arrays,
                                   quantities as array_quantities, measurements,
                                   face_attributes, recorded_arrays)
@@ -44,6 +44,15 @@ def refs(values):
 
 
 def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, project_directory=None):
+    with open(path, 'w', encoding='ascii', buffering=1024 * 1024) as stream:
+        report = _save_ifc(scene, path, project_name, profile, stream)
+    registry = bim_registry.get(scene)
+    config = registry.get('export_profiles', {}).get(profile, {}) if profile else {}
+    report.ids = check_ids(path, config.get('ids_files', []), project_directory)
+    return report
+
+
+def _save_ifc(scene, path, project_name, profile, stream):
     registry = bim_registry.get(scene)
     config = registry.get('export_profiles', {}).get(profile, {}) if profile else {}
     if profile and profile not in registry.get('export_profiles', {}):
@@ -98,11 +107,21 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
             return identity[parts[0]]
         return value
 
-    w = Builder(schema)
     owner = '$'
     project_data = registry.get('project', {})
     author = project_data.get('author', '')
     organization = project_data.get('organization', '')
+    stamp = datetime.datetime.now().isoformat(timespec='seconds')
+    view = config.get('view', 'ReferenceView')
+    if view == 'ReferenceView' and schema == 'IFC4':
+        view = 'ReferenceView_V1.2'
+    header = ("ISO-10303-21;\nHEADER;\n"
+              f"FILE_DESCRIPTION(({_s('ViewDefinition [' + view + ']')}),'2;1');\n"
+              f"FILE_NAME({_s(Path(path).name)},{_s(stamp)},({_s(author)}),({_s(organization)}),"
+              f"{_s('IngeTrazo ' + __version__)},'IngeTrazo','');\n"
+              f"FILE_SCHEMA(('{schema}'));\nENDSEC;\nDATA;\n")
+    stream.write(header)
+    w = Builder(schema, stream)
     if author or organization:
         person = w.entity('IfcPerson', FamilyName=_s(author or organization))
         org = w.entity('IfcOrganization', Name=_s(organization or author))
@@ -177,6 +196,7 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
                 result.append((name, root('IfcPropertySet', ('pset', key, name), Name=_s(name), HasProperties=refs(values))))
         return result
 
+    maps = {}
     for obj in objects:
         group = obj.get('group')
         raw = record.normalize(group.ifc) if group is not None else {'class': obj['class'], 'name': obj['name']}
@@ -228,7 +248,11 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
                      ObjectPlacement=ref(placement))
         rep, item = None, None
         if len(arrays.ring_counts):
-            rep = array_body(w, arrays, body, geometry)
+            if config.get('instancing', False) and group is not None:
+                rep = mapped_body(w, group, bases[id(group)], excluded,
+                                  body, geometry, maps, axis)
+            else:
+                rep = array_body(w, arrays, body, geometry)
             item = w.last_shape_item
             attrs['Representation'] = ref(w.add('IFCPRODUCTDEFINITIONSHAPE', '$', '$', refs([rep])))
         available = w.attributes(cls)
@@ -442,15 +466,5 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
                     Edition=_s(data.get('edition', '')), Description=_s(data.get('description', '')))
         node = w.entity('IfcClassificationReference', Identification=_s(code), Name=_s(name), ReferencedSource=ref(sources[system]))
         relation('IfcRelAssociatesClassification', (system, code), RelatedObjects=refs(members), RelatingClassification=ref(node))
-    stamp = datetime.datetime.now().isoformat(timespec='seconds')
-    view = config.get('view', 'ReferenceView')
-    if view == 'ReferenceView' and schema == 'IFC4':
-        view = 'ReferenceView_V1.2'
-    header = ("ISO-10303-21;\nHEADER;\n"
-              f"FILE_DESCRIPTION(({_s('ViewDefinition [' + view + ']')}),'2;1');\n"
-              f"FILE_NAME({_s(Path(path).name)},{_s(stamp)},({_s(author)}),({_s(organization)}),"
-              f"{_s('IngeTrazo ' + __version__)},'IngeTrazo','');\n"
-              f"FILE_SCHEMA(('{schema}'));\nENDSEC;\nDATA;\n")
-    Path(path).write_text(header + '\n'.join(w.lines) + '\nENDSEC;\nEND-ISO-10303-21;\n', encoding='ascii')
-    ids = check_ids(path, config.get('ids_files', []), project_directory)
-    return ExportReport(len(exported), path, problems, ids, linked_skipped)
+    stream.write('ENDSEC;\nEND-ISO-10303-21;\n')
+    return ExportReport(len(exported), path, problems, [], linked_skipped)
