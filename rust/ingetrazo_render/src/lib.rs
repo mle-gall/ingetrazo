@@ -1,0 +1,661 @@
+//! A resident Metal scene: compute compaction precedes native indirect draws.
+use pyo3::{exceptions::PyValueError, prelude::*};
+use raw_window_handle::{
+    AppKitDisplayHandle, AppKitWindowHandle, RawDisplayHandle, RawWindowHandle,
+};
+use std::{ptr::NonNull, time::Instant};
+use wgpu::util::DeviceExt;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Command {
+    count: u32,
+    instances: u32,
+    first: u32,
+    base: i32,
+    start: u32,
+}
+struct Scene {
+    vertex: wgpu::Buffer,
+    index: wgpu::Buffer,
+    commands: wgpu::Buffer,
+    template: wgpu::Buffer,
+    compute: wgpu::BindGroup,
+    draw: wgpu::BindGroup,
+    n: u32,
+    p: u32,
+}
+#[pyclass(unsendable)]
+struct Renderer {
+    surface: wgpu::Surface<'static>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    config: wgpu::SurfaceConfiguration,
+    depth: wgpu::Texture,
+    ids: wgpu::Texture,
+    camera: wgpu::Buffer,
+    compute: wgpu::ComputePipeline,
+    draw: wgpu::RenderPipeline,
+    scene: Option<Scene>,
+    multi: bool,
+    queries: Option<wgpu::QuerySet>,
+    resolve: wgpu::Buffer,
+    read: wgpu::Buffer,
+    #[pyo3(get)]
+    gpu_memory: u64,
+    #[pyo3(get)]
+    adapter: String,
+}
+fn texture(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
+    d.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    })
+}
+fn buffer(d: &wgpu::Device, bytes: &[u8], usage: wgpu::BufferUsages) -> wgpu::Buffer {
+    d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: None,
+        contents: bytes,
+        usage,
+    })
+}
+fn bind(
+    d: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    buffers: &[&wgpu::Buffer],
+) -> wgpu::BindGroup {
+    let entries: Vec<_> = buffers
+        .iter()
+        .enumerate()
+        .map(|(i, b)| wgpu::BindGroupEntry {
+            binding: i as u32,
+            resource: b.as_entire_binding(),
+        })
+        .collect();
+    d.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout,
+        entries: &entries,
+    })
+}
+#[pymethods]
+impl Renderer {
+    #[new]
+    fn new(ns_view_ptr: usize, width: u32, height: u32, scale: f64) -> PyResult<Self> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::METAL,
+            ..Default::default()
+        });
+        let ptr = NonNull::new(ns_view_ptr as *mut std::ffi::c_void)
+            .ok_or_else(|| PyValueError::new_err("null NSView"))?;
+        // Qt owns the NSView. Python retains this Renderer only while its widget lives.
+        // wgpu's Metal backend installs/reuses a CAMetalLayer on this AppKit view.
+        let surface = unsafe {
+            instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                raw_display_handle: RawDisplayHandle::AppKit(AppKitDisplayHandle::new()),
+                raw_window_handle: RawWindowHandle::AppKit(AppKitWindowHandle::new(ptr)),
+            })
+        }
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let a = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        }))
+        .ok_or_else(|| PyValueError::new_err("no Metal adapter"))?;
+        let optional = wgpu::Features::MULTI_DRAW_INDIRECT | wgpu::Features::TIMESTAMP_QUERY;
+        let features = (a.features() & optional) | wgpu::Features::INDIRECT_FIRST_INSTANCE;
+        let (device, queue) = pollster::block_on(a.request_device(
+            &wgpu::DeviceDescriptor {
+                label: None,
+                required_features: features,
+                required_limits: a.limits(),
+                memory_hints: Default::default(),
+            },
+            None,
+        ))
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let caps = surface.get_capabilities(&a);
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .ok_or_else(|| PyValueError::new_err("no sRGB surface"))?;
+        let w = ((width as f64 * scale) as u32).max(1);
+        let h = ((height as f64 * scale) as u32).max(1);
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: w,
+            height: h,
+            present_mode: wgpu::PresentMode::AutoNoVsync,
+            desired_maximum_frame_latency: 2,
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
+        };
+        surface.configure(&device, &config);
+        let camera = buffer(
+            &device,
+            &[0; 80],
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        );
+        let cs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cull"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+        });
+        let compute = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: None,
+            module: &cs,
+            entry_point: Some("cull"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let vs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("draw"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("draw.wgsl").into()),
+        });
+        let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
+        let draw = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: None,
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &vs,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 28,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &attrs,
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &vs,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R32Uint,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            primitive: Default::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
+        let queries = features.contains(wgpu::Features::TIMESTAMP_QUERY).then(|| {
+            device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: None,
+                ty: wgpu::QueryType::Timestamp,
+                count: 4,
+            })
+        });
+        let resolve = buffer(
+            &device,
+            &[0; 32],
+            wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+        );
+        let read = buffer(
+            &device,
+            &[0; 256],
+            wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        );
+        Ok(Self {
+            depth: texture(&device, w, h, wgpu::TextureFormat::Depth32Float),
+            ids: texture(&device, w, h, wgpu::TextureFormat::R32Uint),
+            surface,
+            device,
+            queue,
+            config,
+            camera,
+            compute,
+            draw,
+            scene: None,
+            multi: features.contains(wgpu::Features::MULTI_DRAW_INDIRECT),
+            queries,
+            resolve,
+            read,
+            gpu_memory: 0,
+            adapter: format!(
+                "{:?}; multi_draw={}",
+                a.get_info(),
+                features.contains(wgpu::Features::MULTI_DRAW_INDIRECT)
+            ),
+        })
+    }
+    /// Packed little-endian arrays; reject malformed uploads before reaching wgpu.
+    fn set_scene(
+        &mut self,
+        prototypes: (&[u8], &[u8], &[u8], &[u8]),
+        instances: &[u8],
+    ) -> PyResult<()> {
+        let (v, ix, p, cmd) = prototypes;
+        if v.len() % 28 != 0
+            || ix.len() % 4 != 0
+            || p.is_empty()
+            || p.len() % 32 != 0
+            || cmd.len() != p.len() / 32 * 20
+            || instances.is_empty()
+            || instances.len() % 80 != 0
+        {
+            return Err(PyValueError::new_err("invalid scene array layout"));
+        }
+        let n = instances.len() / 80;
+        let count = p.len() / 32;
+        let mut counts = vec![0u32; count];
+        for row in instances.chunks_exact(80) {
+            let id = u32::from_le_bytes(row[64..68].try_into().unwrap()) as usize;
+            if id >= count {
+                return Err(PyValueError::new_err("prototype id out of range"));
+            }
+            counts[id] += 1;
+        }
+        let mut start = 0;
+        for (row, capacity) in cmd.chunks_exact(20).zip(counts) {
+            let c: Command = bytemuck::pod_read_unaligned(row);
+            if c.instances != 0
+                || c.start != start
+                || (c.first as u64 + c.count as u64) * 4 > ix.len() as u64
+            {
+                return Err(PyValueError::new_err("invalid command range"));
+            }
+            for index in ix[c.first as usize * 4..(c.first + c.count) as usize * 4].chunks_exact(4)
+            {
+                let j = u32::from_le_bytes(index.try_into().unwrap()) as i64 + c.base as i64;
+                if j < 0 || j >= v.len() as i64 / 28 {
+                    return Err(PyValueError::new_err("vertex index out of range"));
+                }
+            }
+            start += capacity;
+        }
+        for bytes in [p, instances] {
+            if bytes.len() as u64 > self.device.limits().max_storage_buffer_binding_size as u64 {
+                return Err(PyValueError::new_err("scene exceeds storage binding limit"));
+            }
+        }
+        let vertex = buffer(&self.device, v, wgpu::BufferUsages::VERTEX);
+        let index = buffer(&self.device, ix, wgpu::BufferUsages::INDEX);
+        let protos = buffer(&self.device, p, wgpu::BufferUsages::STORAGE);
+        let inst = buffer(&self.device, instances, wgpu::BufferUsages::STORAGE);
+        let commands = buffer(
+            &self.device,
+            cmd,
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::INDIRECT
+                | wgpu::BufferUsages::COPY_DST,
+        );
+        let template = buffer(&self.device, cmd, wgpu::BufferUsages::COPY_SRC);
+        let survivors = buffer(&self.device, &vec![0; n * 4], wgpu::BufferUsages::STORAGE);
+        let compute = bind(
+            &self.device,
+            &self.compute.get_bind_group_layout(0),
+            &[&self.camera, &inst, &protos, &commands, &survivors],
+        );
+        let draw = bind(
+            &self.device,
+            &self.draw.get_bind_group_layout(0),
+            &[&self.camera, &inst, &survivors],
+        );
+        self.gpu_memory =
+            (v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 288)
+                as u64;
+        self.scene = Some(Scene {
+            vertex,
+            index,
+            commands,
+            template,
+            compute,
+            draw,
+            n: n as u32,
+            p: count as u32,
+        });
+        self.device.poll(wgpu::Maintain::Wait);
+        Ok(())
+    }
+    fn set_camera(&mut self, view: Vec<f32>, proj: Vec<f32>) -> PyResult<()> {
+        let v: [f32; 16] = view
+            .try_into()
+            .map_err(|_| PyValueError::new_err("view needs 16 floats"))?;
+        let p: [f32; 16] = proj
+            .try_into()
+            .map_err(|_| PyValueError::new_err("projection needs 16 floats"))?;
+        let correction = glam::Mat4::from_cols_array(&[
+            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0.5, 0., 0., 0., 0.5, 1.,
+        ]);
+        let vp = correction * glam::Mat4::from_cols_array(&p) * glam::Mat4::from_cols_array(&v);
+        let mut data = vp.to_cols_array().to_vec();
+        data.extend([self.config.width as f32, self.config.height as f32, 0., 0.]);
+        self.queue
+            .write_buffer(&self.camera, 0, bytemuck::cast_slice(&data));
+        Ok(())
+    }
+    fn resize(&mut self, w: u32, h: u32, scale: f64) {
+        self.config.width = ((w as f64 * scale) as u32).max(1);
+        self.config.height = ((h as f64 * scale) as u32).max(1);
+        self.surface.configure(&self.device, &self.config);
+        self.depth = texture(
+            &self.device,
+            self.config.width,
+            self.config.height,
+            wgpu::TextureFormat::Depth32Float,
+        );
+        self.ids = texture(
+            &self.device,
+            self.config.width,
+            self.config.height,
+            wgpu::TextureFormat::R32Uint,
+        );
+    }
+    fn render(&mut self) -> PyResult<(f64, Option<f64>)> {
+        let start = Instant::now();
+        let s = self
+            .scene
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+        let frame = self
+            .surface
+            .get_current_texture()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let color = frame.texture.create_view(&Default::default());
+        let depth = self.depth.create_view(&Default::default());
+        let ids = self.ids.create_view(&Default::default());
+        let mut e = self.device.create_command_encoder(&Default::default());
+        e.copy_buffer_to_buffer(&s.template, 0, &s.commands, 0, s.p as u64 * 20);
+        {
+            let mut pass = e.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: self
+                    .queries
+                    .as_ref()
+                    .map(|q| wgpu::ComputePassTimestampWrites {
+                        query_set: q,
+                        beginning_of_pass_write_index: Some(0),
+                        end_of_pass_write_index: Some(1),
+                    }),
+            });
+            pass.set_pipeline(&self.compute);
+            pass.set_bind_group(0, &s.compute, &[]);
+            pass.dispatch_workgroups(s.n.div_ceil(64), 1, 1);
+        }
+        {
+            let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &color,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.12,
+                                g: 0.15,
+                                b: 0.2,
+                                a: 1.,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &ids,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                ],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: self
+                    .queries
+                    .as_ref()
+                    .map(|q| wgpu::RenderPassTimestampWrites {
+                        query_set: q,
+                        beginning_of_pass_write_index: Some(2),
+                        end_of_pass_write_index: Some(3),
+                    }),
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.draw);
+            pass.set_bind_group(0, &s.draw, &[]);
+            pass.set_vertex_buffer(0, s.vertex.slice(..));
+            pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
+            if self.multi {
+                pass.multi_draw_indexed_indirect(&s.commands, 0, s.p);
+            } else {
+                for k in 0..s.p {
+                    pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
+                }
+            }
+        }
+        if let Some(q) = &self.queries {
+            e.resolve_query_set(q, 0..4, &self.resolve, 0);
+            e.copy_buffer_to_buffer(&self.resolve, 0, &self.read, 0, 32);
+        }
+        self.queue.submit([e.finish()]);
+        frame.present();
+        let cpu = start.elapsed().as_secs_f64() * 1000.;
+        let gpu = if self.queries.is_some() {
+            let bytes = self.readback(32)?;
+            let t: Vec<u64> = bytes
+                .chunks_exact(8)
+                .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+                .collect();
+            Some((t[3] - t[0]) as f64 * self.queue.get_timestamp_period() as f64 / 1e6)
+        } else {
+            self.device.poll(wgpu::Maintain::Wait);
+            None
+        };
+        Ok((cpu, gpu))
+    }
+    fn pick(&self, x: u32, y: u32) -> PyResult<i64> {
+        if x >= self.config.width || y >= self.config.height {
+            return Ok(-1);
+        }
+        let mut e = self.device.create_command_encoder(&Default::default());
+        e.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.ids,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &self.read,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit([e.finish()]);
+        let b = self.readback(4)?;
+        Ok(u32::from_le_bytes(b.try_into().unwrap()) as i64 - 1)
+    }
+}
+impl Renderer {
+    fn readback(&self, n: u64) -> PyResult<Vec<u8>> {
+        let slice = self.read.slice(..n);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        self.device.poll(wgpu::Maintain::Wait);
+        rx.recv()
+            .unwrap()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let bytes = slice.get_mapped_range().to_vec();
+        self.read.unmap();
+        Ok(bytes)
+    }
+}
+#[pymodule]
+fn ingetrazo_render(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<Renderer>()
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn indirect_layout() {
+        assert_eq!(std::mem::size_of::<Command>(), 20);
+        assert_eq!(std::mem::offset_of!(Command, start), 16);
+        assert_eq!(std::mem::offset_of!(Command, instances), 4);
+    }
+}
+
+/// Reference of the shader's conservative homogeneous eight-corner test.
+#[cfg(test)]
+fn visible(
+    vp: glam::Mat4,
+    world: glam::Mat4,
+    lo: glam::Vec3,
+    hi: glam::Vec3,
+    size: glam::Vec2,
+) -> bool {
+    let m = vp * world;
+    let mut rejected = [0; 6];
+    let mut low = glam::Vec2::splat(f32::INFINITY);
+    let mut high = glam::Vec2::splat(f32::NEG_INFINITY);
+    let mut crosses = false;
+    for k in 0..8 {
+        let p = glam::vec3(
+            if k & 1 != 0 { hi.x } else { lo.x },
+            if k & 2 != 0 { hi.y } else { lo.y },
+            if k & 4 != 0 { hi.z } else { lo.z },
+        );
+        let q = m * p.extend(1.);
+        for (i, out) in [
+            q.x < -q.w,
+            q.y < -q.w,
+            q.z < 0.,
+            q.x > q.w,
+            q.y > q.w,
+            q.z > q.w,
+        ]
+        .iter()
+        .enumerate()
+        {
+            rejected[i] += *out as u32;
+        }
+        if q.w <= 0. {
+            crosses = true;
+        } else {
+            let xy = glam::vec2(q.x, q.y) / q.w;
+            low = low.min(xy);
+            high = high.max(xy);
+        }
+    }
+    !rejected.contains(&8) && (crosses || ((high - low) * size * 0.5).max_element() >= 1.)
+}
+#[cfg(test)]
+mod reference_tests {
+    use super::*;
+    use glam::*;
+    #[test]
+    fn clip_planes_and_pixel_size() {
+        let lo = vec3(-0.1, -0.1, 0.2);
+        let hi = vec3(0.1, 0.1, 0.4);
+        assert!(visible(
+            Mat4::IDENTITY,
+            Mat4::IDENTITY,
+            lo,
+            hi,
+            Vec2::splat(1000.)
+        ));
+        for shift in [
+            vec3(2., 0., 0.),
+            vec3(-2., 0., 0.),
+            vec3(0., 2., 0.),
+            vec3(0., -2., 0.),
+            vec3(0., 0., 2.),
+            vec3(0., 0., -2.),
+        ] {
+            assert!(!visible(
+                Mat4::IDENTITY,
+                Mat4::from_translation(shift),
+                lo,
+                hi,
+                Vec2::splat(1000.)
+            ));
+        }
+        assert!(!visible(
+            Mat4::IDENTITY,
+            Mat4::from_scale(Vec3::splat(0.001)),
+            lo,
+            hi,
+            Vec2::splat(1000.)
+        ));
+    }
+    #[test]
+    fn mirrored_and_sheared_boxes_remain_visible() {
+        let world = Mat4::from_cols(
+            vec4(-2., 0., 0., 0.),
+            vec4(0.5, 1., 0., 0.),
+            Vec4::Z,
+            Vec4::W,
+        );
+        assert!(visible(
+            Mat4::IDENTITY,
+            world,
+            vec3(-0.1, -0.1, 0.),
+            vec3(0.1, 0.1, 0.5),
+            Vec2::splat(1000.)
+        ));
+    }
+    #[test]
+    fn compact_into_disjoint_capacity_ranges() {
+        let codes = [1, 0, 1, 2, 0];
+        let keep = [true, false, true, true, true];
+        let starts = [0, 2, 4];
+        let mut counts = [0; 3];
+        let mut out = [u32::MAX; 5];
+        for (i, &code) in codes.iter().enumerate() {
+            if keep[i] {
+                out[starts[code] + counts[code]] = i as u32;
+                counts[code] += 1;
+            }
+        }
+        assert_eq!(counts, [1, 2, 1]);
+        assert_eq!(out, [4, u32::MAX, 0, 2, 3]);
+        // Reset between frames; no stale counts may survive the template copy.
+        counts.fill(0);
+        assert_eq!(counts, [0, 0, 0]);
+    }
+}
