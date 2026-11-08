@@ -32,3 +32,13 @@ To be documented.
 ## Plugin system
 
 See [plugins.md](plugins.md).
+
+## Semantic objects and project metadata
+
+Placed groups own versioned JSON [object records](object-record.md) in `group.ifc`.
+The [project registry](project-registry.md) defines classification namespaces,
+shared types, systems and export profiles in scene plugin data. `core.record`
+provides detached normalization, validation and type resolution; `core.ifc_tables`
+holds hand-written schema facts. History commands own persisted metadata edits
+and advance revisions without invalidating geometry caches. Loose-face BIM tags
+remain the minimal legacy representation.
