@@ -50,3 +50,23 @@ def test_the_bridge_still_binds_loopback_only():
     src = (ROOT / "plugins" / "ai_bridge.py").read_text(encoding="utf-8")
     assert 'srv.bind(("127.0.0.1", port))' in src
     assert "INGETRAZO_AI_HOST" not in src
+
+
+def test_tools_list_uses_live_bridge(monkeypatch):
+    mod = _client(monkeypatch)
+    dynamic = [{"name": "extension_tool", "inputSchema": {"type": "object"}}]
+    def bridge(name, args):
+        assert (name, args) == ("list_tools", {})
+        return {"ok": True, "result": {"tools": dynamic}}
+    monkeypatch.setattr(mod, "_bridge", bridge)
+    assert mod.handle({"id": 1, "method": "tools/list"})["result"]["tools"] == dynamic
+
+
+def test_tools_list_falls_back_when_offline(monkeypatch):
+    mod = _client(monkeypatch)
+    def refuse(*args):
+        raise OSError("offline")
+    monkeypatch.setattr(mod, "_bridge", refuse)
+    tools = mod.handle({"id": 1, "method": "tools/list"})["result"]["tools"]
+    assert tools == mod.TOOLS
+    assert {"query_tree", "query_camera", "select"} <= {s["name"] for s in tools}

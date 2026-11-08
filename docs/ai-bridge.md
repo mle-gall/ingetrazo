@@ -81,7 +81,13 @@ cuerpo nunca llega a leerse. Aun así, **detén el puente cuando no lo uses**.
 |---|---|
 | `run_python` | Ejecuta Python sobre el documento vivo (scope: `scene`, `mesh`, `selection`, `groups`, `bim`, `QVector3D`… y los constructores `revolve(perfil)` / `extrude(contorno, z0, z1)`: una línea → un grupo sólido, suave y orientado). Un undo por llamada; rollback total si falla. |
 | `query_model` | Conteos, nombres de grupos/componentes, materiales, capas, bounds. |
-| `screenshot` | Renderiza el viewport real — el agente mira e itera. |
+| `query_groups` / `query_tree` / `query_entity` | Grupos por nombre, árbol paginado y detalles por uid. |
+| `query_selection` / `select` | Inspecciona o cambia la selección por uid o patrón de nombre. |
+| `query_layers` / `set_layer_visibility` | Capas, carpetas y visibilidad (usa el historial de estados de capas). |
+| `query_camera` / `set_camera` / `zoom_to` | Consulta y dirige la cámara; encuadra grupos o la selección. |
+| `query_changes` / `query_status` | Cambios desde una revisión y variables JSON publicadas. |
+| `list_tools` | Catálogo vivo, incluidas las herramientas de extensiones. |
+| `screenshot` | Renderiza el viewport real; `uids` encuadra grupos antes de capturar y devuelve la cámara usada. |
 | `undo` / `redo` | La historia de siempre. |
 
 Sin el puente encendido, las tools responden con el aviso de cómo
@@ -188,3 +194,44 @@ decide when to recheck its inputs, then compare a group's mesh identity and
 `mesh.revision` to mark the record stale after external edits. Its own rebuild
 should update the remembered token. Direct element edits must call
 `mesh.mark_modified()` once per batch (see the plugin documentation).
+
+## Dynamic tools and document navigation
+
+MCP `tools/list` requests the bridge's live registry every time, so extensions
+can publish tools without changing the MCP script. When the bridge is offline,
+the client returns the shared built-in schema catalog. Re-list tools after an
+extension registers or unsubscribes; this server does not emit list-change
+notifications. Calls remain generic and keep the existing bridge error format.
+
+`query_tree(root_uid=None, depth=2, offset=0, limit=200, include_hidden=True)`
+returns `rows`, `total`, `next_offset` and `version`. Order is depth-first in
+scene/child order. Roots have depth zero; a supplied root is included at depth
+zero. Hidden filtering prunes explicitly hidden ancestors. Layer visibility is
+reported separately. Restart paging when the scene version changes.
+
+`query_entity(uid)` returns the tree metadata plus world bounds, column-major
+local and world placement matrices, direct mesh face/edge counts, material
+names, child uids and ancestor names. IFC data is passed through unchanged.
+`shared_definition_key` identifies shared meshes for this bridge session; it
+is not a persisted document identifier. Use group uids across sessions.
+
+`query_selection` returns counts by Python entity kind, group rows, direct
+face/edge selection counts and combined world bounds. `select` accepts uids,
+name globs (`names` or `pattern`, case-sensitive), and replace/add/remove/clear.
+Unknown uids fail before selection changes. Selection and camera changes do
+not create document undo entries.
+
+`query_layers` counts direct group tags and faces across unique meshes (shared
+component faces count once), with folder paths ordered from root to leaf.
+`set_layer_visibility` accepts layer uids or names and uses the Layers panel's
+existing display-state history: restore with **Previous layer state**, not
+geometry undo. It also releases a hidden active layer and prunes selection.
+
+`set_camera` accepts standard presets (top, bottom, front, back, left, right,
+iso), eye/target/up vectors and `ortho`. Explicit vectors use the camera's
+existing look-from navigation, including its near-pole constraint; a preset
+wins over an explicit orientation. `zoom_to` frames supplied group uids,
+otherwise the selection, otherwise the model. An explicit empty uid list is
+a no-op. Screenshots render synchronously through `render_image`; optional
+uids frame first, and the response includes the camera used. MCP returns the
+image with camera metadata as an additional text content block.

@@ -463,3 +463,45 @@ stale if it changed outside the extension's rebuild. Use a rebuild guard and
 update the remembered pair when the rebuild finishes; compare
 `scene.revision` too if placement, tags or child membership are inputs.
 Do not save these tokens as the intent's persistent identity.
+
+## Publishing agent tools
+
+`app.add_agent_tool(name, fn, *, description, input_schema=None, mutates=False)`
+publishes a tool to the AI bridge and its MCP clients, including when registered
+before the bridge starts. Names are global within the window: conflicts with
+core or other extension tools raise `ValueError`. API version remains 2.
+
+```python
+def setup(app):
+    def count_parts(prefix=""):
+        return {"count": sum(g.name.startswith(prefix) for g in app.scene.groups)}
+
+    unsubscribe = app.add_agent_tool(
+        "my_extension_count_parts", count_parts,
+        description="Count top-level parts by name prefix.",
+        input_schema={"type": "object", "properties": {
+            "prefix": {"type": "string", "default": ""}}})
+    # Retain unsubscribe and invoke it in your extension's teardown.
+```
+
+The bridge calls `fn(**args)` on the Qt main thread with the dialog guard
+active. Return plain JSON values (string-keyed dicts, lists, finite numbers,
+strings, booleans or null); invalid output raises a clear error. Schemas are
+advertised to clients, not a runtime JSON Schema validator: validate domain
+arguments in the callable. Read `app.scene` inside the callable so it follows
+the active document tab.
+
+For document edits set `mutates=True`. The callable uses the same snapshot,
+scene normalization and validation as `core.ai.run_transactional`: one undo
+step, with rollback on an exception or invalid JSON output. Return validation
+occurs before commit. Callable transactions additionally preserve existing nested
+group metadata/geometry, layer attributes and extension document data; the
+legacy `run_python` executor is unchanged. Do not start a second history command inside a tool.
+Inspection-only calls do not snapshot or redraw. External side effects are
+outside the document transaction.
+
+The returned unsubscribe is idempotent. Call it when unloading a tool, or call
+`app.remove_agent_tools()` to remove all this handle's registrations. Failed
+plugin setup removes its tools automatically; window destruction removes them
+too. Stopping/restarting the bridge preserves registrations. There is no
+separate general plugin unload lifecycle in the application yet.
