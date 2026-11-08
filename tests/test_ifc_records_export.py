@@ -175,3 +175,16 @@ def test_curated_types_validate(tmp_path, schema):
     logger = ifcopenshell.validate.json_logger()
     ifcopenshell.validate.validate(str(path), logger, express_rules=True)
     assert not logger.statements
+
+
+def test_generic_manual_area_replaces_the_measured_value(tmp_path):
+    ifc = pytest.importorskip('ifcopenshell')
+    scene, wall = rich_scene()
+    wall.ifc['quantities'] = {'Area': {'value': 12, 'source': 'manual'}}
+    path = tmp_path / 'manual.ifc'
+    save_ifc(scene, path)
+    model = ifc.open(str(path))
+    values = {q.Name: q for q in model.by_type('IfcQuantityArea')}
+    assert 'Area' not in values
+    assert values['NetSideArea'].AreaValue == 12
+    assert values['NetSideArea'].Description == 'manual'

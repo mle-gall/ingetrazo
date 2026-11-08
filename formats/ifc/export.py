@@ -201,8 +201,19 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
             group_nodes[id(group)] = (node, eg, spatial, cls)
         for ps_name, ps in psets(raw.get('psets', {}), eg):
             relation('IfcRelDefinesByProperties', (eg, ps_name), RelatedObjects=refs([node]), RelatingPropertyDefinition=ref(ps))
-        manual = r.get('quantities', {})
+        manual = dict(r.get('quantities', {}))
         quantities = {name: (kind, value) for kind, name, value in qentries}
+        # The record examples use generic Volume/Area; map these to the
+        # measured class quantity instead of leaving two conflicting totals.
+        for alias, candidates in {
+            'Volume': ('GrossVolume', 'NetVolume'),
+            'Area': ('NetSideArea', 'GrossArea', 'NetArea'),
+            'Mass': ('Weight', 'GrossWeight', 'NetWeight'),
+        }.items():
+            if alias in manual and alias not in quantities:
+                target = next((name for name in candidates if name in quantities), None)
+                if target:
+                    manual.setdefault(target, manual.pop(alias))
         for name, value in manual.items():
             kind = quantities.get(name, (None,))[0]
             if kind is None:

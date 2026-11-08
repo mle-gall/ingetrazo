@@ -32,7 +32,8 @@ system memberships without mutating the record. Only referenced types and system
 are written. Classifications are shared by system and code, including associations
 to type objects. If names for the same code differ, the first name wins.
 
-Manual quantities override matching measured quantity names and carry Description
+Manual quantities override matching measured quantity names (generic Volume, Area
+and Mass also resolve to the corresponding measured class quantity) and carry Description
 `manual`. New quantity names containing length, area, volume or weight identify
 their dimension; unknown dimensions are reported rather than guessed. Negative
 quantities are omitted. Units include metres, square and cubic metres, kilograms
