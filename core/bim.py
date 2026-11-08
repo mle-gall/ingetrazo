@@ -266,11 +266,16 @@ def _face_tags_in(mesh, memo, seen) -> dict:
             return {}
     by_id: dict = {}
     if _holds_face_tags(mesh):
+        facts_key = mesh.__dict__['_bim_face_tags'][0]
+        cached = mesh.__dict__.get('_bim_tag_indices')
+        if cached is not None and cached[0] == facts_key:
+            return cached[1]
         from core.geometry_arrays import face_attributes
         for index, attrs in enumerate(face_attributes(mesh)):
             tag = attrs.get("ifc")
             if tag:
                 by_id.setdefault(tag.get("id"), (tag, []))[1].append(index)
+        mesh.__dict__['_bim_tag_indices'] = (facts_key, by_id)
     if key is not None and not by_id:
         memo[key] = True
     return by_id
