@@ -896,3 +896,10 @@ frames the full model rather than the requested curated section.
 [Reproduction, raw measurements, build workaround and detailed limitations](benchmarks/wgpu-look-2026-11-09/README.md).
 
 Additional [display-mode and horizon comparisons](benchmarks/wgpu-look-2026-11-09/README.md#display-mode-and-horizon-captures) cover hidden-line, monochrome, wireframe, X-ray, and a 5-degree camera pitch.
+
+Validation: both release builds succeeded (render import required
+`CARGO_PROFILE_RELEASE_STRIP=none`); Rust core 5 passed, renderer 5 passed,
+offscreen scene/style Python tests 21 passed. The one bounded full-suite run
+completed five batches with 6,136 passed and the 19 known baseline failures;
+batch six reached the extended approximately 30-minute bound. Full-suite
+regression status is therefore **unverified**, not a clean-suite claim.

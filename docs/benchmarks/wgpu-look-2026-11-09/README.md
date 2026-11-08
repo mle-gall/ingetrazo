@@ -125,3 +125,18 @@ Reproduce with `--mode hidden_line --capture-only` (or another mode); use
 `--mode shaded --pitch 5 --capture-only` for the on-screen horizon. These runs
 do not collect timing samples. The captured GL X-ray path itself shows
 substantial overlap artifacts; it is preserved as observed, not retouched.
+
+## Bounded full-suite result
+
+The suite was launched once. Five of six batches completed: **6,136 passed,
+19 failed, 115 skipped, 2 xfailed, 804 deselected**. The 19 observed failures
+match the supplied baseline by name: 14 translation cases, cached cursor
+pick, extension preview wrapping, hidden-panel retention, swatch tooltip
+colors and toolbar bold names. No additional failure was observed in those
+five batches.
+
+Batch six remained active at the extended approximately 30-minute bound and
+was terminated along with this run's own driver. **Full-suite regression
+status remains unverified**; these are completed-batch counts, not full-suite
+totals. No second suite run was started. See [validation.json](validation.json)
+for per-batch summaries and focused-test counts.
