@@ -93,8 +93,10 @@ def _source_arrays(mesh):
         corners, sizes, counts = arrays.corners, arrays.ring_sizes, arrays.ring_counts
         edges = np.asarray([(lookup[id(e.v0)], lookup[id(e.v1)]) for e in mesh.edges], np.int64).reshape(-1, 2)
         # Face corners and edges must share indices for boundary deduplication.
-        positions = {tuple(p): i for i, p in enumerate(pos)}
-        corners = np.asarray([positions[tuple(arrays.pos[i])] for i in corners], np.int64)
+        positions = {tuple(p): i for i, p in enumerate(pos.tolist())}
+        remap = np.fromiter((positions[tuple(p)] for p in arrays.pos.tolist()),
+                            dtype=np.int64, count=len(arrays.pos))
+        corners = remap[corners]
         flags = np.asarray([int(e.soft) | (int(e.hidden) << 1) for e in mesh.edges], np.uint8)
         table = [f.attrs for f in mesh.faces]
         attr = np.arange(len(table))
