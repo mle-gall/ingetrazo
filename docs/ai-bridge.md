@@ -262,6 +262,11 @@ removes the record. Classification helpers preserve each object's other codes.
 An omitted classification name uses the registry title, or the code itself when
 no title is registered. An omitted tag name preserves the current record name.
 
+Rows carry `linked=true` when the group comes from a linked file; `query_tree`
+and `query_entity` report `linked` and `link_source` too. Those groups are
+read-only for this document: the write tools refuse them, the exporter skips
+them (see docs/ifc-export.md), and `query_records(linked=false)` hides them.
+
 Read `query_records` again and inspect rows whose `problems` count is nonzero;
 `query_record` gives the messages and resolved type defaults. Totals always cover
 the entire model, regardless of filters; rows follow outliner order and `path`

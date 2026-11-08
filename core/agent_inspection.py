@@ -46,7 +46,12 @@ class InspectionTools:
         if group.mesh not in keys:
             from uuid import uuid4
             keys[group.mesh] = uuid4().hex
+        # Content that comes from a linked file is read-only for the host:
+        # the agent must see it to leave it alone (and the exporter skips it).
+        from core.links import link_of
+        source = next((link_of(g)["path"] for g in [*parents, group] if link_of(g)), None)
         return dict(uid=group.uid, name=group.name,
+                    linked=source is not None, link_source=source,
                     parent_uid=parents[-1].uid if parents else None, depth=len(parents),
                     children_count=len(group.children or []),
                     is_component_instance=group.xform is not None,

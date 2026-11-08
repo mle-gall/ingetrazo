@@ -47,20 +47,33 @@ class RecordTools:
 
     def _tool_query_records(self, system=None, classification_system=None, code=None,
                             type=None, untagged=False, name=None, offset=0, limit=200,
-                            schema='IFC4', **filters):
+                            schema='IFC4', linked=None, **filters):
         schema_name(schema)
         cls = filters.pop('class', None)
         if filters:
             raise ValueError('Unknown filters: ' + ', '.join(filters))
+        if linked is not None and not isinstance(linked, bool):  # `type` is a filter here
+            raise ValueError('linked must be a boolean or omitted')
+        from core.links import is_linked
         registry = self._tool_query_registry()
-        rows, counts, tagged, untagged_count = [], Counter(), 0, 0
+        rows, counts, tagged, untagged_count, linked_count = [], Counter(), 0, 0, 0
         for group, parents, _ in self._groups():
             value = group.ifc or {}
-            if value:
+            # Groups inside a linked file belong to that file: counted apart,
+            # listed only on request, never edited from the host.
+            in_link = any(is_linked(g) for g in [*parents, group])
+            if in_link:
+                linked_count += 1
+            elif value:
                 tagged += 1
                 counts[str(value.get('class'))] += 1
             else:
                 untagged_count += 1
+            if linked is not None and in_link != linked:
+                continue
+            if linked is None and in_link and not value:
+                # Untagged linked groups are not work to do for the host.
+                continue
             if untagged and value:
                 continue
             if cls is not None and value.get('class') != cls:
@@ -77,11 +90,13 @@ class RecordTools:
                     and (code is None or c.get('code') == code) for c in classifications):
                 continue
             rows.append(dict(uid=group.uid, name=group.name, path=[p.name for p in parents],
+                linked=in_link,
                 **{k: value.get(k) for k in ('class', 'predefined_type', 'tag', 'type')},
                 classifications=classifications, systems=value.get('systems', []),
                 problems=len(record.validate(value, registry, schema)) if value else 0))
         return json_value(dict(**page(rows, offset, limit),
-            totals=dict(tagged=tagged, untagged=untagged_count, by_class=dict(counts))))
+            totals=dict(tagged=tagged, untagged=untagged_count, linked=linked_count,
+                        by_class=dict(counts))))
 
     def _tool_query_vocabulary(self, schema='IFC4', classification_system=None,
                                search=None, offset=0, limit=200, **filters):
@@ -121,6 +136,14 @@ class RecordTools:
         missing = [uid for uid in uids if uid not in lookup]
         if missing:
             raise ValueError('Unknown group uids: ' + ', '.join(missing))
+        # A record written on a linked copy would vanish at the next refresh
+        # of the link: classify the source file instead.
+        from core.links import linked_ancestor, link_of
+        linked = [uid for uid in uids if linked_ancestor(lookup[uid]) is not None]
+        if linked:
+            source = link_of(linked_ancestor(lookup[linked[0]]))['path']
+            raise ValueError('These groups come from the linked file ' + source
+                             + '; open that file to classify them: ' + ', '.join(linked))
         return [lookup[uid] for uid in dict.fromkeys(uids)]
 
     def _edit_records(self, targets, patches, schema, force):
@@ -262,4 +285,5 @@ class RecordTools:
             kwargs['project_name'] = project_name
         report = save_ifc(self._viewport.scene, target, **kwargs)
         return json_value(dict(path=report.path, count=report.count,
-                               problems=report.problems, ids=report.ids))
+                               problems=report.problems, ids=report.ids,
+                               linked_skipped=report.linked_skipped))

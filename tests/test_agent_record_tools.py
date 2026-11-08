@@ -97,7 +97,7 @@ def test_registry_vocabulary_and_filters(model):
         classification_system='client', code='X', name='CAR', limit=1)
     assert rows['total'] == 2 and rows['next_offset'] == 1
     assert rows['rows'][0]['path'] == ['Ride']
-    assert rows['totals'] == {'tagged': 3, 'untagged': 1, 'by_class': {'IfcSpace': 1, 'IfcBeam': 2}}
+    assert rows['totals'] == {'tagged': 3, 'untagged': 1, 'linked': 0, 'by_class': {'IfcSpace': 1, 'IfcBeam': 2}}
     assert a._tool_query_records(untagged=True)['rows'][0]['uid'] == ids[2]
     assert a._tool_query_records(offset=2)['rows'][0]['uid'] == ids[1]
     vocabulary = a._tool_query_vocabulary(**{'class': 'IfcWall'})
@@ -210,3 +210,44 @@ def test_export_ifc_tool_writes_next_to_the_document(model, tmp_path):
     assert text.count('IFCCOLUMN(') == 3 and "FILE_SCHEMA(('IFC4'))" in text
     with pytest.raises(ValueError):
         a._tool_export_ifc('')
+
+
+def test_linked_content_is_visible_read_only_and_left_out_of_the_export(model, tmp_path):
+    """A facilities file linked into the track: the agent sees it flagged,
+    cannot write records into it, and the host export leaves it out unless
+    the profile opts in."""
+    a, parent, children = model
+    linked = Group(Mesh(), 'Facilities')
+    linked.ext = {'link': {'path': '/models/facilities.igz'}}
+    inner = Group(Mesh(), 'Kiosk')
+    inner.ifc = {'class': 'IfcBuildingElementProxy'}
+    linked.children = [inner]
+    a._viewport.scene.groups.append(linked)
+    a._tool_tag([g.uid for g in children], 'IfcColumn')
+
+    rows = {r['uid']: r for r in a._tool_query_tree(depth=5)['rows']}
+    assert rows[linked.uid]['linked'] and rows[inner.uid]['link_source'] == '/models/facilities.igz'
+    assert not rows[children[0].uid]['linked']
+
+    result = a._tool_query_records()
+    assert result['totals'] == {'tagged': 4, 'untagged': 0, 'linked': 2,
+                                'by_class': {'IfcSpace': 1, 'IfcColumn': 3}}
+    assert {r['uid'] for r in result['rows'] if r['linked']} == {inner.uid}
+    assert all(not r['linked'] for r in a._tool_query_records(linked=False)['rows'])
+    assert [r['uid'] for r in a._tool_query_records(linked=True)['rows']] == [linked.uid, inner.uid]
+
+    with pytest.raises(ValueError, match='facilities.igz'):
+        a._tool_set_record([inner.uid], {'class': 'IfcWall'})
+    with pytest.raises(ValueError):
+        a._tool_add_classification([children[0].uid, linked.uid], 'discipline', 'A')
+    assert inner.ifc == {'class': 'IfcBuildingElementProxy'}
+
+    a._viewport.window = lambda: SimpleNamespace(_current_path=tmp_path / 'track.igz')
+    out = a._tool_export_ifc('track.ifc')
+    assert out['count'] == 4 and out['linked_skipped'] == 1
+    assert 'IFCBUILDINGELEMENTPROXY(' not in (tmp_path / 'track.ifc').read_text()
+
+    a._tool_set_registry({**a._tool_query_registry(), 'export_profiles': {
+        'all': {'schema': 'IFC4', 'include_links': True}}})
+    out = a._tool_export_ifc('all.ifc', profile='all')
+    assert out['count'] == 5 and out['linked_skipped'] == 0

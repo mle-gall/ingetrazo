@@ -19,12 +19,13 @@ from .ids import check_ids
 
 class ExportReport(int):
     """An integer-compatible count for existing callers, with diagnostic details."""
-    def __new__(cls, count, path, problems, ids):
+    def __new__(cls, count, path, problems, ids, linked_skipped=0):
         result = super().__new__(cls, count)
         result.count = count
         result.path = str(path)
         result.problems = problems
         result.ids = ids
+        result.linked_skipped = linked_skipped
         return result
 
 
@@ -44,7 +45,21 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
     schema = config.get('schema', 'IFC4')
     if schema not in ('IFC4', 'IFC4X3_ADD2'):
         raise ValueError('Unsupported schema: ' + schema)
+    # Content placed from a linked file is that file's deliverable: the host
+    # leaves it out unless the profile says ``include_links``.
+    from core.links import linked_ancestor
+    include_links = bool(config.get('include_links', False))
     objects = collect_objects(scene)
+    linked_skipped = 0
+    if not include_links:
+        kept = []
+        for obj in objects:
+            host = obj.get('group') if obj.get('group') is not None else obj.get('owner')
+            if host is not None and linked_ancestor(host) is not None:
+                linked_skipped += 1
+            else:
+                kept.append(obj)
+        objects = kept
     if not objects:
         raise ValueError('No tagged BIM objects to export')
     identity = scene.plugin_data.setdefault('ifc_identity', {})
@@ -315,4 +330,4 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
               f"FILE_SCHEMA(('{schema}'));\nENDSEC;\nDATA;\n")
     Path(path).write_text(header + '\n'.join(w.lines) + '\nENDSEC;\nEND-ISO-10303-21;\n', encoding='ascii')
     ids = check_ids(path, config.get('ids_files', []), project_directory)
-    return ExportReport(len(exported), path, problems, ids)
+    return ExportReport(len(exported), path, problems, ids, linked_skipped)

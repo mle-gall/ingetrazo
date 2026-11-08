@@ -73,6 +73,13 @@ Georeferencing and mapped geometry instancing are not implemented. Geometry stay
 as faceted B-reps or open shell surface models. The view header identifies the
 selected view; it does not claim full model-view-definition certification.
 
+## Linked files
+
+Groups placed from a linked document (`Group.ext["link"]`, see `core/links.py`)
+and everything under them are skipped, and the report's `linked_skipped` counts
+them. A profile with `"include_links": true` exports them with the host. The
+linked file is its own deliverable: classify and export it from that file.
+
 ## Profiles, provenance and IDS
 
 The UI automatically uses the sole profile or offers a selector for several.
