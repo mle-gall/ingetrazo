@@ -100,8 +100,12 @@ def next_object_id(scene) -> int:
 def tag_faces(faces, ifc_class: str, name: str, obj_id: int) -> None:
     global _TAG_EPOCH
     _TAG_EPOCH += 1
+    faces = list(faces)
+    previous = next((f.attrs["ifc"] for f in faces
+                     if f.attrs.get("ifc", {}).get("id") == obj_id), {})
+    tag = {**previous, "id": obj_id, "class": ifc_class, "name": name}
     for f in faces:
-        f.attrs["ifc"] = {"id": obj_id, "class": ifc_class, "name": name}
+        f.attrs["ifc"] = dict(tag)
 
 
 def untag_faces(faces) -> None:
@@ -112,7 +116,9 @@ def untag_faces(faces) -> None:
 
 
 def tag_group(group, ifc_class: str, name: str) -> None:
-    group.ifc = {"class": ifc_class, "name": name}
+    from core.ifc_identity import ensure_guid
+    group.ifc = {**(group.ifc or {}), "class": ifc_class, "name": name}
+    ensure_guid(group.ifc)
 
 
 def untag_group(group) -> None:

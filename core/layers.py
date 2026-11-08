@@ -14,6 +14,8 @@ parallel projection with the right layers on IS the plan drawing.
 """
 from __future__ import annotations
 
+from core.group import new_uid
+
 DEFAULT_LAYER = "Layer 0"
 
 # Where an imported photogrammetric survey lands (Track G, G6). Its own layer
@@ -78,7 +80,8 @@ class Layer:
                  locked: bool = False, color=None,
                  folder: str | None = None, linetype: str = "continuous",
                  lineweight: float | None = None,
-                 opacity: float = 1.0, printable: bool = True) -> None:
+                 opacity: float = 1.0, printable: bool = True, uid: str | None = None) -> None:
+        self.uid = uid or new_uid()
         self.name = name
         self.visible = visible
         self.locked = locked
@@ -97,7 +100,7 @@ class Layer:
         self.printable = bool(printable)
 
     def to_dict(self) -> dict:
-        entry: dict = {"name": self.name}
+        entry: dict = {"name": self.name, "uid": self.uid}
         if not self.visible:
             entry["visible"] = False
         if self.locked:
@@ -145,7 +148,7 @@ class Layer:
             opacity = float(raw.get("opacity", 1.0))
         except (TypeError, ValueError):
             opacity = 1.0
-        return cls(raw.get("name", DEFAULT_LAYER),
+        return cls(raw.get("name", DEFAULT_LAYER), uid=raw.get("uid"),
                    visible=raw.get("visible", True),
                    locked=raw.get("locked", False),
                    color=color,
@@ -281,6 +284,9 @@ def folders_of(scene) -> list[str]:
     for ly in getattr(scene, "layers", None) or ():
         if ly.folder and ly.folder not in out:
             out.append(ly.folder)
+    # Importers may still assign folder names directly.
+    uids = getattr(scene, "layer_folder_uids", {})
+    scene.layer_folder_uids = {f: uids.get(f) or new_uid() for f in out}
     return out
 
 
@@ -369,6 +375,7 @@ def add_folder(scene, base: str, parent: str | None = None) -> str:
     if parent and parent in folders_of(scene):
         scene.folder_parents = {**(getattr(scene, "folder_parents", None)
                                    or {}), name: parent}
+    folders_of(scene)
     return name
 
 
@@ -393,6 +400,7 @@ def rename_folder(scene, old: str, new: str) -> bool:
     folders = folders_of(scene)
     if old not in folders or not new or new in folders:
         return False
+    scene.layer_folder_uids[new] = scene.layer_folder_uids.pop(old)
     scene.layer_folders = [new if f == old else f for f in folders]
     for ly in scene.layers:
         if ly.folder == old:
@@ -420,6 +428,7 @@ def remove_folder(scene, name: str) -> None:
     parents.pop(name, None)
     scene.folder_parents = parents
     scene.layer_folders = [f for f in folders_of(scene) if f != name]
+    scene.layer_folder_uids.pop(name, None)
 
 
 def move_to_folder(scene, names, folder: str | None) -> None:
@@ -432,6 +441,7 @@ def move_to_folder(scene, names, folder: str | None) -> None:
         ly = scene.layer(name)
         if ly is not None and name != DEFAULT_LAYER:
             ly.folder = folder or None
+    folders_of(scene)
 
 
 def set_visible(scene, names, on: bool) -> bool:
@@ -561,11 +571,56 @@ def template_of(scene) -> dict:
     out = {TEMPLATE_KEY: 1,
            "folders": folders_of(scene),
            "layers": [ly.to_dict() for ly in scene.layers]}
+    out["folder_uids"] = dict(scene.layer_folder_uids)
     parents = {f: folder_parent(scene, f) for f in folders_of(scene)
                if folder_parent(scene, f)}
     if parents:
         out["folder_parents"] = parents
     return out
+
+
+def matched_template(scene, data):
+    """Resolve identities to local names; a name collision keeps the local uid."""
+    import copy
+    data = copy.deepcopy(data)
+    folders_of(scene)
+    folder_names = {}
+    incoming = data.get("folder_uids") or {}
+    for name in data.get("folders") or ():
+        if not isinstance(name, str) or not name:
+            continue
+        uid = incoming.get(name)
+        folder_names[name] = next((n for n, u in scene.layer_folder_uids.items()
+                                   if uid and u == uid), name)
+    data["folders"] = [folder_names[n] for n in folder_names]
+    data["folder_uids"] = {folder_names[n]: u for n, u in incoming.items()
+                           if n in folder_names}
+    data["folder_parents"] = {folder_names.get(n, n): folder_names.get(p, p)
+                              for n, p in (data.get("folder_parents") or {}).items()}
+    for raw in data.get("layers", ()):
+        if not isinstance(raw, dict):
+            continue
+        match = next((ly for ly in scene.layers
+                      if raw.get("uid") and ly.uid == raw["uid"]), None)
+        if match is not None:
+            raw["name"] = match.name
+        if raw.get("folder"):
+            raw["folder"] = folder_names.get(raw["folder"], raw["folder"])
+    return data
+
+
+def template_name_map(scene, data):
+    resolved = matched_template(scene, data)
+    return {a["name"]: b["name"] for a, b in zip(data.get("layers", ()),
+                                                 resolved.get("layers", ()))
+            if isinstance(a, dict) and "name" in a}
+
+
+def _folder_identities(scene, data, previous):
+    folders_of(scene)
+    for name, uid in (data.get("folder_uids") or {}).items():
+        if name not in previous and name in scene.layer_folder_uids and uid:
+            scene.layer_folder_uids[name] = uid
 
 
 def apply_template(scene, data) -> tuple[int, int]:
@@ -577,6 +632,8 @@ def apply_template(scene, data) -> tuple[int, int]:
     if not isinstance(data, dict) or TEMPLATE_KEY not in data \
             or not isinstance(data.get("layers"), list):
         raise ValueError("not a layer template")
+    data = matched_template(scene, data)
+    previous = set(folders_of(scene))
     for f in data.get("folders") or ():
         if isinstance(f, str) and f and f not in folders_of(scene):
             scene.layer_folders = folders_of(scene) + [f]
@@ -585,6 +642,7 @@ def apply_template(scene, data) -> tuple[int, int]:
         for f, p in raw_parents.items():
             if isinstance(f, str) and isinstance(p, str):
                 move_folder(scene, f, p)
+    _folder_identities(scene, data, previous)
     added = updated = 0
     for raw in data["layers"]:
         if not isinstance(raw, dict) or not isinstance(raw.get("name"), str) \
@@ -624,6 +682,7 @@ def template_for(scene, names) -> dict:
     out = {TEMPLATE_KEY: 1,
            "folders": [f for f in folders_of(scene) if f in folders],
            "layers": [ly.to_dict() for ly in layers]}
+    out["folder_uids"] = {f: scene.layer_folder_uids[f] for f in out["folders"]}
     parents = {f: folder_parent(scene, f) for f in out["folders"]
                if folder_parent(scene, f)}
     if parents:
@@ -640,6 +699,7 @@ def add_missing(scene, data) -> tuple[list, list]:
     :func:`remove_added`."""
     if not isinstance(data, dict) or not isinstance(data.get("layers"), list):
         return [], []
+    data = matched_template(scene, data)
     have_folders = set(folders_of(scene))
     new_folders = [f for f in data.get("folders") or ()
                    if isinstance(f, str) and f and f not in have_folders]
@@ -651,6 +711,7 @@ def add_missing(scene, data) -> tuple[list, list]:
             p = raw_parents.get(f)
             if isinstance(p, str) and p:
                 move_folder(scene, f, p)
+    _folder_identities(scene, data, have_folders)
     added: list = []
     for raw in data["layers"]:
         if not isinstance(raw, dict) or not isinstance(raw.get("name"), str) \
@@ -669,15 +730,20 @@ def add_missing(scene, data) -> tuple[list, list]:
 def remove_added(scene, layers, folders) -> None:
     """Undo :func:`add_missing`: drop exactly the tags and folders it
     added."""
-    gone = set(layers)
+    # Commands remember uids so a rename between paste and undo is harmless.
+    gone = {next((ly.name for ly in scene.layers if ly.uid == token), token)
+            for token in layers}
     scene.layers[:] = [ly for ly in scene.layers if ly.name not in gone]
-    drop = set(folders)
+    folders_of(scene)
+    drop = {next((name for name, uid in scene.layer_folder_uids.items()
+                  if uid == token), token) for token in folders}
     if drop:
         scene.layer_folders = [f for f in folders_of(scene) if f not in drop]
         parents = getattr(scene, "folder_parents", None)
         if isinstance(parents, dict):
             for f in drop:
                 parents.pop(f, None)
+        folders_of(scene)
     _release_active(scene)
 
 

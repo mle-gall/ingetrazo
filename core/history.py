@@ -971,7 +971,9 @@ class EnsureLayersCommand(Command):
 
     def do(self, scene) -> None:
         from core.layers import add_missing
-        self._added = add_missing(scene, self._template)
+        layers, folders = add_missing(scene, self._template)
+        self._added = ([scene.layer(n).uid for n in layers],
+                       [scene.layer_folder_uids[n] for n in folders])
         if any(self._added):
             scene.version += 1
 
@@ -3874,7 +3876,7 @@ class ReplaceComponentCommand(Command):
             g.axes = QMatrix4x4(src.axes) if src.axes is not None else None
             g.component = True
             g.text3d = dict(src.text3d) if src.text3d else None
-            g.ifc = dict(src.ifc) if src.ifc else None
+            g.ifc = {k: v for k, v in src.ifc.items() if k != "guid"} if src.ifc else None
             g.ext = copy.deepcopy(src.ext) if src.ext else None
             g.billboard = src.billboard
             g.exploded = dict(src.exploded) if src.exploded else None

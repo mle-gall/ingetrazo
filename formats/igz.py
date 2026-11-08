@@ -735,15 +735,15 @@ def prepare_scene_steps(scene, mesh_steps=None):
         if protos:
             payload["protos"] = protos
     layers = getattr(scene, "layers", None)
-    if layers is not None and (len(layers) > 1 or any(
-            not ly.visible or ly.locked or ly.has_style()
-            for ly in layers)):
+    if layers is not None:
         payload["layers"] = [ly.to_dict() for ly in layers]
     # Older readers ignore both keys: new objects simply go to the default
     # layer there, and the layers show as one flat list.
     if getattr(scene, "active_layer", None):
         payload["active_layer"] = scene.active_layer
-    folders = getattr(scene, "layer_folders", None)
+    from core.layers import folders_of
+    folders = folders_of(scene)
+    payload["layer_folder_uids"] = dict(scene.layer_folder_uids)
     if folders:
         payload["layer_folders"] = list(folders)
     from core.layers import folder_parent
@@ -1275,6 +1275,7 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     scene.active_layer = None
     scene.layer_folders = []
     scene.folder_parents = {}
+    scene.layer_folder_uids = dict(payload.get("layer_folder_uids") or {})
     scene.section_planes = []
     scene.show_section_planes = True
     scene.show_section_cuts = True
@@ -1302,6 +1303,8 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     if isinstance(raw_folders, list):
         scene.layer_folders = [f for f in raw_folders
                                if isinstance(f, str) and f]
+    from core.layers import folders_of
+    folders_of(scene)
     raw_parents = payload.get("layer_folder_parents")
     if isinstance(raw_parents, dict):
         scene.folder_parents = {f: p for f, p in raw_parents.items()

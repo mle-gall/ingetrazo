@@ -697,8 +697,15 @@ def copy_group(group, delta=None, _in_definition=False):
         g = Group(transformed_mesh(group.mesh, t), name=group.name)
         if getattr(group, "axes", None) is not None:
             g.axes = t * group.axes
+    if g.mesh is not group.mesh:
+        # A deep geometry copy owns its face tags; shared definitions instead
+        # scope their tags to the placement uid when exported.
+        for face in g.mesh.faces:
+            if face.attrs.get("ifc"):
+                face.attrs["ifc"] = {k: v for k, v in face.attrs["ifc"].items()
+                                     if k != "guid"}
     g.layer = group.layer
-    g.ifc = dict(group.ifc) if group.ifc else None
+    g.ifc = {k: v for k, v in group.ifc.items() if k != "guid"} if group.ifc else None
     g.billboard = group.billboard
     g.text3d = dict(group.text3d) if group.text3d else None
     g.ext = copy.deepcopy(group.ext) if getattr(group, "ext", None) else None
