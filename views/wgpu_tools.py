@@ -30,6 +30,7 @@ class NativeTools:
         self.ids = np.empty(0, np.int64)
         self.original = None
         self.groups = []
+        self.value_buffer = ""
 
     def sync(self):
         source = self.view.source_viewport
@@ -102,6 +103,7 @@ class NativeTools:
             lines = [(self.start_point, ctx.world)]
             from core.units import fmt_len
             label = (fmt_len((ctx.world-self.start_point).length()), (ctx.world+self.start_point)*.5)
+            self.view.source_viewport.measurementChanged.emit(label[0])
         else:
             return
         for a, b in lines:
@@ -113,6 +115,33 @@ class NativeTools:
             pixel = self.view._world_to_pixel(point)
             if pixel is not None:
                 self.view.overlay_primitives.append(Primitive('text', (pixel,), text=text))
+
+    def key(self, event):
+        if self.mode != 'move' or self.start_point is None:
+            return False
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            from views.viewport import Viewport
+            value = Viewport._parse_value_buffer(self.value_buffer)
+            if isinstance(value, (int, float)) and self.hover_point is not None:
+                delta = self.hover_point - self.start_point
+                if delta.lengthSquared() > 1e-18:
+                    self.restore()
+                    self.view.source_viewport.history.execute(move_command(self.groups, delta.normalized()*value))
+                    self.original = None
+                    self.start_point = None
+                    self.view.source_viewport.notify_scene_changed()
+                    self.view.set_scene(self.view.scene)
+            self.value_buffer = ''
+            return True
+        text = event.text()
+        if text and not (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)) and (text[0].isdigit() or text in '.-+,'):
+            self.value_buffer += text
+            self.view.source_viewport.measurementChanged.emit(self.value_buffer)
+            return True
+        if event.key() == Qt.Key_Backspace:
+            self.value_buffer = self.value_buffer[:-1]
+            return True
+        return False
 
     def write_rows(self, rows):
         if self.view.renderer is not None:
@@ -129,6 +158,7 @@ class NativeTools:
             self.tool.on_cancel(self)
         self.original = None
         self.start_point = None
+        self.value_buffer = ""
         self.view.overlay_primitives = []
 
     def measurements(self):

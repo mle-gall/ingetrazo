@@ -351,6 +351,8 @@ class WgpuView(QWidget):
             self.last = None
             self.overlay_primitives = []
             self.sync_selection()
+        elif self.tools.key(event):
+            pass
         elif mode == 'inert':
             event.ignore()
         elif self.source_viewport is not None:
