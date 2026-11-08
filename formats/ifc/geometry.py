@@ -150,6 +150,6 @@ def mapped_body(w, group, base, excluded, context_id, geometry, cache, axis):
 
     walk(group, base)
     # Style each occurrence, never the shared prototype.
-    w.last_shape_item = items[0] if len(items) == 1 else None
+    w.last_shape_item = items
     return w.add('IFCSHAPEREPRESENTATION', f'#{context_id}', "'Body'",
                  "'MappedRepresentation'", '(' + ','.join(f'#{i}' for i in items) + ')')

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Measure placed geometry without allocating Python vertices or faces.
 
-Rings retain their winding and holes. Closure is checked after welding all
-placements, because an object can be assembled from individually open shells.
+Rings retain their winding and holes. Independently closed placements retain their topology. Open placements weld
+together because an object can be assembled from individually open shells.
 """
 from dataclasses import dataclass, field
 import numpy as np
@@ -94,7 +94,7 @@ def assembled(arrays):
     if len(parts) == 1:
         return parts[0]
     if not all(a.edge_face_counts is not None and
-               np.all(a.edge_face_counts == 2) for a in parts):
+               np.all((a.edge_face_counts == 0) | (a.edge_face_counts == 2)) for a in parts):
         return merged(parts)
     offsets = np.cumsum([0] + [len(a.pos) for a in parts[:-1]])
     return Arrays(np.concatenate([a.pos for a in parts]),
@@ -134,7 +134,7 @@ def measurements(a):
         edges = np.sort(np.column_stack((a.corners, a.corners[nxt])), axis=1)
         keys = edges[:, 0] * np.int64(len(a.pos)) + edges[:, 1]
         _, counts = np.unique(keys, return_counts=True)
-    closed = bool(len(counts) and np.all(counts == 2))
+    closed = bool(np.any(counts) and np.all((counts == 0) | (counts == 2)))
     # Triangulation subtracts holes regardless of their stored winding.
     owners = np.repeat(np.arange(len(outer)), a.ring_counts)
     same = np.einsum('ij,ij->i', vectors, vectors[outer][owners]) > 0
