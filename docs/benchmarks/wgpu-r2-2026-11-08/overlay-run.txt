@@ -1,0 +1,1 @@
+{"capture": "wgpu surface readback after overlay, before present", "scale": 2.0, "capture_scale": 2.0, "badge_pixel": [255, 0, 0, 255], "overlay_visible": true, "placements": 76029, "frames": 120, "overlay_raster_upload_ms": {"min": 2.9301659669727087, "avg": 3.42968325324667, "max": 5.479125073179603}}

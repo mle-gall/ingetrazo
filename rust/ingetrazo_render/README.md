@@ -179,3 +179,24 @@ order. The ordinary GL triangulation keeps its original unindexed path.
 `PackedScene.timings` exposes Python handoff, native-call and finishing times,
 plus process peak RSS at build completion (bytes on macOS). The spike script
 reports first picture both including load and measured from load completion.
+
+## R2 overlay API (2026-11-08)
+
+`set_overlay(width, height, rgba)` borrows a contiguous NumPy uint8 RGBA
+image at the surface's exact physical size. Pixels use straight alpha and
+sRGB color. The texture is retained and reused until resized, with one upload
+per call. A separate fullscreen pass composites after scene rendering,
+without changing depth or placement IDs. Clear with a transparent image.
+`views.wgpu_overlay` supplies Qt rasterization and the logical-pixel primitive
+list. This is an overlay foundation; the stand-in still lacks tool integration.
+
+For explicit diagnostics only, `request_capture()`, then `render()`, then
+`take_capture()` returns the presented frame's tightly packed RGBA bytes.
+This readback waits for the GPU; never request it in interactive frame timing.
+The capture occurs after overlays and before presentation, so it verifies the
+surface contents, not OS window stacking. The normal render path does no
+capture readback. The surface requires COPY_SRC support for this diagnostic.
+
+Run the externally bounded ride proof using `scripts/wgpu_r2_overlay.py MODEL`.
+See the dated R2 section of the performance plan for the captured image and
+CPU raster/upload measurements; GPU overlay duration is not yet isolated.

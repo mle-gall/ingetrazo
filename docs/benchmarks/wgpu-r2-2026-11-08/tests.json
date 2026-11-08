@@ -1,0 +1,28 @@
+{
+  "full_suite": "19 failed, 7107 passed, 138 skipped, 2 xfailed, 805 deselected, 56 warnings in 1299s (6 batches)",
+  "focused_python_passed": 16,
+  "core_rust_passed": 4,
+  "renderer_rust_passed": 4,
+  "failures": [
+    "tests/test_dimensions.py::test_world_under_cursor_uses_cached_pick",
+    "tests/test_extension_manager.py::test_long_author_tags_and_license_wrap_within_preview_width",
+    "tests/test_panel_refresh_deferred.py::test_hidden_panels_let_the_previous_document_go",
+    "tests/test_style_editor.py::test_a_swatch_tooltip_keeps_the_tooltip_colours",
+    "tests/test_tooltips_wrap.py::test_an_extensions_toolbar_added_after_start_up_shows_names_in_bold",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ar]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[de]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[id]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[it]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ja]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ko]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[lo]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[pl]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[pt-BR]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ru]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[th]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[uk]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[vi]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[zh-CN]"
+  ],
+  "new_failures": []
+}

@@ -786,3 +786,72 @@ The batch totals and failure names are in `validation.txt`. The later small
 built-mesh remap/palette adjustments were also checked with the focused
 14-test packing suite while the full run was in progress. No GL viewport
 behavior or expected baseline tests were changed.
+
+## R2 — 2026-11-08: native overlay foundation
+
+The first overlay gate has a positive **GPU surface capture** on macOS/Metal:
+[ride plus overlays](benchmarks/wgpu-r2-2026-11-08/overlay-surface.png).
+Qt rasterizes logical-pixel primitives into a straight-alpha RGBA image at
+physical resolution; wgpu samples an sRGB texture and alpha-composites it in
+a separate pass after scene drawing. The ID attachment is untouched.
+No native sibling widget is involved.
+
+On the 76,029-placement ride model, at 1000×700 logical / 2000×1400 physical,
+120 paced frames measured CPU rasterization plus texture upload at
+2.930 / 3.430 / 5.479 ms min/average/max. This excludes GPU compositing time;
+it is not the full frame budget. The captured badge pixel is exactly
+RGBA (255, 0, 0, 255). JSON and reproduction script:
+[overlay.json](benchmarks/wgpu-r2-2026-11-08/overlay.json),
+[scripts/wgpu_r2_overlay.py](../scripts/wgpu_r2_overlay.py).
+The explicit capture reads the actual swapchain texture after compositing,
+before presentation, and waits only when requested. Normal frames do not wait
+for capture. Qt's OS window-grab API returned unrelated foreground content,
+which was deleted; OS compositor/window-stacking capture is not validated.
+
+The primitive API supports polylines, polygons, rectangles, points, text,
+snap glyphs and projected axes. Empty lists clear a previous overlay.
+Resize invalidates the texture dimensions; stale-sized overlays are skipped.
+The production GL renderer is unchanged. No new Cargo dependencies.
+
+This section records incremental R2 work, not completion of its interaction
+or performance gates.
+
+### R2 foundation validation commands
+
+Both release builds succeeded using the private Python 3.13 venv and
+`CARGO_HOME=$PWD/.cargo-work`. The commands are the same as R1b above,
+including `--features extension-module` for ingetrazo_render.
+Use `TMPDIR=$PWD/.r2-tmp` for subsequent builds and tests (short enough
+for macOS Unix sockets).
+
+```sh
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_overlay.py tests/test_wgpu_scene.py
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_core/Cargo.toml
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2-tmp .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'
+```
+
+Focused Python: **16 passed**, including two new overlay tests.
+Rust: **4 core + 4 renderer passed**. Native shader creation, composition,
+surface readback and normal presentation were exercised in the bounded ride
+proof. The GUI subprocess had an external 240-second timeout.
+
+### Scope still outstanding
+
+This is **not a completed R2 viewport**. Deliverables 2–8 remain:
+ID-local geometric inference and its <30 ms gate; shared selection and group
+editing; navigation parity/MSAA; Select/Tape/Move integration and unsupported
+tool messaging; mutation-aware partial geometry/instance updates and <50 ms
+move gate; real-MainWindow startup deferral/measurement; and the persisted
+Preferences renderer choice. Their requested tests and GUI measurements are
+also missing. GPU compositing duration needs separate measurement.
+These are outstanding **R2** work, not features silently deferred to R3.
+R3's intended scope remains live mesh editing.
+
+Final bounded suite, one invocation: **7,107 passed, 19 failed, 138 skipped,
+2 xfailed, 805 deselected, 56 warnings in 1,299 s (six batches)**.
+All 19 failed test IDs exactly match the baseline; no new failures or crashes.
+See [tests.json](benchmarks/wgpu-r2-2026-11-08/tests.json) and
+[full output](benchmarks/wgpu-r2-2026-11-08/validation.txt).
+Rust output is retained alongside them. No push, PR, issue or external comment
+was made. Branch: `renderer/r2-tools`, based on `af3959af`.
