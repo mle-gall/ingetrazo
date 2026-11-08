@@ -146,6 +146,7 @@ def test_loaded_takeoff_stays_deferred(tmp_path, monkeypatch):
     assert '_deferred' in mesh.__dict__
     obj, = collect_objects(loaded)
     assert obj['volume'] == pytest.approx(1.)
+    assert '_deferred_plan' not in mesh.__dict__
     class_quantities_arrays(obj['class'], obj['arrays']())
     assert '_deferred' in mesh.__dict__
     from formats.ifc import save_ifc
@@ -352,3 +353,66 @@ def test_mapping_tiny_scales_preserve_uniformity_and_scale(tmp_path):
     assert len(maps) == 2
     scales = [m.MappingTarget.Scale for m in model.by_type('IfcMappedItem')]
     assert scales == pytest.approx([1e-8, 1.])
+
+
+@pytest.mark.parametrize('scale', [(2,2,2), (-2,2,2), (2,3,4), (1e-6,2e-6,1e-6)])
+def test_prototype_placement_quantities_match_world(scale):
+    from core.geometry_arrays import owned_placements, placement_quantities
+    g = cube()
+    g.xform = QMatrix4x4()
+    g.xform.scale(*scale)
+    actual = placement_quantities(list(owned_placements(g)))
+    expected = quantities(merged(world_arrays(g)))
+    assert actual[:3] == pytest.approx(expected[:3], rel=2e-6, abs=1e-25)
+    assert actual[3:] == expected[3:]
+
+
+def test_direct_source_preserves_distinct_coincident_points(monkeypatch):
+    from core.mesh import Mesh, DeferredMesh
+    from core.geometry_arrays import Arrays
+    import core.lazy_mesh as lazy
+    # Two coincident triangles with distinct saved vertex identities are two
+    # open sheets, not a welded closed two-sided surface.
+    mesh = Mesh()
+    pos = np.array([[0,0,0],[1,0,0],[0,1,0]] * 2, dtype=float)
+    source = dict(pos=pos, rings=np.arange(6), sizes=np.array([3,3]),
+                  counts=np.array([1,1]))
+    DeferredMesh.defer(mesh, lambda m: None, 2, source)
+    def fail(*args, **kwargs):
+        raise AssertionError('indexed source must not plan or weld')
+    monkeypatch.setattr(lazy, 'plan', fail)
+    monkeypatch.setattr(lazy, 'weld', fail)
+    assert quantities(arrays_of(mesh)) == (1., 1., None, False, 2)
+    assert '_deferred_plan' not in mesh.__dict__
+
+
+def test_collect_reuses_prototype_measurements_and_split_closure(monkeypatch):
+    import core.geometry_arrays as ga
+    prototype = cube()
+    scene = Scene()
+    for i in range(5):
+        g = Group(prototype.mesh)
+        g.ifc = {'class': 'IfcWall'}
+        g.xform = QMatrix4x4()
+        g.xform.translate(i * 3, 0, 0)
+        scene.groups.append(g)
+    calls = []
+    original = ga.ring_data
+    def counted(a):
+        calls.append(a)
+        return original(a)
+    monkeypatch.setattr(ga, 'ring_data', counted)
+    assert [o['volume'] for o in collect_objects(scene)] == [1.] * 5
+    assert len(calls) == 1
+    scene.groups = [cube(True)]
+    assert collect_objects(scene)[0]['volume'] == pytest.approx(1.)
+
+
+def test_tag_cache_invalidates_on_tag_epoch():
+    from core.bim import _holds_face_tags, untag_faces
+    g = cube()
+    assert not _holds_face_tags(g.mesh)
+    tag_faces(g.mesh.faces, 'IfcWall', 'Tagged', 1)
+    assert _holds_face_tags(g.mesh)
+    untag_faces(g.mesh.faces)
+    assert not _holds_face_tags(g.mesh)
