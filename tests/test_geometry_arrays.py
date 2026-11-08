@@ -379,7 +379,7 @@ def test_direct_source_preserves_distinct_coincident_points(monkeypatch):
     mesh = Mesh()
     pos = np.array([[0,0,0],[1,0,0],[0,1,0]] * 2, dtype=float)
     source = dict(pos=pos, rings=np.arange(6), sizes=np.array([3,3]),
-                  counts=np.array([1,1]))
+                  counts=np.array([1,1]), sequential=True, meta={'arrays': {}})
     DeferredMesh.defer(mesh, lambda m: None, 2, source)
     def fail(*args, **kwargs):
         raise AssertionError('indexed source must not plan or weld')

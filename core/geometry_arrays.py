@@ -52,7 +52,7 @@ def arrays_of(mesh):
             # points stay distinct. JSON sources instead repeat coordinates.
             pos = np.asarray(source['pos'], dtype=np.float32).astype(float)
             corners = np.asarray(source['rings'], dtype=np.int64)
-            if 'sequential' in source:
+            if 'sequential' in source and 'arrays' not in source.get('meta', {}):
                 from core.lazy_mesh import weld
                 pos, inverse = weld(pos, source['sequential'])
                 corners = inverse[corners]
