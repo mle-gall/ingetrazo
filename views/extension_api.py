@@ -70,6 +70,25 @@ class ExtensionApp:
     def __init__(self, window, key: str) -> None:
         self._window = window
         self.key = str(key)
+        self._agent_tool_unsubscribers = []
+
+    def add_agent_tool(self, name, fn, *, description, input_schema=None, mutates=False):
+        """Publish a main-thread agent tool; retain unsubscribe for teardown."""
+        from core.agent_tools import BUILTIN_TOOLS, extension_registry, register
+        if name in {s["name"] for s in BUILTIN_TOOLS} | {"list_tools"}:
+            raise ValueError(f"agent tool {name!r} is already registered")
+        unsubscribe = register(extension_registry(self.window), name, fn,
+                               description=description, input_schema=input_schema,
+                               mutates=mutates)
+        self._agent_tool_unsubscribers.append(unsubscribe)
+        self.window.destroyed.connect(unsubscribe)
+        return unsubscribe
+
+    def remove_agent_tools(self):
+        """Unpublish this extension's tools on unload or failed setup."""
+        for unsubscribe in self._agent_tool_unsubscribers:
+            unsubscribe()
+        self._agent_tool_unsubscribers.clear()
 
     # ---- Where things are ------------------------------------------------
     @property

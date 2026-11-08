@@ -73,7 +73,10 @@ class _NoDialogs(QObject):
         return False
 
 
-class _Bridge(QObject):
+from core.agent_inspection import InspectionTools
+
+
+class _Bridge(QObject, InspectionTools):
     """The in-app half: accepts one agent connection and executes its tool
     calls on the Qt main thread."""
 
@@ -101,6 +104,15 @@ class _Bridge(QObject):
         self._scope: dict = {"__name__": "__ai__"}
         self.port: int | None = None
         self._busy = False
+        from core.agent_tools import BUILTIN_TOOLS, extension_registry, register
+        self.registry = {}
+        self._extension_tools = extension_registry(viewport.window() or viewport)
+        for spec in BUILTIN_TOOLS:
+            register(self.registry, spec["name"], getattr(self, "_tool_" + spec["name"]),
+                     description=spec["description"], input_schema=spec["inputSchema"],
+                     mutates=spec["name"] in {"run_python", "undo", "redo"})
+        register(self.registry, "list_tools", self._tool_list_tools,
+                 description="List currently available agent tools.")
         # Queued to a BOUND method of this main-thread QObject — connecting a
         # lambda would run the slot on the worker thread (CLAUDE.md gotcha).
         self._dispatch.connect(self._run_on_main, Qt.QueuedConnection)
@@ -220,10 +232,15 @@ class _Bridge(QObject):
         guard = _NoDialogs()
         QApplication.instance().installEventFilter(guard)
         try:
-            handler = getattr(self, f"_tool_{tool}", None)
-            if handler is None:
+            entry = self.registry.get(tool) or self._extension_tools.get(tool)
+            if entry is None:
                 raise ValueError(f"unknown tool {tool!r}")
-            result = handler(**args)
+            from core.agent_tools import json_value
+            if entry["mutates"] and tool not in self.registry:
+                from core.ai import run_callable_transactional
+                result = run_callable_transactional(self._viewport, lambda: entry["fn"](**args))
+            else:
+                result = json_value(entry["fn"](**args))
             if guard.refused and isinstance(result, dict):
                 result["dialogs_cancelled"] = list(guard.refused)
                 result["stderr"] = (result.get("stderr") or "") + "".join(
@@ -237,6 +254,12 @@ class _Bridge(QObject):
             QApplication.instance().removeEventFilter(guard)
             self._busy = False
             job["done"].set()
+
+    def _tool_list_tools(self):
+        return {"tools": [dict(name=name, description=e["description"],
+                               inputSchema=e["input_schema"],
+                               annotations={"readOnlyHint": not e["mutates"]})
+                          for name, e in (self.registry | self._extension_tools).items()]}
 
     # ---- Tools ---------------------------------------------------------------
     def _tool_run_python(self, code: str = "") -> dict:
@@ -332,7 +355,9 @@ class _Bridge(QObject):
             raise ValueError("status must contain only JSON values")
         return {"found": True, "value": copy(self._scope[name])}
 
-    def _tool_screenshot(self, width: int = 1024, height: int = 768) -> dict:
+    def _tool_screenshot(self, width: int = 1024, height: int = 768, uids=None) -> dict:
+        if uids is not None:
+            self._tool_zoom_to(uids)
         width = max(64, min(int(width), 4096))
         height = max(64, min(int(height), 4096))
         image = self._viewport.render_image(width, height)
@@ -340,7 +365,8 @@ class _Bridge(QObject):
         out_dir.mkdir(parents=True, exist_ok=True)
         out = out_dir / "viewport.png"
         image.save(str(out))
-        return {"path": str(out), "width": width, "height": height}
+        return {"path": str(out), "width": width, "height": height,
+                "camera": self._tool_query_camera()}
 
     def _tool_undo(self) -> dict:
         ok = self._viewport.history.undo()

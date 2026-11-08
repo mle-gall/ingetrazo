@@ -2927,9 +2927,11 @@ class MainWindow(QMainWindow):
         for plug in list(plugins):
             if plug.setup is None:
                 continue
+            extension_app = ExtensionApp(self, plug.stem)
             try:
-                plug.setup(ExtensionApp(self, plug.stem))
+                plug.setup(extension_app)
             except Exception as exc:  # noqa: BLE001 — never break startup
+                extension_app.remove_agent_tools()
                 log.exception("plugin %r setup failed", plug.stem)
                 from core.extensions import PluginError
                 errors.append(PluginError(

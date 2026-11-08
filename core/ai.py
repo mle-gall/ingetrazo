@@ -467,6 +467,30 @@ def run_transactional(viewport, code: str, scope: dict) -> dict:
             "error": error, "changed": changed}
 
 
+def run_callable_transactional(viewport, fn):
+    """Execute and validate a callable inside the same snapshot as recipes."""
+    from core.agent_tools import json_value
+    result = None
+    def mutate(scene):
+        nonlocal result
+        result = json_value(fn())
+        _tidy_groups(scene)
+        _check_scene_lists(scene)
+    from core.agent_transaction import AgentSnapshot
+    cmd = AgentSnapshot(mutate)
+    history = viewport.history
+    saved_redo = list(history.redo_stack)
+    history.execute(cmd)
+    error = history.last_error
+    if error is None and not cmd.changed and history.undo_stack and history.undo_stack[-1] is cmd:
+        history.undo_stack.pop()
+        history.redo_stack[:] = saved_redo
+    viewport.notify_scene_changed()
+    if error is not None:
+        raise RuntimeError(error)
+    return result
+
+
 # ---- Provider layer (mirrors IngePresupuestos ai_specs) ---------------------
 
 PROVIDERS = ("groq", "anthropic", "openai", "gemini", "openrouter",
