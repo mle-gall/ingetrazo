@@ -48,7 +48,9 @@ def test_layer_round_trips_every_field_and_drops_defaults():
             back.lineweight, back.opacity) == (
         "Muros", False, True, "Arquitectura", "dashdot", 0.35, 0.5)
     assert back.color == pytest.approx((0.2, 0.4, 0.6))
-    assert Layer("Plain").to_dict() == {"name": "Plain"}
+    plain = Layer("Plain")
+    assert plain.to_dict() == {"name": "Plain", "uid": plain.uid}
+    assert back.uid == ly.uid
 
 
 @pytest.mark.parametrize("raw", [

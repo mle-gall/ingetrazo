@@ -138,6 +138,8 @@ class FlipTool(Tool):
         n = _AXES[axis]
         cmds: list = []
         if copy:
+            from core.ifc_identity import copied_face_attrs
+            copy_attrs = copied_face_attrs(viewport.scene)
             m = mirror_matrix(centre, n)
             for g in groups:
                 copy = copy_group(g)
@@ -151,7 +153,7 @@ class FlipTool(Tool):
                          for h in f.holes] or None
                 cmds.append(AddFaceCommand(
                     loop, holes=holes, auto=False,
-                    attrs=transformed_attrs(f.attrs, m)))
+                    attrs=copy_attrs(transformed_attrs(f.attrs, m))))
             for e in edges:
                 curve = getattr(e, "curve", None)
                 if curve is not None and curve not in id_map:

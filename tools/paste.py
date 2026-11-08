@@ -163,6 +163,17 @@ class PasteTool(Tool):
         """Stamp the clipboard displaced by ``off`` as ONE undoable step;
         False when there was nothing to stamp. ``select_all`` leaves the
         loose faces and edges selected too (groups always are)."""
+        from core.ifc_identity import copied_face_attrs
+        copy_attrs = copied_face_attrs(viewport.scene)
+        from core.layers import template_name_map
+        names = template_name_map(viewport.scene, self._clip.get("layers") or {})
+
+        def remap_attrs(attrs):
+            out = copy_attrs(attrs)
+            if out.get("layer") in names:
+                out["layer"] = names[out["layer"]]
+            return out
+
         commands: list = [_PruneOnUndo()]
         # The tags the copy carries that this document lacks (with their
         # folders) come first, undone with the paste; tags it already has
@@ -190,7 +201,7 @@ class PasteTool(Tool):
                 [p + off for p in loop],
                 holes=[[p + off for p in h] for h in holes] or None,
                 auto=False,
-                attrs=attrs,
+                attrs=remap_attrs(attrs),
             ))
         # A face pasted onto a plane that already carries faces merges with
         # them, as a rectangle drawn there does: overlapping ones split into
@@ -211,11 +222,24 @@ class PasteTool(Tool):
             commands.append(AddEdgeCommand(
                 a + off, b + off, soft=soft or None,
                 curve=id_map.get(curve),
-                layer=edge_layers[i] if i < len(edge_layers) else None))
+                layer=names.get(edge_layers[i], edge_layers[i]) if i < len(edge_layers) else None))
         # Each stamp builds FRESH group copies from the clipboard templates
         # (instances stay siblings of the same prototype).
         pasted_groups = [copy_group(g, off)
                          for g in self._clip.get("groups", ())]
+        if any(a != b for a, b in names.items()):
+            from core.group import iter_placements, transformed_mesh
+            from PySide6.QtGui import QMatrix4x4
+            for root in pasted_groups:
+                for g, _ in iter_placements(root):
+                    g.layer = names.get(g.layer, g.layer)
+                    # A renamed target tag must not rename the source definition.
+                    g.mesh = transformed_mesh(g.mesh, QMatrix4x4())
+                    for f in g.mesh.faces:
+                        if f.attrs.get("layer") in names:
+                            f.attrs["layer"] = names[f.attrs["layer"]]
+                    for e in g.mesh.edges:
+                        e.layer = names.get(e.layer, e.layer)
         commands.extend(InsertGroupCommand(g) for g in pasted_groups)
         if len(commands) == guards:
             return False        # only the guards: nothing to stamp

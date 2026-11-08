@@ -74,6 +74,7 @@ class Scene:
     layer_folders: list = field(default_factory=list)
     # Folder → the folder it sits in (absent: at the top).
     folder_parents: dict = field(default_factory=dict)
+    layer_folder_uids: dict = field(default_factory=dict)
     # Named materials (core.materials.Material), name → Material. The
     # registry gives identity to paint recipes; faces keep their baked
     # attrs (color/texture) as the render truth and optionally carry
@@ -758,6 +759,7 @@ class Scene:
             self.active_layer = None
             self.layer_folders = []
             self.folder_parents = {}
+            self.layer_folder_uids = {}
             self.georef = None
             self.tile_layer = None
             self.terrain = None

@@ -521,6 +521,8 @@ class RotateTool(ProtractorBase):
             if copy:
                 id_map: dict[int, int] = {}
                 for deg in degs:
+                    from core.ifc_identity import copied_face_attrs
+                    copy_attrs = copied_face_attrs()
                     m = rotation_matrix(start, axis, deg)
                     for group in groups:
                         g = copy_group(group)  # instance → sibling instance
@@ -534,7 +536,7 @@ class RotateTool(ProtractorBase):
                             holes=[[m.map(v) for v in h] for h in f.holes]
                             or None,
                             auto=False,
-                            attrs=transformed_attrs(f.attrs, m),
+                            attrs=copy_attrs(transformed_attrs(f.attrs, m)),
                         ))
                     for e in edges:
                         curve = getattr(e, "curve", None)

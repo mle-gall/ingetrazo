@@ -961,6 +961,8 @@ class MoveTool(Tool):
             bound: list = []
             open_loops: set = set()
             for d in deltas:
+                from core.ifc_identity import copied_face_attrs
+                copy_attrs = copied_face_attrs()
                 m = QMatrix4x4()
                 m.translate(d)
                 for group in groups:
@@ -974,7 +976,7 @@ class MoveTool(Tool):
                         [v + d for v in f.vertices],
                         holes=[[v + d for v in h] for h in f.holes] or None,
                         auto=False,
-                        attrs=transformed_attrs(f.attrs, m),
+                        attrs=copy_attrs(transformed_attrs(f.attrs, m)),
                     ))
                 id_map: dict[int, int] = {}
                 for e in edges:
