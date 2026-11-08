@@ -47,15 +47,23 @@ def save_ifc(scene, path, project_name='IngeTrazo project', profile=None, *, pro
         raise ValueError('Unsupported schema: ' + schema)
     # Content placed from a linked file is that file's deliverable: the host
     # leaves it out unless the profile says ``include_links``.
-    from core.links import linked_ancestor
+    from core.links import is_linked
     include_links = bool(config.get('include_links', False))
     objects = collect_objects(scene)
     linked_skipped = 0
     if not include_links:
+        linked_ids = set()
+        def mark(groups, inside):
+            for g in groups:
+                here = inside or is_linked(g)
+                if here:
+                    linked_ids.add(id(g))
+                mark(g.children or [], here)
+        mark(scene.groups, False)
         kept = []
         for obj in objects:
             host = obj.get('group') if obj.get('group') is not None else obj.get('owner')
-            if host is not None and linked_ancestor(host) is not None:
+            if host is not None and id(host) in linked_ids:
                 linked_skipped += 1
             else:
                 kept.append(obj)

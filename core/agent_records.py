@@ -132,19 +132,24 @@ class RecordTools:
     def _record_targets(self, uids):
         if not isinstance(uids, list) or any(not isinstance(uid, str) for uid in uids):
             raise ValueError('uids must be a list of strings')
-        lookup = {g.uid: g for g, _, _ in self._groups()}
-        missing = [uid for uid in uids if uid not in lookup]
+        rows = {g.uid: (g, parents) for g, parents, _ in self._groups()}
+        missing = [uid for uid in uids if uid not in rows]
         if missing:
             raise ValueError('Unknown group uids: ' + ', '.join(missing))
         # A record written on a linked copy would vanish at the next refresh
-        # of the link: classify the source file instead.
-        from core.links import linked_ancestor, link_of
-        linked = [uid for uid in uids if linked_ancestor(lookup[uid]) is not None]
-        if linked:
-            source = link_of(linked_ancestor(lookup[linked[0]]))['path']
-            raise ValueError('These groups come from the linked file ' + source
-                             + '; open that file to classify them: ' + ', '.join(linked))
-        return [lookup[uid] for uid in dict.fromkeys(uids)]
+        # of the link: classify the source file instead. The tree walk, not
+        # the owner chain, decides: it is what the read tools showed.
+        from core.links import link_of
+        sources = {}
+        for uid in uids:
+            group, parents = rows[uid]
+            source = next((link_of(g)['path'] for g in [*parents, group] if link_of(g)), None)
+            if source is not None:
+                sources[uid] = source
+        if sources:
+            raise ValueError('These groups come from the linked file ' + next(iter(sources.values()))
+                             + '; open that file to classify them: ' + ', '.join(sources))
+        return [rows[uid][0] for uid in dict.fromkeys(uids)]
 
     def _edit_records(self, targets, patches, schema, force):
         schema_name(schema)
