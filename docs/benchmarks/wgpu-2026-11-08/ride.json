@@ -1,0 +1,37 @@
+{
+  "model": "/Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz",
+  "adapter": "AdapterInfo { name: \"Apple M1 Max\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }; multi_draw=true",
+  "load_s": 8.092882208002266,
+  "build_s": 40.88546995900106,
+  "upload_s": 0.2594801670056768,
+  "first_picture_s": 49.363423875009175,
+  "gpu_buffer_bytes": 822052868,
+  "attachment_bytes": 21536000.0,
+  "placements": 76029,
+  "prototypes": 15906,
+  "visible_placements": 69116,
+  "triangles": 8484592,
+  "frames": 1007,
+  "cpu_ms": {
+    "min": 0.928125,
+    "avg": 1.1556293853028798,
+    "max": 12.530375
+  },
+  "gpu_ms": {
+    "min": 5.593375,
+    "avg": 6.697724848063555,
+    "max": 35.409125
+  },
+  "wall_ms": {
+    "min": 7.811625022441149,
+    "avg": 9.434048681198078,
+    "max": 98.1192920007743
+  },
+  "pick_ms": 1.3155419728718698,
+  "picked": 63975,
+  "logical_size": [
+    1000,
+    673
+  ],
+  "scale": 2.0
+}
