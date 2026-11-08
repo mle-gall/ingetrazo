@@ -93,6 +93,7 @@ cuerpo nunca llega a leerse. Aun así, **detén el puente cuando no lo uses**.
 | `set_registry` / `add_classification_system` / `import_classification_codes` | Sustituye el registro, añade un espacio de clasificación o importa códigos CSV. |
 | `set_type` / `set_system` | Crea o sustituye tipos y sistemas del proyecto. |
 | `delete_type` / `delete_system` / `delete_classification_system` | Elimina entradas; rechaza referencias activas salvo con `force=true`. |
+| `export_ifc` | Exporta el IFC con un perfil del registro y devuelve el recuento, las fichas omitidas con su motivo y el resultado IDS. |
 | `list_tools` | Catálogo vivo, incluidas las herramientas de extensiones. |
 | `screenshot` | Renderiza el viewport real; `uids` encuadra grupos antes de capturar y devuelve la cámara usada. |
 | `undo` / `redo` | La historia de siempre. |
@@ -274,3 +275,9 @@ references for later repair; the resulting registry must still pass its own
 validator. `set_registry` is a validated whole-document replacement.
 Use `query_changes` to see what the agent did, then have a human review the
 classification in the BIM panel.
+
+Finish with `export_ifc(path, profile=...)`. The result lists the elements
+written, the records skipped with their validation messages, and, when the
+profile names IDS files and `ifctester` is installed, the pass and fail counts
+per specification. Fix the skipped records with `set_record` and export again:
+GUIDs are persistent, so the second file describes the same objects.

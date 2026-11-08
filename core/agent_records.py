@@ -235,3 +235,31 @@ class RecordTools:
 
     def _tool_delete_classification_system(self, key, force=False):
         return self._registry_delete('classification_systems', key, force)
+
+    def _tool_export_ifc(self, path, profile=None, project_name=None):
+        """Write the IFC the user would get from File > Export, and hand back
+        the report: how many elements, which records were skipped and why,
+        and the IDS results when the profile lists IDS files. A relative
+        path lands next to the open document, or in the working directory
+        when the document was never saved. The export assigns missing GUIDs
+        and the identity namespace, which is why it is advertised as a
+        mutating tool; it is not an undo step."""
+        from pathlib import Path
+        from formats.ifc import save_ifc
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError('path must be a file name')
+        window = self._viewport.window() if callable(getattr(self._viewport, 'window', None)) else None
+        current = getattr(window, '_current_path', None)
+        base = Path(current).parent if current else Path.cwd()
+        target = Path(path).expanduser()
+        if not target.is_absolute():
+            target = base / target
+        if target.suffix.lower() != '.ifc':
+            target = target.with_suffix('.ifc')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        kwargs = {'profile': profile, 'project_directory': base}
+        if project_name:
+            kwargs['project_name'] = project_name
+        report = save_ifc(self._viewport.scene, target, **kwargs)
+        return json_value(dict(path=report.path, count=report.count,
+                               problems=report.problems, ids=report.ids))

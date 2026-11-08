@@ -190,6 +190,8 @@ for _name, _description, _props, _required in [
     *[(name, 'Delete a registry entry; return referencing uids and refuse unless forced.',
        {'key': _TEXT, 'force': _FORCE}, ['key'])
       for name in ('delete_type', 'delete_system', 'delete_classification_system')],
+    ('export_ifc', 'Write the IFC file for a registry export profile (IFC4 default) and return the count, skipped records with reasons, and IDS results. Relative paths land next to the open document.',
+     {'path': _TEXT, 'profile': _TEXT, 'project_name': _TEXT}, ['path']),
 ]:
     BUILTIN_TOOLS.append(dict(name=_name, description=_description,
         mutates=not _name.startswith('query_'),

@@ -30,13 +30,23 @@ def role(record):
 
 def apply_type(record, registry):
     """Type scalar defaults; property-level pset overrides; lists replace."""
-    defaults = deepcopy(registry.get('types', {}).get(record.get('type'), {}))
+    # A malformed type reference (unknown key, a non-string, a type entry
+    # that is not an object) is a validation problem, not a crash: resolve
+    # as if the record had no type, so readers still get a view.
+    types = registry.get('types', {})
+    key = record.get('type')
+    entry = types.get(key) if isinstance(key, str) and isinstance(types, dict) else None
+    defaults = deepcopy(entry) if isinstance(entry, dict) else {}
     if 'ifc_class' in defaults:
         defaults['class'] = defaults.pop('ifc_class')
     psets = defaults.pop('psets', {})
+    if not isinstance(psets, dict):
+        psets = {}
     defaults.update(deepcopy(record))
-    for name, props in record.get('psets', {}).items():
-        psets.setdefault(name, {}).update(deepcopy(props))
+    own = record.get('psets', {})
+    for name, props in (own.items() if isinstance(own, dict) else ()):
+        if isinstance(props, dict):
+            psets.setdefault(name, {}).update(deepcopy(props))
     if psets:
         defaults['psets'] = psets
     return normalize(defaults)

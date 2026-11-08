@@ -178,5 +178,35 @@ def test_forced_malformed_type_remains_readable(model):
     a, _, children = model
     result = a._tool_set_record([children[0].uid], {'class': 'IfcBeam', 'type': []}, force=True)
     assert result['applied'] and result['records'][0]['problems']
-    assert result['records'][0]['resolved'] is None
+    # A broken type reference resolves as "no type": the view stays readable
+    # and the problems list is what reports it.
+    assert result['records'][0]['resolved']['class'] == 'IfcBeam'
     assert a._tool_set_record([children[0].uid], {'type': None})['applied']
+
+
+def test_apply_type_tolerates_a_malformed_type_reference():
+    """A record pointing at a missing or broken type still resolves, and the
+    validator is what reports the problem."""
+    from core import record
+    registry = {'types': {'broken': 'not an object'}}
+    for key in ('missing', 'broken', ['list'], 7):
+        view = record.apply_type({'class': 'IfcWall', 'type': key}, registry)
+        assert view['class'] == 'IfcWall'
+    problems = record.validate({'class': 'IfcWall', 'type': 'missing'}, registry)
+    assert any('type' in p.lower() for p in problems)
+
+
+def test_export_ifc_tool_writes_next_to_the_document(model, tmp_path):
+    a, parent, children = model
+    ids = [g.uid for g in children]
+    a._tool_tag(ids, 'IfcColumn')
+    a._viewport.window = lambda: SimpleNamespace(_current_path=tmp_path / 'ride.igz')
+    result = a._tool_export_ifc('out/ride', profile=None)
+    path = tmp_path / 'out' / 'ride.ifc'
+    assert result['path'] == str(path) and path.exists()
+    assert result['count'] == 4  # the space and its three columns
+    assert result['problems'] == [] and result['ids'] == []
+    text = path.read_text(encoding='ascii')
+    assert text.count('IFCCOLUMN(') == 3 and "FILE_SCHEMA(('IFC4'))" in text
+    with pytest.raises(ValueError):
+        a._tool_export_ifc('')
