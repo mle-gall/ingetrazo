@@ -375,7 +375,10 @@ class _Bridge(QObject, InspectionTools, RecordTools, FacetTools):
             self._tool_zoom_to(uids)
         width = max(64, min(int(width), 4096))
         height = max(64, min(int(height), 4096))
-        image = self._viewport.window()._shown_viewport().render_image(width, height)
+        window = self._viewport.window()
+        shown = getattr(window, "_shown_viewport", None)
+        view = shown() if shown is not None else self._viewport
+        image = view.render_image(width, height)
         out_dir = Path(tempfile.gettempdir()) / "ingetrazo-ai"
         out_dir.mkdir(parents=True, exist_ok=True)
         out = out_dir / "viewport.png"
