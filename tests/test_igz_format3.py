@@ -211,3 +211,28 @@ def test_small_component_binary_roundtrip(tmp_path, monkeypatch):
     binary_back = _save_and_load(_scene(tmp_path), tmp_path / "small-binary.igz")
     assert _canonical(binary_back) == _canonical(json_back)
     assert binary_back.groups[0].mesh is binary_back.groups[1].mesh
+
+
+def test_explicit_save_backs_up_previous_geometry_and_respects_preference(tmp_path, binary, monkeypatch):
+    from core import general_settings
+    from core.layers import Layer
+
+    path = tmp_path / "ride.igz"
+    backup = tmp_path / "ride.igz.bak"
+    enabled = "1"
+    monkeypatch.setattr(general_settings, "value", lambda name, default, settings=None:
+                        enabled if name == "backup" else default)
+    igz.save_scene(_scene(tmp_path), path)
+    first = path.read_bytes()
+    assert not backup.exists()
+    scene = Scene()
+    igz.load_into(scene, path)
+    scene.layers.append(Layer("A", folder="Y"))
+    igz.save_scene(scene, path)
+    assert backup.read_bytes() == first
+    with zipfile.ZipFile(path) as new, zipfile.ZipFile(backup) as old:
+        assert set(new.namelist()) == set(old.namelist())
+        assert {n for n in new.namelist() if new.read(n) != old.read(n)} == {"document.json"}
+    enabled = "0"
+    igz.save_scene(scene, path)
+    assert backup.read_bytes() == first

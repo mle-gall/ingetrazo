@@ -369,15 +369,18 @@ class _Bridge(QObject, InspectionTools, RecordTools, FacetTools):
         return {"found": True, "value": copy(self._scope[name])}
 
     def _tool_screenshot(self, width: int = 1024, height: int = 768, uids=None) -> dict:
+        """Capture the shown view. On Metal the ride-model agent framed the
+        shared camera but captured the hidden GL widget (2026-11-09)."""
         if uids is not None:
             self._tool_zoom_to(uids)
         width = max(64, min(int(width), 4096))
         height = max(64, min(int(height), 4096))
-        image = self._viewport.render_image(width, height)
+        image = self._viewport.window()._shown_viewport().render_image(width, height)
         out_dir = Path(tempfile.gettempdir()) / "ingetrazo-ai"
         out_dir.mkdir(parents=True, exist_ok=True)
         out = out_dir / "viewport.png"
-        image.save(str(out))
+        if image is None or not image.save(str(out)):
+            raise RuntimeError("Could not save the viewport screenshot")
         return {"path": str(out), "width": width, "height": height,
                 "camera": self._tool_query_camera()}
 

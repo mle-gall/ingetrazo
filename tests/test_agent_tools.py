@@ -133,6 +133,17 @@ def test_tree_entity_selection_and_layers(model):
     assert win.viewport.scene.layer("Walls").visible
 
 
+def test_layer_usage_includes_untagged_groups_and_shared_faces(model):
+    win, bridge, parent, child, layer = model
+    layer.name = child.layer = "A"
+    win.viewport.scene.groups.append(Group(child.mesh))
+    child.mesh.faces[0].attrs["layer"] = None
+    rows = {r["name"]: r for r in call(bridge, "query_layers")["layers"]}
+    assert rows["Layer 0"]["groups"] == 2
+    assert rows["Layer 0"]["faces"] == 1
+    assert rows["A"]["groups"] == 1
+
+
 def test_camera_zoom_and_screenshot(model, monkeypatch):
     win, bridge, parent, child, _ = model
     before = len(win.viewport.history.undo_stack)
@@ -147,6 +158,29 @@ def test_camera_zoom_and_screenshot(model, monkeypatch):
     shot = call(bridge, "screenshot", uids=[child.uid], width=64, height=64)
     assert shot["camera"] == call(bridge, "query_camera")
     assert len(win.viewport.history.undo_stack) == before
+
+
+def test_screenshot_frames_shared_camera_and_captures_metal(model, monkeypatch, tmp_path):
+    from PySide6.QtGui import QImage
+    win, bridge, _, child, _ = model
+    targets = []
+
+    def capture(w, h):
+        targets.append(win.viewport.camera.target.x())
+        image = QImage(w, h, QImage.Format_RGB32)
+        image.fill(0xff123456)
+        return image
+
+    monkeypatch.setattr(win._doc, "stand_in", SimpleNamespace(
+        isVisible=lambda: True, render_image=capture))
+    monkeypatch.setattr(win.viewport, "render_image", lambda w, h: None)
+    monkeypatch.setattr("plugins.ai_bridge.tempfile.gettempdir", lambda: str(tmp_path))
+    for args in ({"uids": [child.uid]}, {}):
+        shot = call(bridge, "screenshot", width=90, height=65, **args)
+        image = QImage(shot["path"])
+        assert (image.width(), image.height(), image.pixel(0, 0)) == (90, 65, 0xff123456)
+    assert 10 <= targets[0] <= 12
+    assert targets[0] == targets[1]
 
 
 def test_existing_nested_metadata_and_mesh_are_transactional(model):

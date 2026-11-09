@@ -611,7 +611,31 @@ def _pack_plan(mesh, plan, sink: dict) -> dict:
     return _write_geometry(arrays, table, layer_table, sink)
 
 
-def save_scene(scene, path: Path) -> dict:
+def _backup_previous(path: Path) -> bool:
+    """Keep the previous explicit save, including the headless saves that
+    missed the ride-model agent's backup on 2026-11-09."""
+    import shutil
+    from tempfile import TemporaryDirectory
+    from PySide6.QtCore import QCoreApplication, QSettings
+    from core import general_settings
+
+    if not path.is_file():
+        return True
+    settings = None if QCoreApplication.organizationName() else QSettings(
+        QSettings.defaultFormat(), QSettings.UserScope, "IngeTrazo", "IngeTrazo")
+    if str(general_settings.value("backup", "1", settings)) == "0":
+        return True
+    try:
+        with TemporaryDirectory(dir=path.parent) as tmp:
+            copy = Path(tmp) / "previous"
+            shutil.copy2(path, copy)
+            copy.replace(path.with_name(path.name + ".bak"))
+    except OSError:
+        return False
+    return True
+
+
+def save_scene(scene, path: Path, *, backup=True) -> dict:
     """Synchronous explicit save; autosave drives the same preparation in slices."""
     from core import project, links
     if hasattr(scene, "plugin_data"):
@@ -623,7 +647,11 @@ def save_scene(scene, path: Path) -> dict:
         try:
             next(steps)
         except StopIteration as done:
-            return write_prepared(done.value, path)
+            backup_failed = backup and not _backup_previous(path)
+            stats = write_prepared(done.value, path)
+            if backup_failed:
+                stats["backup_failed"] = True
+            return stats
 
 
 def prepare_scene_steps(scene, mesh_steps=None):

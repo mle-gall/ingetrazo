@@ -7241,17 +7241,6 @@ class MainWindow(WorksessionMixin, QMainWindow):
         if self._session_path and project_path_missing(self.viewport.scene):
             from core import project
             project.attach(self.viewport.scene, self._session_path, path)
-        # Backup BEFORE writing (Preferences ▸ General): the previous good
-        # version survives even a save that dies mid-write — which a syncing
-        # drive has actually produced (pCloud truncation).
-        if str(_gs.value("backup", "1")) != "0" \
-                and path.is_file():
-            import shutil
-            try:
-                shutil.copy2(path, path.with_name(path.name + ".bak"))
-            except OSError:
-                self.statusBar().showMessage(
-                    tr("Could not write the backup copy."), 4000)
         try:
             self.viewport.scene.camera_home = self._camera_dict()
             # Linked files: their paths relative to where this is saved.
@@ -7287,6 +7276,8 @@ class MainWindow(WorksessionMixin, QMainWindow):
                 tr("{n} texture image(s) could not be read, so they were not "
                    "packed into the document — those faces will lose their "
                    "texture on another computer.", n=missing))
+        elif stats.get("backup_failed"):
+            self.statusBar().showMessage(tr("Could not write the backup copy."), 4000)
         elif embedded:
             self.statusBar().showMessage(
                 tr("Saved — {n} texture(s) packed into the document.",
