@@ -15,6 +15,8 @@ class Arrays:
     ring_sizes: np.ndarray
     ring_counts: np.ndarray
     edge_face_counts: np.ndarray | None = None
+    _perimeter: float = field(default=0., init=False, repr=False)
+    _balanced: bool = field(default=True, init=False, repr=False)
     _signed_volume: float = field(default=0., init=False, repr=False)
     _bounds: object = field(default=None, init=False, repr=False)
     _measurements: object = field(default=None, init=False, repr=False)
@@ -91,6 +93,32 @@ def owned_placements(group, base=None, excluded=()):
                      if not child.ifc and child.uid not in excluded)
 
 
+def uniform_scale(local, rot, trans):
+    """Uniform scale when float32 rounding stays below quantity tolerance.
+
+    Thin solids far from the origin need the historical world calculation.
+    A surface-area times coordinate-error bound guards their signed volume;
+    this also avoids magnifying cancellation in almost-zero volumes.
+    """
+    gram = rot.T @ rot
+    scale2 = float(np.trace(gram) / 3)
+    if scale2 <= 0 or np.max(np.abs(gram - np.eye(3) * scale2)) > 2e-6 * scale2:
+        return None
+    data = measurements(local)
+    if data is not None:
+        bounds = np.maximum(np.abs(local._bounds[0]), np.abs(local._bounds[1]))
+        magnitude = float(np.max(np.abs(rot) @ bounds + np.abs(trans)))
+        error = magnitude * np.finfo(np.float32).eps
+        area = float(data[0].sum()) * scale2
+        if error * local._perimeter * scale2**.5 > max(1e-7, 2e-5 * area):
+            return None
+        if data[4]:
+            volume = data[3] * abs(float(np.linalg.det(rot)))
+            if error * area > max(1e-7, 2e-5 * volume):
+                return None
+    return scale2
+
+
 def placed_arrays(local, matrix):
     """Reuse prototype Newell measurements for rigid/uniform placements.
 
@@ -104,9 +132,8 @@ def placed_arrays(local, matrix):
     a = Arrays((local.pos @ rot.T + trans).astype(np.float32).astype(float),
                local.corners, local.ring_sizes, local.ring_counts,
                local.edge_face_counts)
-    gram = rot.T @ rot
-    scale2 = float(np.trace(gram) / 3)
-    if scale2 > 0 and np.max(np.abs(gram - np.eye(3) * scale2)) <= 2e-6 * scale2:
+    scale2 = uniform_scale(local, rot, trans)
+    if scale2 is not None:
         data = measurements(local)
         if data is not None:
             gross, net, normals, volume, closed, starts = data
@@ -197,6 +224,8 @@ def measurements(a):
     signed = np.where(same[:, None], -vectors, vectors)
     volume = (abs(float(np.sum(np.einsum('ij,ij->i', points[starts], signed)) / 3))
               if closed else None)
+    a._perimeter = float(np.linalg.norm(points - points[nxt], axis=1).sum())
+    a._balanced = bool(np.linalg.norm(signed.sum(axis=0)) <= 1e-10 * ring_areas.sum())
     if closed:
         a._signed_volume = float(np.sum(np.einsum('ij,ij->i', points[starts], signed)) / 3)
     used = a.pos[a.corners]
@@ -222,7 +251,8 @@ def placement_quantities(placements):
     if not parts:
         return 0., 0., None, False, 0
     local = [measurements(a) for a, _ in parts]
-    if len(parts) > 1 and not all(data[4] for data in local):
+    if len(parts) > 1 and not all(data[4] and a._balanced
+                                  for (a, _), data in zip(parts, local)):
         return quantities(placed_arrays(a, m) for a, m in parts)
     gross = net = signed_volume = 0.
     count = 0
@@ -230,11 +260,10 @@ def placement_quantities(placements):
     for (a, matrix), data in zip(parts, local):
         det = scale2 = 1.
         if matrix is not None:
-            rot, _ = np_affine(matrix)
-            gram = rot.T @ rot
-            scale2 = float(np.trace(gram) / 3)
+            rot, trans = np_affine(matrix)
+            scale2 = uniform_scale(a, rot, trans)
             det = float(np.linalg.det(rot))
-            if scale2 <= 0 or np.max(np.abs(gram - np.eye(3) * scale2)) > 2e-6 * scale2:
+            if scale2 is None:
                 return quantities(placed_arrays(a, m) for a, m in parts)
         gross += float(data[0].sum()) * scale2
         net += float(data[1].sum()) * scale2

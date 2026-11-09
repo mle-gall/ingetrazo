@@ -419,3 +419,36 @@ def test_tag_cache_invalidates_on_tag_epoch():
     assert _holds_face_tags(g.mesh)
     untag_faces(g.mesh.faces)
     assert not _holds_face_tags(g.mesh)
+
+
+@pytest.mark.parametrize('closed', [False, True])
+def test_uniform_far_from_origin_preserves_float32_volume(closed):
+    from core.geometry_arrays import owned_placements, placement_quantities
+    g = cube() if closed else Group()
+    if not closed:
+        g.mesh.add_face([V(*p) for p in CUBE[0]])
+    g.xform = QMatrix4x4()
+    g.xform.translate(100000, 100000, 100000)
+    g.xform.scale(.01)
+    reference = list(world_arrays(g))
+    for arrays in reference:
+        arrays._measurements = None
+    expected = quantities(reference)
+    if closed:
+        assert expected[2] != pytest.approx(1e-6, rel=1e-3, abs=1e-12)
+    assert placement_quantities(list(owned_placements(g))) == pytest.approx(expected)
+
+
+def test_inconsistent_winding_preserves_assembled_volume():
+    from core.geometry_arrays import owned_placements, placement_quantities
+    root = Group()
+    for i in range(2):
+        g = cube()
+        g.ifc = None
+        g.mesh.faces[0].loop.reverse()
+        g.xform = QMatrix4x4()
+        g.xform.translate(0, 0, i * 10)
+        root.children.append(g)
+    reference = quantities(world_arrays(root))
+    actual = placement_quantities(list(owned_placements(root)))
+    assert actual == pytest.approx(reference)
