@@ -2700,3 +2700,55 @@ A separate Metal-only run completed in 31.2192 s. Both children exited within
 240 seconds. Runs overlapped briefly and are single samples, not a performance
 acceptance gate. GL initialization is excluded; fresh Metal setup/upload is
 included. PNGs and raw JSON measurements are in the linked artifact directory.
+
+
+## R3c-1 — 2026-11-09: registry coverage audit
+
+Baseline audit before implementation. Native denotes an existing dispatch route,
+not exhaustive parity acceptance. Main-window availability hints currently
+lag the mesh dispatch table. Section planes and texture positioning remain
+after the crate work. Group/component, visibility and zoom-window actions
+are commands/navigation modes outside the tool registry.
+
+| Registry key | Class | Metal status | GL hooks / preview dependencies |
+| --- | --- | --- | --- |
+| select | SelectTool | native | _world_to_pixel, pick_dimension, pick_edge, pick_face, pick_geopath, pick_group |
+| line | LineTool | native | rubber_band_lines |
+| freehand | FreehandTool | inert with note | rubber_band_lines |
+| rectangle | RectangleTool | native | rubber_band_lines |
+| rotated_rect | RotatedRectangleTool | inert with note | rubber_band_lines |
+| circle | CircleTool | inert with note | rubber_band_lines |
+| polygon | PolygonTool | inert with note | rubber_band_lines |
+| arc | ArcTool | inert with note | rubber_band_lines |
+| arc3 | ThreePointArcTool | inert with note | rubber_band_lines |
+| center_arc | CenterArcTool | inert with note | rubber_band_lines |
+| pie | PieTool | inert with note | rubber_band_lines |
+| pushpull | PushPullTool | native | _pixel_to_ray, _world_to_pixel, pick_face_any, rubber_band_lines |
+| offset | OffsetTool | inert with note | _pixel_to_ray, _world_to_pixel, pick_face, rubber_band_lines |
+| move | MoveTool | native | _world_to_pixel, pick_edge, pick_face, pick_group, set_groups_preview_offset, rubber_band_lines |
+| rotate | RotateTool | inert with note | pick_edge, pick_face, set_groups_preview_matrix, rubber_band_lines |
+| scale | ScaleTool | inert with note | _pixel_to_ray, _world_to_pixel, pick_edge, pick_face, scale_box_state (screen handles) |
+| flip | FlipTool | inert with note | _world_to_pixel |
+| followme | FollowMeTool | inert with note | pick_edge, pick_face, rubber_band_lines |
+| fillet | FilletTool | inert with note | rubber_band_lines |
+| texture_position | TexturePositionTool | inert with note — after the crate work | shared viewport / tool base |
+| paint | PaintTool | inert with note | pick_face_any |
+| dimension | DimensionTool | inert with note | rubber_band_lines |
+| eraser | EraserTool | native | pick_dimension, pick_edge, pick_geopath, pick_guide, rubber_band_lines |
+| tape | TapeMeasureTool | native | _world_to_pixel, pick_axis, pick_edge, pick_edge_any, pick_guide, rubber_band_lines |
+| protractor | ProtractorTool | inert with note | rubber_band_lines |
+| text | TextTool | inert with note | pick_edge, pick_face_any, rubber_band_lines |
+| geopath | GeoPathTool | inert with note | _world_to_pixel, rubber_band_lines |
+| section | SectionPlaneTool | inert with note — after the crate work | rubber_band_lines |
+| position_camera | PositionCameraTool | inert with note | rubber_band_lines |
+| walk | WalkTool | inert with note | rubber_band_lines |
+| look_around | LookAroundTool | inert with note | rubber_band_lines |
+| first_person | FirstPersonTool | inert with note | rubber_band_lines |
+| outer_shell | OuterShellTool | inert with note | pick_group |
+| solid_union | UnionTool | inert with note | pick_group |
+| solid_subtract | SubtractTool | inert with note | pick_group |
+| solid_trim | TrimTool | inert with note | pick_group |
+| solid_intersect | IntersectTool | inert with note | pick_group |
+| solid_split | SplitTool | inert with note | pick_group |
+| change_axes | ChangeAxesTool | inert with note | rubber_band_lines |
+| scale_manager | ScaleManagerTool | inert with note | shared viewport / tool base |
