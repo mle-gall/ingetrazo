@@ -87,6 +87,9 @@ def test_a_first_run_opens_the_everyday_trays_and_keeps_the_rest_ready(
     assert not win.tray.isHidden()                    # Properties
     assert not win.project_browser.isHidden()          # the model's tree
     assert win.project_browser in win.tabifiedDockWidgets(win.tray)
+    assert not win.structure_dock.isHidden()
+    assert win.structure_dock in win.tabifiedDockWidgets(win.tray)
+    assert win.structure_dock.windowTitle() in [a.text() for a in win._panels_menu.actions()]
     assert _tab_order(win)[:2] == ["Properties", "Browser"]
     assert win.bim_tray.isHidden() and win.georef_tray.isHidden()
     assert win.bim_tray.toggleViewAction().isEnabled()  # one click away
