@@ -167,7 +167,7 @@ def locate(link: dict, host_path=None) -> Path | None:
     return p if p.is_file() else None
 
 
-def load_source(path):
+def load_source(path, select=None):
     """``(definition, source scene)`` for the .igz at ``path``: the whole
     document as one component definition (``core.insert``), its own links
     resolved first. Raises :class:`LinkError`."""
@@ -198,7 +198,29 @@ def load_source(path):
                 "folders": list(getattr(src, "layer_folders", ()) or ()),
                 "parents": dict(getattr(src, "folder_parents", {}) or {})}
         materials = dict(getattr(src, "materials", {}) or {})
-        comp = component_from_scene(src, stem(path))
+        from core.group import Group
+        from core.insert import is_scale_figure
+        from core.mesh import Mesh
+        from PySide6.QtGui import QMatrix4x4
+        validate_select(select)
+        groups = [g for g in src.groups if not is_scale_figure(g)]
+        mesh = src.mesh
+        if select is not None:
+            from core.facets import build, evaluate
+            wanted = set(select['uids']) if 'uids' in select else set(evaluate(build(src), select['filter']))
+            selected = []
+            def visit(items, parent):
+                for group in items:
+                    world = parent * (group.xform or QMatrix4x4())
+                    if group.uid in wanted:
+                        group.xform = world
+                        selected.append(group)
+                    else:
+                        visit(group.children or (), world)
+            visit(groups, QMatrix4x4())
+            groups, mesh = selected, Mesh()
+        comp = Group(mesh, name=stem(path))
+        comp.adopt(groups)
     except LinkError:
         raise
     except Exception as exc:  # noqa: BLE001 — any reader failure
@@ -371,29 +393,72 @@ def _install(scene, path, comp) -> None:
     """Every copy of ``path`` shows ``comp``: they share its prototype
     mesh and nested placements, each keeping its own transform, tag,
     paint and name."""
-    from core.group import copy_group
     for g in linked_groups(scene, path):
-        g.mesh = comp.mesh
-        g.children = [copy_group(c, _in_definition=True)
-                      for c in (comp.children or ())]
-        g.component = True
+        _populate(g, comp)
+    _entry(scene, path)['loaded_mtime_ns'] = Path(path).stat().st_mtime_ns
     scene.version += 1
+
+
+def validate_select(select):
+    """Only source UIDs or a Navigator expression can define a subset."""
+    if select is None:
+        return
+    if not isinstance(select, dict) or set(select) not in ({'uids'}, {'filter'}):
+        raise ValueError('select requires exactly uids or filter')
+    if 'uids' in select:
+        if not isinstance(select['uids'], list) or any(not isinstance(u, str) for u in select['uids']):
+            raise ValueError('uids must be a list of strings')
+    else:
+        from core.facets import validate_filter
+        validate_filter(select['filter'])
+
+
+def stable_uid(placement_uid, source_uid):
+    """Versioned, platform-independent UUID5 mapping; paths never participate."""
+    import uuid
+    return uuid.uuid5(uuid.NAMESPACE_URL, 'ingetrazo:link:v1:' + placement_uid + ':' + source_uid).hex[:16]
+
+
+def _populate(placement, source):
+    from copy import copy, deepcopy
+    from PySide6.QtGui import QMatrix4x4
+    def clone(group, parent):
+        result = copy(group)
+        result.uid = stable_uid(placement.uid, group.uid)
+        result.ext = deepcopy(group.ext)
+        result.ifc = deepcopy(group.ifc)
+        if result.ifc:
+            for opening in result.ifc.get('openings', []):
+                if opening.get('group_uid'):
+                    opening['group_uid'] = stable_uid(placement.uid, opening['group_uid'])
+        result.xform = QMatrix4x4(group.xform) if group.xform is not None else None
+        result.owner = parent
+        result.children = [clone(c, result) for c in group.children or ()]
+        return result
+    placement.mesh = source.mesh
+    placement.children = [clone(c, placement) for c in source.children or ()]
+    placement.component = True
 
 
 # ---- the entry points --------------------------------------------------------------
 
-def make_link(scene, path, host_path=None):
+def make_link(scene, path, host_path=None, select=None):
     """A copy of the .igz at ``path`` ready to place in ``scene`` (by the
     placement tool, like an imported component), its tags brought in.
     Raises :class:`LinkError`."""
     path = Path(path).resolve()
     if host_path is not None and _norm(path) == _norm(host_path):
         raise LinkError("a document cannot link itself")
-    comp, tags, materials = load_source(path)
+    comp, tags, materials = load_source(path, select)
     _rename_tags(comp, path)
     _merge_materials(scene, materials, comp)
     _apply_tags(scene, path, tags)
     comp.ext = {LINK_KEY: _link_record(path, host_path)}
+    if select is not None:
+        from copy import deepcopy
+        comp.ext[LINK_KEY]['select'] = deepcopy(select)
+    _populate(comp, comp)
+    _entry(scene, path)['loaded_mtime_ns'] = path.stat().st_mtime_ns
     comp.name = stem(path)
     return comp
 
@@ -418,11 +483,18 @@ def _merge_materials(scene, materials, comp) -> None:
 def reload(scene, path, host_path=None) -> None:
     """Read ``path`` again and show it in every copy. Raises
     :class:`LinkError` (the copies keep what they showed)."""
-    comp, tags, materials = load_source(path)
-    _rename_tags(comp, path)
-    _merge_materials(scene, materials, comp)
-    _apply_tags(scene, path, tags)
-    _install(scene, path, comp)
+    # Prepare every subset before changing any placement.
+    prepared = []
+    for group in linked_groups(scene, path):
+        comp, tags, materials = load_source(path, link_of(group).get('select'))
+        _rename_tags(comp, path)
+        _merge_materials(scene, materials, comp)
+        prepared.append((group, comp, tags))
+    for group, comp, tags in prepared:
+        _apply_tags(scene, path, tags)
+        _populate(group, comp)
+    _entry(scene, path)['loaded_mtime_ns'] = Path(path).stat().st_mtime_ns
+    scene.version += 1
 
 
 def resolve(scene, host_path=None) -> dict:
@@ -499,3 +571,19 @@ def save_as_placeholder(group, scene) -> bool:
     unpacked link: the source holds the geometry)."""
     link = link_of(group)
     return link is not None and not is_packed(scene, link["path"])
+
+
+def query(scene):
+    """JSON metadata for UI and agents, without touching geometry."""
+    from core.group import iter_placements
+    rows = []
+    for group in linked_groups(scene):
+        rec = link_of(group)
+        path = Path(rec['path'])
+        stamp = path.stat().st_mtime_ns if path.is_file() else None
+        state = ('packed' if is_packed(scene, path) else 'missing' if stamp is None
+                 else 'modified' if stamp != _entry(scene, path).get('loaded_mtime_ns')
+                 else 'resolved')
+        rows.append(dict(uid=group.uid, path=str(path), status=state,
+                         select=rec.get('select'), stable_uid_count=sum(1 for _ in iter_placements(group)) - 1))
+    return rows
