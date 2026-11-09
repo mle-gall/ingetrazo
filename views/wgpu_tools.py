@@ -32,6 +32,7 @@ TOOL_DISPATCH['LookAroundTool'] = 'mesh'
 TOOL_DISPATCH['FirstPersonTool'] = 'mesh'
 TOOL_DISPATCH['OuterShellTool'] = 'mesh'
 TOOL_DISPATCH['UnionTool'] = 'mesh'
+TOOL_DISPATCH['SubtractTool'] = 'mesh'
 
 def move_command(groups, delta):
     commands = [MoveGroupCommand(group, delta) for group in groups]
