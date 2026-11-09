@@ -9,7 +9,8 @@ fn facing(p: vec4f, q: vec4f, r: vec4f) -> f32 {
 // Scalar arrays keep this storage record tightly packed at 48 bytes.
 struct Edge { a: array<f32,3>, b: array<f32,3>, normals: array<f32,6> }
 @group(0) @binding(3) var<storage, read> edges: array<Edge>;
-@group(0) @binding(4) var<storage, read> viewpoints: array<vec4f>;
+struct EdgePlacement { eye: vec4f, transform: mat4x4f }
+@group(0) @binding(4) var<storage, read> viewpoints: array<EdgePlacement>;
 @vertex fn edge_vs(@builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32) -> Out {
  let first = vertex / 6u;
  let edge = edges[first];
@@ -26,15 +27,14 @@ struct Edge { a: array<f32,3>, b: array<f32,3>, normals: array<f32,6> }
  let n0 = packed_normal * select(1.,0.5,soft);
  let n1 = vec3f(edge.normals[3],edge.normals[4],edge.normals[5]);
  let corner = vec4f(select(0.,1.,side_bit),select(0.,1.,end),select(0.,1.,soft),0.);
- let world = inst[id].world;
- let transform = camera.vp * world;
+ let transform = viewpoints[id].transform;
  var a = transform * vec4f(pos, 1.);
  var b = transform * vec4f(other, 1.);
  var profile = false;
  // Hard edges need classification only when it can change their width.
  if style.profiles.x > 0. && (corner.b > 0.5 || style.profiles.y > style.edge.w) {
   let boundary = dot(n0,n0) > 0. && dot(n1,n1) == 0.;
-  let eye = viewpoints[id];
+  let eye = viewpoints[id].eye;
   if eye.w <= 1. {
    let direction = eye.xyz - pos * eye.w;
    profile = boundary || ((dot(n0,direction)>0.) != (dot(n1,direction)>0.));

@@ -343,3 +343,21 @@ def test_replacement_preserves_full_material_rows_and_resident_texture_ids(tmp_p
     assert materials.nbytes == 3 * 32
     assert materials.view(np.uint32).reshape(-1, 8)[:, 5].tolist() == [2, 2, 2]
     assert not any(name == 'set_textures' for name, _ in renderer.calls)
+
+
+def test_drag_preview_batches_rows_without_rendering_ids():
+    from views.wgpu_tools import NativeTools
+    from views.wgpu_scene import INSTANCE
+    renderer = Renderer()
+    packed = SimpleNamespace(instances=np.zeros(2000, dtype=INSTANCE))
+    view = SimpleNamespace(renderer=renderer, packed=packed)
+    native = NativeTools(view)
+    native.ids = np.arange(0, 2000, 2, dtype=np.int64)
+    rows = packed.instances[native.ids].copy()
+    rows['world'][:, 3, 0] = 7
+    native.write_rows(rows)
+    assert [name for name, _ in renderer.calls] == ['update_instances']
+    assert renderer.calls[0][1][0] == native.ids.tolist()
+    assert len(renderer.calls[0][1][1]) == 1000 * 80
+    assert np.all(packed.instances['world'][native.ids, 3, 0] == 7)
+    assert np.all(packed.instances['world'][1::2, 3, 0] == 0)
