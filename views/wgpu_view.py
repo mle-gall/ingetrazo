@@ -357,6 +357,13 @@ class WgpuView(QWidget):
         if self.tools.sync() == 'mesh':
             self.tools.work_point(x, y)
         tool = getattr(source, 'active_tool', None)
+        if tool is not None and not tool.uses_snap and self.tools.mode == 'mesh':
+            from types import SimpleNamespace
+            point = self.tools.work_point(x, y)
+            if point is not None:
+                self.last_snap = SimpleNamespace(point=point, kind=None, context=None)
+            self.update()
+            return self.last_snap
         inference = getattr(source, 'inference', None)
         options = dict(start_point=self.tools.start_point,
                        chain_first_point=getattr(tool, 'chain_first_point', None),
@@ -440,6 +447,11 @@ class WgpuView(QWidget):
         self._drag_nav = event.button() == Qt.MiddleButton or bool(
             getattr(self.source_viewport, 'nav_mode', None))
         mode = self.tools.sync()
+        if (not self._drag_nav and callable(getattr(self.tools.tool, 'on_look', None))
+                and event.button() in (Qt.LeftButton, Qt.RightButton)):
+            from views.viewport import Viewport
+            Viewport._begin_look(self, event)
+            return
         if not self._drag_nav and event.button() == Qt.LeftButton and mode in ('tape', 'move', 'mesh'):
             self.hover(self.press.x(), self.press.y(), event.modifiers())
             self.tools.click(event)
@@ -447,6 +459,13 @@ class WgpuView(QWidget):
             self._pivot = self._orbit_pivot_at(self.press.x(), self.press.y())
 
     def mouseMoveEvent(self, event):
+        if getattr(self, '_look_drag', None) is not None:
+            from views.viewport import Viewport
+            if event.buttons():
+                Viewport._look_move(self, event)
+                return
+            self._look_drag = None
+            self.tools._apply_tool_cursor()
         if not event.buttons():
             self.last = None
             self.hover(event.position().x(), event.position().y(), event.modifiers())
@@ -475,7 +494,28 @@ class WgpuView(QWidget):
                 ((self.press.x(), self.press.y()), (self.last.x(), self.last.y())))]
         self.update()
 
+    @property
+    def active_tool(self):
+        return self.tools.tool
+
+    def _can_warp_pointer(self):
+        from views.viewport import Viewport
+        return Viewport._can_warp_pointer()
+
+    def focusOutEvent(self, event):
+        self._look_drag = None
+        hook = getattr(self.tools.tool, 'on_focus_out', None)
+        if hook is not None:
+            hook(self.tools)
+        self.tools.cancel()
+        super().focusOutEvent(event)
+
     def mouseReleaseEvent(self, event):
+        if getattr(self, '_look_drag', None) is not None:
+            self._look_drag = None
+            self.tools._apply_tool_cursor()
+            self.last = None
+            return
         if self.last is None:
             return
         mode = getattr(self.source_viewport, 'nav_mode', None)
@@ -547,6 +587,9 @@ class WgpuView(QWidget):
 
     def keyPressEvent(self, event):
         mode = self.tools.sync()
+        if event.key() == Qt.Key_Escape:
+            self._look_drag = None
+            self.tools._apply_tool_cursor()
         if event.key() == Qt.Key_Escape and mode in ('tape', 'move', 'mesh'):
             self.tools.cancel()
         elif event.key() == Qt.Key_Escape:

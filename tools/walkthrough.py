@@ -394,7 +394,7 @@ class WalkTool(_EyeTool):
     def _start(self, viewport) -> None:
         if self._timer is None:
             from PySide6.QtCore import QTimer
-            self._timer = QTimer(viewport)
+            self._timer = QTimer(getattr(viewport, 'view', viewport))
             self._timer.setInterval(self.TICK_MS)
             self._timer.timeout.connect(self._tick)
         self._timer.start()
@@ -571,7 +571,7 @@ class FirstPersonTool(_EyeTool):
     def _start(self, viewport) -> None:
         if self._timer is None:
             from PySide6.QtCore import QTimer
-            self._timer = QTimer(viewport)
+            self._timer = QTimer(getattr(viewport, 'view', viewport))
             self._timer.setInterval(self.TICK_MS)
             self._timer.timeout.connect(self._tick)
         if not self._timer.isActive():

@@ -3630,6 +3630,11 @@ class MainWindow(QMainWindow):
             return
         tool = self._tools[key]
         self.viewport.set_active_tool(tool)
+        if metal:
+            display = self._doc.stand_in
+            display.tools.sync()
+            display.set_scene(self.viewport.scene)
+            display.update()
         if key == "tape" and not metal:
             tool.start_from_hover(self.viewport)
         from views.wgpu_tools import TOOL_DISPATCH

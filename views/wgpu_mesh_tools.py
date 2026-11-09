@@ -230,6 +230,7 @@ class MeshToolAccess:
         self._hover_entity = getattr(self, '_mesh_hover', None)
         Viewport._draw_dimensions(self, painter)
         Viewport._draw_text_labels(self, painter)
+        Viewport._draw_geo_paths(self, painter)
         hook = getattr(self.tool, 'draw_overlay', None)
         if hook is not None:
             hook(self, painter)
@@ -255,7 +256,14 @@ class MeshToolAccess:
     def _unsupported_pick(self, *args, **kwargs):
         return None
 
-    pick_geopath = _unsupported_pick
+    def pick_geopath(self, *args):
+        from views.viewport import Viewport
+        return Viewport.pick_geopath(self, *args)
+
+    def _draw_geo_path_label(self, *args):
+        from views.viewport import Viewport
+        return Viewport._draw_geo_path_label(self, *args)
+
     pick_section_plane = _unsupported_pick
     pick_image = _unsupported_pick
     pick_image_plane = _unsupported_pick
