@@ -185,12 +185,21 @@ def test_native_move_preview_then_history_commit(completion):
     source = SimpleNamespace(active_tool=MoveTool(), history=history,
                              flash_status=lambda *a: None, notify_scene_changed=lambda: None,
                              measurementChanged=SimpleNamespace(emit=lambda *a: None))
+    # Like the real view, re-apply resident rows only when the document
+    # changed: MoveTool's own update() calls set_scene during the preview,
+    # and re-applying the unchanged document would wipe the previewed rows.
+    seen = {'content': scene.content_version}
+
+    def set_scene(scene):
+        if scene.content_version != seen['content']:
+            seen['content'] = scene.content_version
+            updates.apply(*updates.diff(scene))
     view = SimpleNamespace(scene=scene, packed=updates.packed, renderer=Renderer(),
                            source_viewport=source, overlay_primitives=[],
                            uid_rows={uid: [row] for uid, row in updates.rows.items()},
                            _instance_updates=updates, update=lambda: None,
                            _world_to_pixel=lambda point: (point.x(), point.y()),
-                           set_scene=lambda scene: updates.apply(*updates.diff(scene)))
+                           set_scene=set_scene)
     native = NativeTools(view)
     event = SimpleNamespace(position=lambda: QPointF(), modifiers=lambda: Qt.NoModifier)
     view.last_snap = SimpleNamespace(point=QVector3D(), kind='endpoint')
