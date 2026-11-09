@@ -1,6 +1,7 @@
 //! A resident Metal scene: compute compaction precedes native indirect draws.
 mod timing;
 mod overlay;
+mod sections;
 mod textures;
 // R-look: isolated style and background passes.
 mod style;
@@ -84,6 +85,7 @@ struct Renderer {
     capture_next: bool,
     captured: Option<Vec<u8>>,
     overlay: overlay::Overlay,
+    sections: sections::Sections,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -469,6 +471,7 @@ impl Renderer {
             capture_next: false,
             captured: None,
             overlay: overlay::Overlay::new(&device, format),
+            sections: sections::Sections::new(&device, format, &camera),
             depth: texture(&device, w, h, wgpu::TextureFormat::Depth32Float),
             offscreen: texture(&device, w, h, format),
             ids: texture(&device, w, h, wgpu::TextureFormat::R32Uint),
@@ -952,14 +955,21 @@ impl Renderer {
     }
     /// Render with resident geometry and textures into isolated sheet targets.
     /// Surface configuration and interactive attachments are never replaced.
+    #[pyo3(signature = (width, height, view, projection, style, instances=None))]
     fn render_image(&mut self, width: u32, height: u32, view: Vec<f32>,
-                    projection: Vec<f32>, style: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+                    projection: Vec<f32>, style: &Bound<'_, PyAny>, instances: Option<PyReadonlyArray1<'_, u8>>) -> PyResult<Vec<u8>> {
         if width == 0 || height == 0 || width > self.device.limits().max_texture_dimension_2d
             || height > self.device.limits().max_texture_dimension_2d {
             return Err(PyValueError::new_err("invalid offscreen dimensions"));
         }
         if view.len() != 16 || projection.len() != 16 {
             return Err(PyValueError::new_err("camera matrices need 16 floats"));
+        }
+        let temporary_rows = instances.as_ref().map(|v| v.as_slice()).transpose()?;
+        if let Some(rows) = temporary_rows {
+            if self.scene.as_ref().map(|s| s.rows.len()) != Some(rows.len()) {
+                return Err(PyValueError::new_err("capture rows must match resident instances"));
+            }
         }
         let format = self.config.format;
         let mut aa = antialias::Antialias::new(&self.device, format, &self.look.buffer, width, height);
@@ -987,6 +997,9 @@ impl Renderer {
         let old_ids = std::mem::replace(&mut self.ids, texture(&self.device, width, height, wgpu::TextureFormat::R32Uint));
         self.config.width = width;
         self.config.height = height;
+        if let (Some(rows), Some(s)) = (temporary_rows, &self.scene) {
+            self.queue.write_buffer(&s.inst, 0, rows);
+        }
         let result = (|| {
             self.set_style(style)?;
             self.set_camera(view, projection)?;
@@ -994,6 +1007,9 @@ impl Renderer {
             self.render(false)?;
             Ok(self.captured.take().unwrap_or_default())
         })();
+        if temporary_rows.is_some() {
+            if let Some(s) = &self.scene { self.queue.write_buffer(&s.inst, 0, &s.rows); }
+        }
         self.config.width = old_size.0;
         self.config.height = old_size.1;
         self.aa = old_aa;
@@ -1114,6 +1130,14 @@ impl Renderer {
     }
     #[getter]
     fn texture_memory(&self) -> u64 { self.textures.bytes }
+    fn set_section_geometry(&mut self, vertices: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
+        let bytes = vertices.as_slice()?;
+        if bytes.len() % 72 != 0 {
+            return Err(PyValueError::new_err("section geometry must contain 24-byte triangle vertices"));
+        }
+        self.sections.upload(&self.device, bytes);
+        Ok(())
+    }
     fn set_msaa(&mut self, enabled: bool) {
         self.antialias = enabled;
     }
@@ -1321,7 +1345,7 @@ impl Renderer {
             drop(pass);
             }
             if msaa && !self.pick_pending {
-                self.aa.draw(&mut e, &color, s, self.style, self.edges, self.look.data[6][0] > 0., self.multi, self.queries.as_ref(), Some(edge_only));
+                self.aa.draw(&mut e, &color, s, self.style, self.edges, self.look.data[6][0] > 0., self.multi, self.queries.as_ref(), Some(edge_only), self.sections.count > 0);
             }
             if !edge_only && ao_active {
                 if msaa { self.aa.resolve_depth(&self.device, &mut e, &depth); }
@@ -1330,6 +1354,13 @@ impl Renderer {
             }
         }
         if (!msaa || self.pick_pending) && (draw_ids || ao_active) { self.ids_dirty = false; }
+        if self.sections.count > 0 {
+            if msaa && !self.pick_pending {
+                self.sections.draw(&mut e, &self.aa.color_view(), &self.aa.depth_view(), Some(&color), tq);
+            } else {
+                self.sections.draw(&mut e, &color, &depth, None, tq);
+            }
+        }
         self.overlay
             .draw(&mut e, &color, self.config.width, self.config.height, tq);
         if let (Some(q), Some(k)) = (&self.queries, timing_slot) {
@@ -1416,6 +1447,7 @@ impl Renderer {
                 });
             self.timings[k].pending = Some(rx);
             let mut active = vec!["background", "culling", "overlay", "frame"];
+            if self.sections.count > 0 { active.push("section_caps"); }
             if !msaa { active.push("faces"); if !msaa && (self.edges || self.style == 4) { active.push("edge_quads"); } }
             if msaa && !self.pick_pending { active.push("antialias"); if ao_active || self.edges || self.style == 4 { active.push("antialias_edges"); } }
             if self.style == 1 { active.extend(["xray_accumulation", "xray_composite"]); }
