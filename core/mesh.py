@@ -1087,6 +1087,7 @@ class Mesh:
         self.edges.append(edge)
         self._registry.setdefault(_key(edge.v0.position), edge.v0)
         self._registry.setdefault(_key(edge.v1.position), edge.v1)
+        self.mark_modified()
 
     def relink_face(self, face: Face) -> None:
         """Re-attach a previously removed face object (undo), recreating any
@@ -1100,6 +1101,7 @@ class Mesh:
                 if face not in edge.faces:
                     edge.faces.append(face)
         self.faces.append(face)
+        self.mark_modified()
 
     # ---- Holes --------------------------------------------------------------
     def add_hole(self, face: Face, loop_positions: Iterable[QVector3D]) -> list[Vertex]:
