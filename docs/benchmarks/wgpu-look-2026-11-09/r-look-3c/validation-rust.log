@@ -1,0 +1,26 @@
+   Compiling ingetrazo_render v0.1.0 (/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/rust/ingetrazo_render)
+warning: function `multisampled` is never used
+   --> src/lib.rs:104:4
+    |
+104 | fn multisampled(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
+    |    ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: `ingetrazo_render` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.80s
+     Running unittests src/lib.rs (rust/ingetrazo_render/target/debug/deps/ingetrazo_render-fb22adae1b2e53df)
+
+running 9 tests
+test tests::indirect_layout ... ok
+test edges::classification_tests::boundary_and_opposed_faces_are_profiles ... ok
+test xray::tests::transmittance_and_average_are_order_independent ... ok
+test reference_tests::clip_planes_and_pixel_size ... ok
+test reference_tests::mirrored_and_sheared_boxes_remain_visible ... ok
+test reference_tests::compact_into_disjoint_capacity_ranges ... ok
+test edges::tests::expands_endpoint_pairs_without_changing_face_commands ... ok
+test edges::classification_tests::coplanar_triangulation_does_not_create_a_profile_diagonal ... ok
+test antialias::tests::metal_validates_background_and_multisample_pipelines ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.72s
+

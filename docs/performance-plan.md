@@ -1283,3 +1283,21 @@ completed batches, 1,267 passed / 18 failed / 48 skipped / 1 deselected;
 all observed failures match the baseline, but the remainder is unverified.
 Ride default timed out without an image; edges-off wrote its image before
 a shutdown timeout. Its width-4 diagnostic exited normally.
+
+## R-look 3c — 2026-11-09
+
+GPU adjacency-based profiles and dashed back edges now share the edge-quad upload
+path. X-ray has order-independent faces at GL's 0.6 opacity, face depth for washed
+hidden edges, and soft profiles on top. Frame timings separate polling, acquisition,
+encoding, submission and presentation. Python reuses camera matrices and avoids
+unchanged style uploads.
+
+The apparent 13 ms CPU floor is chiefly Metal drawable acquisition: the final
+2000×1400 one-triangle control costs 0.40 ms CPU offscreen, versus
+9.31 ms waiting for a drawable on screen. This does not claim a corresponding
+on-screen frame-rate gain. Matched baseline/3c captures and CPU/GPU/wall tables cover
+the marquee, pusher car and ride. Profile geometry adds substantial GPU cost on the
+ride. X-ray/back edges currently use single-sample rendering; authored hidden-edge
+metadata is absent from the existing upload. Complete GL parity is not claimed.
+
+[Comparison images, before/after cost table, commands and limitations](benchmarks/wgpu-look-2026-11-09/r-look-3c/README.md).
