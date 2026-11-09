@@ -163,6 +163,14 @@ _PAGE = {'offset': {'type': 'integer', 'minimum': 0, 'default': 0},
 _SCHEMA = {'enum': ['IFC4', 'IFC4X3_ADD2'], 'default': 'IFC4'}
 _FORCE = {'type': 'boolean', 'default': False}
 for _name, _description, _props, _required in [
+    ('query_structure', 'Read ordered structure nodes with counts, recipes and active node.', {}, []),
+    ('set_structure', 'Replace the section with value, or patch node fields by key (null deletes). Resync affected members.',
+     {'value': {'type': 'object'}, 'patch': {'type': 'object'}, 'force': _FORCE}, []),
+    ('file', 'File placements under one structure node in one undo step.',
+     {'uids': _STRINGS, 'node': _TEXT}, ['uids', 'node']),
+    ('query_unsorted', 'Page local placements needing filing or class review.', _PAGE, []),
+    ('bootstrap_structure', 'Infer nodes and filings from existing tags. Inspect conflicts before applying.',
+     {'apply': {'type': 'boolean', 'default': False}}, []),
     ('query_record', 'Read an object record, resolved type defaults and validation problems.',
      {'uid': _TEXT, 'schema': _SCHEMA}, ['uid']),
     ('query_records', 'Page placed groups in outliner order; totals cover the entire model. Name is a case-insensitive substring. Problems is an error count.',

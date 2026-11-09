@@ -196,6 +196,12 @@ def load_source(path, select=None):
         tags = {"layers": [ly.to_dict() for ly in src.layers],
                 "folders": list(getattr(src, "layer_folders", ()) or ()),
                 "parents": dict(getattr(src, "folder_parents", {}) or {})}
+        from core import bim_registry, structure
+        vocabulary = bim_registry.get(src)
+        nodes = vocabulary.get('structure', {}).get('nodes', {})
+        if nodes:
+            tags['structure'] = {key: {**node, 'recipe': structure.resolve(vocabulary, key)}
+                                 for key, node in nodes.items()}
         materials = dict(getattr(src, "materials", {}) or {})
         from core.group import Group
         from core.insert import is_scale_figure
@@ -332,6 +338,10 @@ def _apply_tags(scene, path, tags) -> None:
     folders left behind when the source reorganised its tags."""
     from core.layers import Layer, folders_of, move_folder, remove_folder
     entry = _entry(scene, path)
+    if tags.get('structure'):
+        entry['structure'] = tags['structure']
+    else:
+        entry.pop('structure', None)
     overrides = entry["overrides"]
     # What the source said last time: a tag the host now shows otherwise
     # was switched here — by the Tags panel, Isolate, a saved view, any

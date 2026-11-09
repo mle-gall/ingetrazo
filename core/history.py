@@ -5517,6 +5517,37 @@ class ChangeAxesCommand(Command):
         return QMatrix4x4(m)
 
 
+class SetStructureNodeCommand(Command):
+    """Membership belongs to a placement, including ones without an IFC record."""
+    def __init__(self, targets, key):
+        self.targets = list(targets)
+        self.key = key
+
+    def do(self, scene):
+        from copy import deepcopy
+        self.before = []
+        for group in self.targets:
+            ext = dict(group.ext or {})
+            self.before.append((group.ext is None, 'structure' in ext, deepcopy(ext.get('structure'))))
+            if self.key is None:
+                ext.pop('structure', None)
+            else:
+                ext['structure'] = {'node': self.key}
+            group.ext = ext or None
+        scene.version += 1
+
+    def undo(self, scene):
+        from copy import deepcopy
+        for group, (was_none, had_key, value) in zip(self.targets, self.before):
+            ext = dict(group.ext or {})
+            if had_key:
+                ext['structure'] = deepcopy(value)
+            else:
+                ext.pop('structure', None)
+            group.ext = None if was_none and not ext else ext
+        scene.version += 1
+
+
 class SetRecordCommand(Command):
     """Top-level patch of group records; None patch removes the record.
 
@@ -5526,7 +5557,8 @@ class SetRecordCommand(Command):
     # History currently treats keeps_paint as also keeping BIM tags.
     keeps_paint = False
 
-    def __init__(self, targets, patch):
+    def __init__(self, targets, patch, *, normalize_values=True):
+        self.normalize_values = normalize_values
         from copy import deepcopy
         self.targets = list(targets)
         self.patch = deepcopy(patch)
@@ -5560,7 +5592,7 @@ class SetRecordCommand(Command):
                 else:
                     new.pop('guid', None)
                     ensure_guid(new)
-                self._after.append(normalize(new))
+                self._after.append(normalize(new) if self.normalize_values else new)
         self._write(scene, self._after)
 
     def undo(self, scene):
@@ -5578,7 +5610,8 @@ class UntagGroupsCommand(SetRecordCommand):
 
 
 class SetRegistryCommand(SetPluginDataCommand):
-    def __init__(self, value):
+    def __init__(self, value, *, refiled_uids=()):
+        self.refiled_uids = frozenset(refiled_uids)
         from core.bim_registry import validate
         errors = validate(value)
         if errors:
@@ -5588,8 +5621,16 @@ class SetRegistryCommand(SetPluginDataCommand):
     def do(self, scene):
         from core import project, bim_registry
         stamp = getattr(scene, '_project_mtime_ns', None)
+        current = bim_registry.get(scene)
+        removed = (current.get('structure', {}).get('nodes', {}).keys()
+                   - self.value.get('structure', {}).get('nodes', {}).keys())
+        if removed:
+            from core.structure import _placements, node_of
+            for group, source, _ in _placements(scene):
+                if not source and node_of(group) in removed and group.uid not in self.refiled_uids:
+                    raise CommandRejected('Cannot delete occupied node: ' + node_of(group))
         if not hasattr(self, '_project_before'):
-            self._project_before = bim_registry.get(scene)
+            self._project_before = current
         if stamp is not None:
             scene._project_mtime_ns = stamp
         if project.write_registry(scene, self.value):

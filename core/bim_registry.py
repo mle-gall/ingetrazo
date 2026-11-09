@@ -4,7 +4,7 @@ from copy import deepcopy
 import csv
 import io
 
-SECTIONS = ('classification_systems', 'types', 'systems', 'project', 'export_profiles', 'tag_sets', 'storeys', 'pset_library', 'views', 'rules')
+SECTIONS = ('classification_systems', 'types', 'systems', 'project', 'export_profiles', 'tag_sets', 'storeys', 'pset_library', 'views', 'rules', 'structure')
 
 def seed_defaults(registry=None):
     r = deepcopy(registry) if registry is not None else {}
@@ -50,6 +50,93 @@ def import_codes_csv(registry, key, text):
         if row.get('parent'):
             codes[code]['parent'] = row['parent'].strip()
     return result
+
+def _structure_errors(registry):
+    """Validate inherited constraints too: a parent edit can invalidate a leaf."""
+    from core.ifc_tables import TABLES, predefined_types
+    section = registry.get('structure', {})
+    nodes = section.get('nodes', {})
+    if not isinstance(nodes, dict):
+        return ['structure.nodes must be an object']
+
+    def known(key, mapping):
+        return isinstance(key, str) and key in mapping
+
+    errors = []
+    if 'active' in section and not known(section['active'], nodes):
+        errors.append('structure.active must name a node')
+    for key, node in nodes.items():
+        prefix = f'structure.nodes.{key}: '
+        if not isinstance(key, str) or not key or not isinstance(node, dict):
+            errors.append(prefix + 'expected a named node object')
+            continue
+        if not isinstance(node.get('name'), str) or not node['name'].strip():
+            errors.append(prefix + 'name must be nonempty text')
+        if type(node.get('order')) is not int:
+            errors.append(prefix + 'order must be an integer')
+        lineage = []
+        seen = set()
+        ancestor = key
+        while ancestor is not None:
+            if not known(ancestor, nodes) or not isinstance(nodes[ancestor], dict):
+                errors.append(prefix + 'unknown parent')
+                break
+            if ancestor in seen:
+                errors.append(prefix + 'parent cycle')
+                break
+            seen.add(ancestor)
+            lineage.append(nodes[ancestor])
+            ancestor = nodes[ancestor].get('parent', False)
+        recipe = node.get('recipe', {})
+        if not isinstance(recipe, dict):
+            errors.append(prefix + 'recipe must be an object')
+            continue
+        effective = {}
+        for item in reversed(lineage):
+            if isinstance(item.get('recipe'), dict):
+                effective.update(item['recipe'])
+        cls = effective.get('class')
+        if cls is not None and not known(cls, TABLES):
+            errors.append(prefix + 'unknown class')
+        allowed = effective.get('classes_allowed')
+        if 'classes_allowed' in effective and (
+                not isinstance(allowed, list) or any(not known(c, TABLES) for c in allowed)
+                or (cls is not None and cls not in allowed)):
+            errors.append(prefix + 'invalid classes_allowed')
+        pt = effective.get('predefined_type')
+        if pt is not None and (not known(cls, TABLES) or not any(
+                pt in predefined_types(cls, schema) for schema in TABLES[cls]['schemas'])):
+            errors.append(prefix + 'invalid predefined_type')
+        for field in ('tag', 'object_type'):
+            if field in recipe and not isinstance(recipe[field], str):
+                errors.append(prefix + field + ' must be text')
+        if 'tag' in recipe and not recipe['tag']:
+            errors.append(prefix + 'tag must be nonempty')
+        folder = recipe.get('folder', [])
+        if not isinstance(folder, (str, list)) or (isinstance(folder, list)
+                and any(not isinstance(f, str) or not f for f in folder)):
+            errors.append(prefix + 'folder must be a name or path of names')
+        if recipe.get('type') is not None and not known(recipe['type'], registry.get('types', {})):
+            errors.append(prefix + 'unknown type')
+        systems = recipe.get('systems', [])
+        if not isinstance(systems, list) or any(not known(k, registry.get('systems', {})) for k in systems):
+            errors.append(prefix + 'invalid systems')
+        items = recipe.get('classifications', [])
+        namespaces = registry.get('classification_systems', {})
+        if not isinstance(items, list):
+            errors.append(prefix + 'classifications must be a list')
+        else:
+            for item in items:
+                ns = item.get('system') if isinstance(item, dict) else None
+                entry = namespaces.get(ns) if isinstance(ns, str) else None
+                codes = entry.get('codes') if isinstance(entry, dict) else None
+                if not isinstance(codes, dict) or not known(item.get('code'), codes):
+                    errors.append(prefix + 'unknown classification system/code')
+        props = recipe.get('psets', {})
+        if not isinstance(props, dict) or any(not isinstance(p, dict) for p in props.values()):
+            errors.append(prefix + 'psets must map names to property maps')
+    return errors
+
 
 def validate(registry):
     from core.record import validate as validate_record
@@ -150,7 +237,7 @@ def validate(registry):
     for key, value in registry.get('project', {}).items():
         if key in ('name', 'description', 'phase', 'author', 'organization') and not isinstance(value, str):
             errors.append('project.' + key + ' must be text')
-    return errors
+    return errors + _structure_errors(registry)
 
 
 def ordered_classes(registry):
