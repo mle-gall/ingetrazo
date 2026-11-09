@@ -98,3 +98,25 @@ def test_save_as_placeholder_and_reopen(win, tmp_path):
     _settle()
     (g,) = links.linked_groups(win.viewport.scene)
     assert _faces(g) == 2
+
+
+def test_links_tab_subset_and_agent_surface(win, tmp_path):
+    from core.group import Group
+    from core.scene import Scene
+    from core.agent_tools import BUILTIN_TOOLS
+    scene = Scene()
+    scene.groups = [Group(name='A'), Group(name='B')]
+    path = tmp_path / 'parts.igz'
+    igz.save_scene(scene, path)
+    win.link_igz_path(path, at=(0, 0, 0), select={'uids': [scene.groups[0].uid]})
+    panel = win.project_browser.links_panel
+    panel.refresh()
+    assert panel.tree.topLevelItemCount() == 1
+    item = panel.tree.topLevelItem(0)
+    assert item.text(1) == 'resolved'
+    assert item.text(2) == '1 UIDs'
+    assert item.text(3) == '1'
+    panel.tree.setCurrentItem(item)
+    panel.pack()
+    assert panel.tree.topLevelItem(0).text(1) == 'packed'
+    assert {'query_links', 'link_document', 'reload_link', 'query_project', 'set_project'} <= {t['name'] for t in BUILTIN_TOOLS}

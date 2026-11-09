@@ -1,0 +1,102 @@
+{
+  "igz_format": 1,
+  "app_version": "0.6.0",
+  "scene": {
+    "edges": [],
+    "faces": [],
+    "groups": [
+      {
+        "proto": 0,
+        "xform": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "component": true,
+        "name": "five-parts",
+        "ext": {
+          "link": {
+            "path": "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-25f3a5d5/tests/fixtures/links/five-parts.igz",
+            "rel": "five-parts.igz",
+            "select": {
+              "uids": [
+                "0000000000000001",
+                "0000000000000002"
+              ]
+            }
+          }
+        },
+        "uid": "1000000000000000"
+      }
+    ],
+    "protos": [
+      {
+        "edges": [],
+        "faces": []
+      }
+    ],
+    "layers": [
+      {
+        "name": "Layer 0",
+        "uid": "949b31d4fc4142e8"
+      },
+      {
+        "name": "five-parts / Untagged",
+        "uid": "9c95dad8b5f94ef8",
+        "folder": "five-parts"
+      }
+    ],
+    "layer_folder_uids": {
+      "Linked files": "818c277d549b4faa",
+      "five-parts": "6029fed968684bb9"
+    },
+    "layer_folders": [
+      "Linked files",
+      "five-parts"
+    ],
+    "layer_folder_parents": {
+      "five-parts": "Linked files"
+    },
+    "dimension_style": {
+      "decimals": 2,
+      "units": "m",
+      "font_size": 9,
+      "color": [
+        45,
+        55,
+        75
+      ],
+      "norma": "iso",
+      "base_step_mm": 8.0,
+      "ends": "arrow",
+      "show_unit": true
+    },
+    "plugin_data": {
+      "links": {
+        "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-25f3a5d5/tests/fixtures/links/five-parts.igz": {
+          "overrides": {},
+          "source_visible": {
+            "five-parts / Untagged": true
+          },
+          "tags": [
+            "five-parts / Untagged"
+          ],
+          "loaded_mtime_ns": 1794200191055130177
+        }
+      }
+    }
+  }
+}

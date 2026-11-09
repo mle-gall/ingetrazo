@@ -5583,11 +5583,24 @@ class SetRegistryCommand(SetPluginDataCommand):
         super().__init__('bim_registry', value)
 
     def do(self, scene):
-        super().do(scene)
+        from core import project, bim_registry
+        stamp = getattr(scene, '_project_mtime_ns', None)
+        if not hasattr(self, '_project_before'):
+            self._project_before = bim_registry.get(scene)
+        if stamp is not None:
+            scene._project_mtime_ns = stamp
+        if project.write_registry(scene, self.value):
+            scene.version += 1
+        else:
+            super().do(scene)
         scene.mesh.bump_revision()
 
     def undo(self, scene):
-        super().undo(scene)
+        from core import project
+        if project.write_registry(scene, self._project_before):
+            scene.version += 1
+        else:
+            super().undo(scene)
         scene.mesh.bump_revision()
 
 

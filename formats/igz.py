@@ -613,6 +613,11 @@ def _pack_plan(mesh, plan, sink: dict) -> dict:
 
 def save_scene(scene, path: Path) -> dict:
     """Synchronous explicit save; autosave drives the same preparation in slices."""
+    from core import project, links
+    if hasattr(scene, "plugin_data"):
+        project.refresh_reference(scene, path)
+        project.sync_files(scene, path)
+        links.refresh_paths(scene, path)
     steps = prepare_scene_steps(scene)
     while True:
         try:
@@ -1115,6 +1120,14 @@ def load_into(scene, path: Path, progress=None) -> None:
     # that cannot be read leaves its copies empty — the document still opens
     # (scene.link_errors says which, for the window to report).
     from core import links
+    scene._project_host_path = str(Path(path).resolve())
+    from core.project import read as read_project
+    try:
+        shared = read_project(scene)
+        if shared:
+            scene.plugin_data["ifc_identity"] = shared["ifc_identity"]
+    except (OSError, ValueError) as exc:
+        scene.project_warning = str(exc)
     scene.link_errors = {}
     if links.linked_groups(scene):
         try:
