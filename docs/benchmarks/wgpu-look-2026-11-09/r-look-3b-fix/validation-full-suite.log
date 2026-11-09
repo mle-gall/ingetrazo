@@ -1,0 +1,578 @@
+=================================== FAILURES ===================================
+_______________ test_hidden_panels_let_the_previous_document_go ________________
+
+win = <views.main_window.MainWindow(0x787e825180) at 0x1519b9740>
+
+    def test_hidden_panels_let_the_previous_document_go(win):
+        """Waiting to be shown, the «In model» list and the Browser kept their
+        rows — and each row holds its group, so after New or Open the whole
+        previous document stayed in memory (+130 MB on the Plaza,
+        release_check 10-10)."""
+        import gc
+        from PySide6.QtGui import QVector3D as V
+        from core.group import Group
+        from core.mesh import Mesh
+        m = Mesh()
+        m.add_face([V(0, 0, 0), V(1, 0, 0), V(1, 1, 0), V(0, 1, 0)])
+        g = Group(m, "previous-document-marker")
+        g.component = True
+        vp = win.viewport
+        vp.scene.groups.append(g)
+        vp.scene.version += 1
+        panel = win.tray.components
+        browser = win.project_browser.outliner
+        panel.refresh_in_model()
+        browser.refresh()
+        assert browser._groups                      # the rows hold the group
+        panel.hide()
+        browser.hide()
+        del g, m
+        win._saved_version = vp.scene.version       # no «discard?» question
+        win._on_new()
+        _app.processEvents()
+        gc.collect()
+        alive = [o for o in gc.get_objects() if isinstance(o, Group)
+                 and o.name == "previous-document-marker"]
+>       assert alive == []
+E       AssertionError: assert [Group('previ...ces, 4 edges)] == []
+E         
+E         Left contains one more item: Group('previous-document-marker': 1 faces, 4 edges)
+E         Use -v to get more diff
+
+tests/test_panel_refresh_deferred.py:152: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+QOpenGLWidget is not supported on this platform.
+This plugin does not support propagateSizeHints()
+This plugin does not support createPlatformOpenGLContext!
+QOpenGLWidget: Failed to create context
+This plugin does not support createPlatformOpenGLContext!
+QOpenGLWidget: Failed to create context
+----------------------------- Captured stderr call -----------------------------
+QWidget::setMinimumSize: (tray_project_browser/ProjectBrowser) Negative sizes (240,-1) are not possible
+This plugin does not support createPlatformOpenGLContext!
+QOpenGLWidget: Failed to create context
+=============================== warnings summary ===============================
+tests/test_a_shape_on_the_face_under_the_cursor.py: 12 warnings
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/tests/test_a_shape_on_the_face_under_the_cursor.py:93: DeprecationWarning: Function: 'QMouseEvent.QMouseEvent(QEvent.Type type, const QPointF &localPos, Qt.MouseButton button, QFlags<Qt.MouseButton> buttons, QFlags<Qt.KeyboardModifier> modifiers, const QPointingDevice *device)' is marked as deprecated, please check the documentation for more information.
+    vp._dispatch_tool_click(QMouseEvent(
+
+tests/test_pushpull_measures_from_the_click.py::test_a_pull_clicked_near_a_slab_corner_follows_the_cursor
+tests/test_pushpull_measures_from_the_click.py::test_a_ring_pulled_one_metre_rises_one_metre
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/tests/test_pushpull_measures_from_the_click.py:40: DeprecationWarning: Function: 'QMouseEvent.QMouseEvent(QEvent.Type type, const QPointF &localPos, Qt.MouseButton button, QFlags<Qt.MouseButton> buttons, QFlags<Qt.KeyboardModifier> modifiers, const QPointingDevice *device)' is marked as deprecated, please check the documentation for more information.
+    return QMouseEvent(QMouseEvent.MouseButtonPress, QPointF(px, py),
+
+tests/test_pushpull_snaps_to_guides.py::test_push_stops_level_with_a_tape_guide_point
+tests/test_pushpull_snaps_to_guides.py::test_push_stops_level_with_a_tape_guide_point
+tests/test_pushpull_snaps_to_guides.py::test_push_stops_level_with_a_tape_guide_point
+tests/test_pushpull_snaps_to_guides.py::test_push_stops_level_with_a_guide_line
+tests/test_pushpull_snaps_to_guides.py::test_without_the_guide_the_push_follows_the_cursor
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/tests/test_pushpull_snaps_to_guides.py:53: DeprecationWarning: Function: 'QMouseEvent.QMouseEvent(QEvent.Type type, const QPointF &localPos, Qt.MouseButton button, QFlags<Qt.MouseButton> buttons, QFlags<Qt.KeyboardModifier> modifiers, const QPointingDevice *device)' is marked as deprecated, please check the documentation for more information.
+    vp._dispatch_tool_click(QMouseEvent(
+
+tests/test_thin_rectangle_keeps_its_width_389.py::test_a_thin_rectangle_keeps_its_width[far0-reference]
+tests/test_thin_rectangle_keeps_its_width_389.py::test_a_thin_rectangle_keeps_its_width[far0-reference]
+tests/test_thin_rectangle_keeps_its_width_389.py::test_a_thin_rectangle_keeps_its_width[far1-from_point]
+tests/test_thin_rectangle_keeps_its_width_389.py::test_a_thin_rectangle_keeps_its_width[far1-from_point]
+tests/test_thin_rectangle_keeps_its_width_389.py::test_the_far_corner_lines_up_with_a_visited_corner
+tests/test_thin_rectangle_keeps_its_width_389.py::test_the_rotated_rectangle_reads_its_width_off_the_diagonal_too
+tests/test_thin_rectangle_keeps_its_width_389.py::test_the_rotated_rectangle_reads_its_width_off_the_diagonal_too
+tests/test_thin_rectangle_keeps_its_width_389.py::test_an_image_with_a_free_aspect_keeps_its_height
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/tests/test_thin_rectangle_keeps_its_width_389.py:167: DeprecationWarning: Function: 'QMouseEvent.QMouseEvent(QEvent.Type type, const QPointF &localPos, Qt.MouseButton button, QFlags<Qt.MouseButton> buttons, QFlags<Qt.KeyboardModifier> modifiers, const QPointingDevice *device)' is marked as deprecated, please check the documentation for more information.
+    vp._dispatch_tool_click(QMouseEvent(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== FAILED tests/test_panel_refresh_deferred.py::test_hidden_panels_let_the_previous_document_go
+batch 1/6: 1 failed, 1120 passed, 15 skipped, 27 warnings in 313.85s (0:05:13)
+batch 2/6: 1233 passed, 48 skipped, 1 deselected, 2 xfailed, 16 warnings in 247.12s (0:04:07)
+=================================== FAILURES ===================================
+_____ test_an_extensions_toolbar_added_after_start_up_shows_names_in_bold ______
+
+tmp_path = PosixPath('/private/var/folders/zy/1s11p6w53_jctswhjtc0w6zh0000gn/T/pytest-of-legallmaxence/pytest-830/test_an_extensions_toolbar_add0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x11924baf0>
+
+    def test_an_extensions_toolbar_added_after_start_up_shows_names_in_bold(
+            tmp_path, monkeypatch):
+        """As the extensions build theirs: a toolbar of their own, added once
+        the window is up, with «Name — sentence» tooltips or a status tip."""
+        from PySide6.QtCore import QSettings
+        from PySide6.QtGui import QKeySequence
+        import PySide6.QtCore as qc
+        import views.main_window as mw
+        from views.tooltips import WrappingToolTips
+        path = tmp_path / "prefs.ini"
+        factory = lambda *a: QSettings(str(path), QSettings.IniFormat)  # noqa: E731
+        monkeypatch.setattr(qc, "QSettings", factory)
+        monkeypatch.setattr(mw, "QSettings", factory)
+        shown = []
+        orig = QToolTip.showText
+        QToolTip.showText = staticmethod(lambda pos, text, *a: shown.append(text))
+        win = mw.MainWindow()
+        try:
+            tb = win.addToolBar("Plugin bar")
+            one_line = tb.addAction("Extruder")
+            one_line.setToolTip("Extruder — extruye cada cara a su propio grupo")
+            status_only = tb.addAction("Summon Faces")
+            status_only.setStatusTip("Crea caras a partir de las aristas.")
+            status_only.setShortcut(QKeySequence("Ctrl+Shift+J"))
+            also_main = win.toolbars["main"].addAction("Late tool")
+            also_main.setToolTip("Late tool: added by an update")
+            f = WrappingToolTips()
+            ev = QHelpEvent(QEvent.ToolTip, QPoint(1, 1), QPoint(10, 10))
+            for bar, act, bold, under in (
+                    (tb, one_line, "<b>Extruder</b><br>",
+                     "Extruye cada cara a su propio grupo"),
+                    (tb, status_only, "<b>Summon Faces</b>  (Ctrl+Shift+J)<br>",
+                     "Crea caras a partir de las aristas."),
+                    (win.toolbars["main"], also_main, "<b>Late tool</b><br>",
+                     "Added by an update")):
+                btn = bar.widgetForAction(act)
+                assert f.eventFilter(btn, ev) is True
+>               assert bold in shown[-1] and under in shown[-1], shown[-1]
+E               AssertionError: <p style='white-space:normal'><b>Summon Faces</b>  (⇧⌘J)<br>Crea caras a partir de las aristas.</p>
+E               assert ('<b>Summon Faces</b>  (Ctrl+Shift+J)<br>' in "<p style='white-space:normal'><b>Summon Faces</b>  (⇧⌘J)<br>Crea caras a partir de las aristas.</p>")
+
+tests/test_tooltips_wrap.py:215: AssertionError
+----------------------------- Captured stderr call -----------------------------
+QOpenGLWidget is not supported on this platform.
+QMainWindow::saveState(): 'objectName' not set for QToolBar 0x7667b554d0 'Plugin bar'
+=============================== warnings summary ===============================
+tests/test_pushpull_click_on_the_cap.py::test_the_pull_follows_the_cursor_past_the_horizon_and_the_top_click_commits
+tests/test_pushpull_click_on_the_cap.py::test_the_pull_follows_the_cursor_past_the_horizon_and_the_top_click_commits
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/tests/test_pushpull_click_on_the_cap.py:66: DeprecationWarning: Function: 'QMouseEvent.QMouseEvent(QEvent.Type type, const QPointF &localPos, Qt.MouseButton button, QFlags<Qt.MouseButton> buttons, QFlags<Qt.KeyboardModifier> modifiers, const QPointingDevice *device)' is marked as deprecated, please check the documentation for more information.
+    vp._dispatch_tool_click(QMouseEvent(
+
+tests/test_wgpu_materials.py::test_array_flips_v_and_supplies_mips
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/views/wgpu_scene.py:332: DeprecationWarning: Function: 'QImage.mirrored(bool horizontally, bool vertically)' is marked as deprecated, please check the documentation for more information.
+    images = [QImage(path).mirrored() for path in paths]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== FAILED tests/test_tooltips_wrap.py::test_an_extensions_toolbar_added_after_start_up_shows_names_in_bold
+batch 3/6: 1 failed, 1421 passed, 11 skipped, 802 deselected, 3 warnings in 176.50s (0:02:56)
+=================================== FAILURES ===================================
+___________________ test_world_under_cursor_uses_cached_pick ___________________
+
+    def test_world_under_cursor_uses_cached_pick():
+        # Zoom-to-cursor's pick rides the cached NumPy triangles (fast wheel
+        # bursts must not re-triangulate the model per event). Nearest hit wins;
+        # empty scene falls back to the ground plane.
+        from PySide6.QtGui import QVector3D
+        from views.viewport import Viewport
+    
+        scene = Scene()
+        scene.mesh.add_face([QVector3D(-2, 0, -2), QVector3D(2, 0, -2),
+                             QVector3D(2, 0, 2), QVector3D(-2, 0, 2)])   # wall y=0
+        scene.mesh.add_face([QVector3D(-2, 3, -2), QVector3D(2, 3, -2),
+                             QVector3D(2, 3, 2), QVector3D(-2, 3, 2)])   # wall y=3
+    
+        class _Cam:
+            target = QVector3D(0, 0, 0)
+            def eye(self):
+                return QVector3D(0.0, -10.0, 0.0)
+    
+        class _VP:
+            # Occlusion reaches into the pick index, which pulls in a handful of
+            # viewport helpers; bind whatever it asks for rather than listing them.
+            def __getattr__(self, name):
+                import inspect
+                raw = inspect.getattr_static(Viewport, name, None)
+                if raw is None:
+                    raise AttributeError(name)
+                # Plain functions bind to the stub; staticmethods are taken as-is.
+                bound = (raw.__get__(self) if inspect.isfunction(raw)
+                         else getattr(Viewport, name))
+                setattr(self, name, bound)
+                return bound
+    
+        vp = _VP()
+        vp.scene = scene
+        vp.camera = _Cam()
+        vp._pixel_to_ray = lambda x, y: (QVector3D(0, -10, 0), QVector3D(0, 1, 0))
+        vp._pick_index = Viewport._pick_index.__get__(vp)
+        vp._placements = Viewport._placements.__get__(vp)
+        vp._expand_placements = Viewport._expand_placements.__get__(vp)
+        vp._ray_hits = Viewport._ray_hits.__get__(vp)
+        under = Viewport._world_under_cursor.__get__(vp)
+    
+        hit = under(0, 0)
+        assert abs(hit.y() - 0.0) < 1e-6          # nearest wall, not the far one
+        scene.mesh.clear()
+        scene.version += 1                        # cache refresh on scene change
+        vp._pixel_to_ray = lambda x, y: (QVector3D(0, 0, 10),
+                                         QVector3D(0, 0, -1))
+        ground = under(0, 0)
+>       assert abs(ground.z()) < 1e-6             # falls back to the ground plane
+                   ^^^^^^^^
+E       AttributeError: 'NoneType' object has no attribute 'z'
+
+tests/test_dimensions.py:367: AttributeError
+_________ test_long_author_tags_and_license_wrap_within_preview_width __________
+
+tmp_path = PosixPath('/private/var/folders/zy/1s11p6w53_jctswhjtc0w6zh0000gn/T/pytest-of-legallmaxence/pytest-831/test_long_author_tags_and_lice0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x141b4b310>
+
+    def test_long_author_tags_and_license_wrap_within_preview_width(
+            tmp_path, monkeypatch):
+        app = QApplication.instance() or QApplication([])
+        extension = manager.Extension(**{
+            **_extension(b"long-details").__dict__,
+            "author": "A very long extension author name that should wrap "
+                      "rather than push the card layout",
+            "license": "A long custom license name that should wrap below tags",
+            "tags": ("architecture-and-urban-planning",
+                     "productivity-workflow", "data-import-export"),
+        })
+        from views import extension_manager_dialog as dialog_module
+        _stub_catalog(monkeypatch, dialog_module, [extension])
+        monkeypatch.setattr(manager, "user_plugins_dir", lambda: tmp_path)
+        dialog = dialog_module.ExtensionManagerDialog()
+        try:
+            _wait_for_catalog(dialog, app)
+            dialog.show()
+            app.processEvents()
+            row = dialog._pages["browse"]["grid"].itemAt(0).widget()
+            author = next(label for label in row.findChildren(QLabel)
+                          if label.text().startswith("by A very long"))
+            license_label = next(label for label in row.findChildren(QLabel)
+                                 if label.text().startswith("License: A long"))
+            assert author.wordWrap()
+            assert license_label.wordWrap()
+            assert author.width() <= dialog_module._IMAGE_SIZE[0]
+            assert license_label.width() <= dialog_module._IMAGE_SIZE[0]
+            assert author.height() > author.fontMetrics().height()
+            assert license_label.height() > license_label.fontMetrics().height()
+            assert row.width() <= dialog_module._ROW_MAX_WIDTH
+            tags_layout = next(layout for layout in row.findChildren(
+                dialog_module.FlowLayout))
+            image_details = tags_layout.parentWidget()
+            assert _card_rule(row, image_details) == "background: transparent;"
+>           assert tags_layout.heightForWidth(dialog_module._IMAGE_SIZE[0]) \
+                > max(tags_layout.itemAt(index).sizeHint().height()
+                      for index in range(tags_layout.count()))
+E                     assert 40 > 40
+E                      +  where 40 = heightForWidth(256)
+E                      +    where heightForWidth = <views.tray.FlowLayout(0x74bdb94000) at 0x14393e700>.heightForWidth
+E                      +  and   40 = max(<generator object test_long_author_tags_and_license_wrap_within_preview_width.<locals>.<genexpr> at 0x143004e40>)
+
+tests/test_extension_manager.py:512: AssertionError
+=============================== warnings summary ===============================
+tests/test_axis_lock_released_after_operation.py::test_the_lock_goes_the_moment_the_SEGMENT_exists
+tests/test_axis_lock_released_after_operation.py::test_but_a_click_that_makes_NOTHING_keeps_it
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/tests/test_axis_lock_released_after_operation.py:47: DeprecationWarning: Function: 'QMouseEvent.QMouseEvent(QEvent.Type type, const QPointF &localPos, Qt.MouseButton button, QFlags<Qt.MouseButton> buttons, QFlags<Qt.KeyboardModifier> modifiers, const QPointingDevice *device)' is marked as deprecated, please check the documentation for more information.
+    vp._dispatch_tool_click(QMouseEvent(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== FAILED tests/test_dimensions.py::test_world_under_cursor_uses_cached_pick - A...
+FAILED tests/test_extension_manager.py::test_long_author_tags_and_license_wrap_within_preview_width
+batch 4/6: 2 failed, 1200 passed, 14 skipped, 1 deselected, 2 warnings in 193.53s (0:03:13)
+=================================== FAILURES ===================================
+__________________ test_every_language_has_every_message[ar] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/ar.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[de] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/de.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[id] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/id.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[it] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/it.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[ja] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/ja.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[ko] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/ko.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[lo] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/lo.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[pl] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/pl.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+_________________ test_every_language_has_every_message[pt-BR] _________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/pt-BR.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[ru] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/ru.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[th] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/th.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[uk] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/uk.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[vi] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/vi.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+_________________ test_every_language_has_every_message[zh-CN] _________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/i18n/zh-CN.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+=============================== warnings summary ===============================
+tests/test_alt_inference_toggle.py::test_the_toggle_lasts_one_operation_and_no_longer
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/tests/test_alt_inference_toggle.py:163: DeprecationWarning: Function: 'QMouseEvent.QMouseEvent(QEvent.Type type, const QPointF &localPos, Qt.MouseButton button, QFlags<Qt.MouseButton> buttons, QFlags<Qt.KeyboardModifier> modifiers, const QPointingDevice *device)' is marked as deprecated, please check the documentation for more information.
+    vp.mousePressEvent(QMouseEvent(
+
+tests/test_alt_inference_toggle.py::test_a_click_mid_operation_does_not_give_the_inferences_back
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/tests/test_alt_inference_toggle.py:181: DeprecationWarning: Function: 'QMouseEvent.QMouseEvent(QEvent.Type type, const QPointF &localPos, Qt.MouseButton button, QFlags<Qt.MouseButton> buttons, QFlags<Qt.KeyboardModifier> modifiers, const QPointingDevice *device)' is marked as deprecated, please check the documentation for more information.
+    vp.mousePressEvent(QMouseEvent(
+
+tests/test_snap_under_lock_both_sides.py::test_clicking_the_level_foot_at_the_start_draws_nothing_and_breaks_nothing
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/tests/test_snap_under_lock_both_sides.py:143: DeprecationWarning: Function: 'QMouseEvent.QMouseEvent(QEvent.Type type, const QPointF &localPos, Qt.MouseButton button, QFlags<Qt.MouseButton> buttons, QFlags<Qt.KeyboardModifier> modifiers, const QPointingDevice *device)' is marked as deprecated, please check the documentation for more information.
+    vp._dispatch_tool_click(QMouseEvent(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== FAILED tests/test_translation_files.py::test_every_language_has_every_message[ar]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[de]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[id]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[it]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[ja]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[ko]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[lo]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[pl]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[pt-BR]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[ru]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[th]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[uk]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[vi]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[zh-CN]
+batch 5/6: 14 failed, 1234 passed, 27 skipped, 3 warnings in 297.02s (0:04:57)
+batch 6/6: 956 passed, 27 skipped, 1 deselected, 6 warnings in 340.24s (0:05:40)
+18 failed, 7164 passed, 142 skipped, 2 xfailed, 805 deselected, 57 warnings in 1577s (6 batches)

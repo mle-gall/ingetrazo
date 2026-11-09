@@ -1,0 +1,13 @@
+{
+  "scale": 2.0,
+  "size": [
+    2000,
+    1400
+  ],
+  "rgb_mae": 0.4258370238095238,
+  "frames": {},
+  "prototypes": 30,
+  "vertices": 183559,
+  "material_bytes": 1740288,
+  "resident_bytes": 43334072
+}

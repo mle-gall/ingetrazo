@@ -1,0 +1,29 @@
+{
+  "prototypes": 30,
+  "vertices": 183559,
+  "material_bytes": 1740288,
+  "resident_bytes": 43334088,
+  "size": [
+    2000,
+    1400
+  ],
+  "frames": {
+    "False": {
+      "cpu_ms": 0.24075,
+      "gpu_ms": 1.283833
+    },
+    "True": {
+      "cpu_ms": 0.281,
+      "gpu_ms": 1.179333
+    }
+  },
+  "reupload_memory_verified": true,
+  "pick_ms": [
+    2.5367080233991146,
+    1.1980000417679548,
+    1.1673750123009086,
+    3.460415988229215,
+    1.219875062815845
+  ],
+  "cold_pick_ms": 8.771499968133867
+}

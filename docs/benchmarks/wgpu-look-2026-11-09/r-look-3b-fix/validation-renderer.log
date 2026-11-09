@@ -1,0 +1,27 @@
+   Compiling ingetrazo_render v0.1.0 (/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/rust/ingetrazo_render)
+warning: function `multisampled` is never used
+   --> src/lib.rs:112:4
+    |
+112 | fn multisampled(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
+    |    ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: `ingetrazo_render` (lib test) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 2.25s
+     Running unittests src/lib.rs (rust/ingetrazo_render/target/release/deps/ingetrazo_render-a663c21fd55a293f)
+
+running 10 tests
+test edges::classification_tests::boundary_and_opposed_faces_are_profiles ... ok
+test id_schedule_tests::multisample_color_does_not_replay_geometry_for_idle_picking ... ok
+test reference_tests::clip_planes_and_pixel_size ... ok
+test edges::tests::expands_endpoint_pairs_without_changing_face_commands ... ok
+test reference_tests::compact_into_disjoint_capacity_ranges ... ok
+test edges::classification_tests::coplanar_triangulation_does_not_create_a_profile_diagonal ... ok
+test tests::indirect_layout ... ok
+test reference_tests::mirrored_and_sheared_boxes_remain_visible ... ok
+test xray::tests::transmittance_and_average_are_order_independent ... ok
+test antialias::tests::metal_validates_background_and_multisample_pipelines ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
