@@ -3142,3 +3142,63 @@ Remaining acceptance gaps:
   is checked; a reverse Navigator result-selection contract is not established.
 - Section and texture_position remain explicitly inert. No network write,
   push, issue, comment or pull request was performed.
+
+## R3c-2b — 2026-11-09: default-renderer machinery
+
+The default remains OpenGL. Renderer selection now combines the saved
+`General/viewport_renderer`, `INGETRAZO_WGPU=0/1`, a session-cached capability
+probe, and the existing persistent presentation guard. Existing `wgpu` choices
+survive; absent settings read `DEFAULT_RENDERER` without writing a migration.
+Guard recovery explicitly saves `opengl`, independently of that constant.
+Environment-selected runs still neither arm nor consume the persistent guard.
+
+The probe runs before the main window in a subprocess with a 30-second limit.
+It imports the extension and, on macOS, constructs its actual Renderer on a
+hidden 16×16 native Qt widget: adapter selection, required
+INDIRECT_FIRST_INSTANCE support, device creation and pipelines use the same
+crate code as the view. Missing crates, device errors, child crashes, malformed
+output and timeout select GL. This is stronger than an adapter-name check, but
+does not prove presentation on the eventual window; that remains covered by
+the first-frame guard. The frozen executable has an early probe-only entry
+point before settings, logging and normal startup. Preferences reports the
+capability reason and Python/Qt versions; the status bar identifies Metal,
+OpenGL, or OpenGL with the Metal unavailability reason. Linux/Windows remain
+“not validated” even though wgpu itself supports Vulkan/DX12.
+
+macOS release CI and the local native build script now build/install the
+render crate with extension-module and CARGO_PROFILE_RELEASE_STRIP=none
+(rust-lang/rust#157750). The spec includes the renderer package and refuses a
+macOS package missing it; PyInstaller stripping remains disabled. A signed
+bundle on a clean machine has NOT been validated in this worktree.
+
+Validation in the worktree's Python 3.13.12 / Qt 6.11.3 environment:
+
+- Both crates: maturin develop --release, isolated CARGO_HOME; render adds
+  --features extension-module and CARGO_PROFILE_RELEASE_STRIP=none. Both passed.
+  No debug target directories were produced.
+- Initial renderer-settings unit run: 52 passed.
+- Final focused run: 270 passed, 2 skipped, four existing QImage deprecations:
+  `.venv-work/bin/python -m pytest -q tests/test_renderer_settings.py tests/test_general_settings.py tests/test_rust_engine_switch.py tests/test_startup_first_picture.py tests/test_preferences.py tests/test_preferences_restore_defaults.py tests/test_project_tabs.py tests/test_project_tabs_central_widget.py tests/test_wgpu_*.py`
+- Real probe: `.venv-work/bin/python -m core.renderer_settings` returned
+  available=true.
+- Bounded Cocoa window smoke (120-second subprocess timeout):
+  `QT_QPA_PLATFORM=cocoa INGETRAZO_R3_GUI=1 .venv-work/bin/python -m pytest -q tests/test_wgpu_last_tier_menus.py`:
+  1 passed, including actual native frame drawing.
+- Shell syntax and git diff whitespace checks passed.
+
+The device-free menu test now explicitly supplies a successful capability
+instead of assuming an environment override bypasses hardware detection.
+Tests cover both defaults, persisted/absent choices, both environment values,
+capability failure, crash recovery, status strings, missing extension,
+missing adapter, unvalidated platforms, timeout/crash isolation and session
+caching. An additional window test proves GL selection with the extension
+absent. Existing engine first-frame guard behavior is preserved.
+
+The eventual one-line flip is
+`DEFAULT_RENDERER = 'opengl'` → `DEFAULT_RENDERER = 'wgpu'` in
+`core/renderer_settings.py`. Before Maxence flips it, finish the outstanding
+R3c parity/interaction/visual acceptance gates documented above, verify startup
+and representative large-project performance, and validate signed clean-machine
+macOS packaging (extension import, successful Metal presentation, unavailable
+Metal fallback and recovery after a start with no first frame). These tests
+establish selection machinery, not completion of those release gates.
