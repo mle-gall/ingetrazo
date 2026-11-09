@@ -4380,7 +4380,8 @@ class ScenesPanel(QWidget):
             saved = bim_registry.get(scene).get('views', {}).get(view.navigator_view)
             if saved is not None:
                 set_display(self._window.viewport, saved['filter'], saved.get('color_by'),
-                            isolate=saved.get('isolate', False), key=view.navigator_view)
+                            isolate=saved.get('isolate', False), key=view.navigator_view,
+                            exact=saved.get('exact', False))
 
         # A scene that only moves the camera changes nothing the caches
         # keyed on ``scene.version`` hold: bumping it re-synced every edge

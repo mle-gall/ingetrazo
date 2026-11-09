@@ -281,7 +281,8 @@ class WgpuView(QWidget):
         import ingetrazo_render
 
         source = self.source_viewport
-        height_px = height_px or round(width_px * self.height() / max(1, self.width()))
+        if height_px is None:
+            height_px = round(width_px * self.height() / max(1, self.width()))
         width_px, height_px = int(width_px), int(height_px)
         if width_px <= 0 or height_px <= 0:
             raise ValueError("Image dimensions must be positive")

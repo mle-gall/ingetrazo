@@ -116,3 +116,28 @@ def test_scene_recall_updates_metal_layers_camera_style_and_filter():
     assert not layer.visible
     assert scene.display_style.face_mode == 'wireframe'
     assert scene._navigator_allowed is None
+
+
+def test_saved_navigator_filter_is_temporary():
+    from core import bim_registry
+    from core.group import Group
+    from core.mesh import Mesh
+    from views.composer_scene import temporary_display
+    composer, host = _composer()
+    scene = host.viewport.scene
+    a, b = Group(Mesh(), name='A'), Group(Mesh(), name='B')
+    scene.groups.extend([a, b])
+    registry = bim_registry.get(scene)
+    scene.plugin_data['bim_registry'] = registry
+    registry['views']['only-a'] = {
+        'filter': {'facet': 'name', 'in': ['A']}, 'isolate': True}
+    view = SavedView('A', navigator_view='only-a')
+    scene.selection.add(b)
+    before = scene.version
+    with temporary_display(host.viewport, view):
+        assert scene._navigator_allowed == {a.uid}
+        assert b in scene.selection
+    assert scene._navigator_allowed is None
+    assert scene.version == before
+    composer.close()
+    host.close()
