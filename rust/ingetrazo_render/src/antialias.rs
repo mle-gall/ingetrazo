@@ -122,14 +122,15 @@ impl Antialias {
         survivors: &wgpu::Buffer,
         style: &wgpu::Buffer,
         edges: &wgpu::Buffer,
+        viewpoints: &wgpu::Buffer,
     ) {
         self.groups = self
             .pipelines
             .iter()
             .enumerate().map(|(k,p)| {
-                let buffers = [camera, inst, survivors, edges];
+                let buffers = [camera, inst, survivors, edges, viewpoints];
                 (
-                    crate::bind(d, &p.get_bind_group_layout(0), &buffers[..if k >= 2 { 4 } else { 3 }]),
+                    crate::bind(d, &p.get_bind_group_layout(0), &buffers[..if k >= 2 { 5 } else { 3 }]),
                     crate::bind(d, &p.get_bind_group_layout(1), &[style]),
                 )
             })

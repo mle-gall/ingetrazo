@@ -212,7 +212,7 @@ impl Renderer {
         surface.configure(&device, &config);
         let camera = buffer(
             &device,
-            &[0; 80],
+            &[0; 96],
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         );
         let cs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -501,10 +501,11 @@ impl Renderer {
         }
         let hard_template = buffer(&self.device, &hard_cmd, wgpu::BufferUsages::COPY_SRC);
         let survivors = buffer(&self.device, &vec![0; n * 4], wgpu::BufferUsages::STORAGE);
+        let viewpoints = buffer(&self.device, &vec![0; n * 16], wgpu::BufferUsages::STORAGE);
         let compute = bind(
             &self.device,
             &self.compute.get_bind_group_layout(0),
-            &[&self.camera, &inst, &protos, &commands, &survivors],
+            &[&self.camera, &inst, &protos, &commands, &survivors, &viewpoints],
         );
         let draw = bind(
             &self.device,
@@ -514,7 +515,7 @@ impl Renderer {
         let edge_draw = bind(
             &self.device,
             &self.edge.get_bind_group_layout(0),
-            &[&self.camera, &inst, &survivors, &edge_records],
+            &[&self.camera, &inst, &survivors, &edge_records, &viewpoints],
         );
         let xray_draw = bind(
             &self.device,
@@ -524,13 +525,13 @@ impl Renderer {
         let xray_edge_draw = bind(
             &self.device,
             &self.xray_edge.get_bind_group_layout(0),
-            &[&self.camera, &inst, &survivors, &edge_records],
+            &[&self.camera, &inst, &survivors, &edge_records, &viewpoints],
         );
-        let profile_draw = bind(&self.device, &self.profile_top.get_bind_group_layout(0), &[&self.camera, &inst, &survivors, &edge_records]);
+        let profile_draw = bind(&self.device, &self.profile_top.get_bind_group_layout(0), &[&self.camera, &inst, &survivors, &edge_records, &viewpoints]);
         self.transparency.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer);
-        self.aa.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer, &edge_records);
+        self.aa.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer, &edge_records, &viewpoints);
         self.gpu_memory =
-            (v.len() + expanded_v.len() + ix.len() + p.len() + cmd.len() * 3 + instances.len() + n * 4 + 80 + 416)
+            (v.len() + expanded_v.len() + ix.len() + p.len() + cmd.len() * 3 + instances.len() + n * 20 + 96 + 416)
                 as u64 + self.textures.bytes + self.textures.materials.size();
         self.ids_dirty = true;
         self.scene = Some(Scene {
@@ -638,6 +639,9 @@ impl Renderer {
             self.style as f32,
             if self.textures_enabled { 0. } else { 1. },
         ]);
+        let inverse_view = glam::Mat4::from_cols_array(&v).inverse();
+        let eye = inverse_view * if p[15] == 0. { glam::Vec4::W } else { glam::Vec4::Z };
+        data.extend(eye.to_array());
         if self.camera_data != data {
             self.stable_frames = 0;
             self.ids_dirty = true;

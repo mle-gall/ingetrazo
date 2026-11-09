@@ -243,3 +243,34 @@ mod compact_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod view_direction_tests {
+    #[test]
+    fn local_eye_classification_matches_projected_area() {
+        use glam::{Mat3, Mat4, Vec3, Vec4};
+        let eye = Vec3::new(5., 7., 11.);
+        let view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+        let a = Vec3::new(0.2, 0.3, 0.4);
+        let b = a + Vec3::Y;
+        for mirror in [1., -1.] {
+            let world = Mat4::from_scale(Vec3::new(mirror*2., 3., 4.));
+            for perspective in [false, true] {
+                let projection = if perspective { Mat4::perspective_rh(1., 1.4, 0.1, 100.) }
+                    else { Mat4::orthographic_rh(-10.,10.,-10.,10.,0.1,100.) };
+                let transform = projection * view * world;
+                let camera = view.inverse() * if perspective { Vec4::W } else { Vec4::Z };
+                let local = world.inverse() * camera;
+                let direction = local.truncate() - a * local.w;
+                let xyw = |p: Vec4| Vec3::new(p.x,p.y,p.w);
+                let projected = |n: Vec3| Mat3::from_cols(
+                    xyw(transform*a.extend(1.)), xyw(transform*b.extend(1.)),
+                    xyw(transform*(a+n.cross(b-a)).extend(1.))).determinant();
+                for (n0,n1) in [(Vec3::X,Vec3::Z),(Vec3::X,-Vec3::Z),(-Vec3::X,Vec3::Z)] {
+                    assert_eq!((projected(n0)>0.) != (projected(n1)>0.),
+                        (n0.dot(direction)>0.) != (n1.dot(direction)>0.));
+                }
+            }
+        }
+    }
+}

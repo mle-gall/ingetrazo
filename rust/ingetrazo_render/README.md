@@ -261,3 +261,13 @@ command templates (all edges and hard-only); reset indirect counts before cullin
 translations if face ranges move.
 Placement matrix/flags and survivor layouts are unchanged. AO should consume
 28-byte face vertices and the existing face commands, never edge rows.
+
+Culling also writes a separate 16-byte `vec4f` viewpoint per placement, indexed
+by the original placement ID. Its xyz is the local camera position (w=1) or
+local orthographic direction toward the camera (w=0). The camera uniform is now
+96 bytes: VP at 0, existing size/style at 64, world camera position/direction at
+80. Compute binding 5 writes viewpoints; edge group 0 binding 4 reads them.
+This leaves the 80-byte instance and 48-byte edge records unchanged. A singular
+placement stores w=2 and uses the projected-area fallback. Profiles are tested
+with two normal dot products in the vertex shader; matrix inversion occurs
+once per visible placement in culling, not six times per edge.

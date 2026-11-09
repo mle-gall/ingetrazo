@@ -9,6 +9,7 @@ fn facing(p: vec4f, q: vec4f, r: vec4f) -> f32 {
 // Scalar arrays keep this storage record tightly packed at 48 bytes.
 struct Edge { a: array<f32,3>, b: array<f32,3>, normals: array<f32,6> }
 @group(0) @binding(3) var<storage, read> edges: array<Edge>;
+@group(0) @binding(4) var<storage, read> viewpoints: array<vec4f>;
 @vertex fn edge_vs(@builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32) -> Out {
  let first = vertex / 6u;
  let edge = edges[first];
@@ -33,9 +34,16 @@ struct Edge { a: array<f32,3>, b: array<f32,3>, normals: array<f32,6> }
  // Hard edges need classification only when it can change their width.
  if style.profiles.x > 0. && (corner.b > 0.5 || style.profiles.y > style.edge.w) {
   let boundary = dot(n0,n0) > 0. && dot(n1,n1) == 0.;
-  let r0 = transform * vec4f(pos + cross(n0,other-pos),1.);
-  let r1 = transform * vec4f(pos + cross(n1,other-pos),1.);
-  profile = boundary || ((facing(a,b,r0)>0.) != (facing(a,b,r1)>0.));
+  let eye = viewpoints[id];
+  if eye.w <= 1. {
+   let direction = eye.xyz - pos * eye.w;
+   profile = boundary || ((dot(n0,direction)>0.) != (dot(n1,direction)>0.));
+  } else {
+   // Singular placements retain the projected-area fallback.
+   let r0 = transform * vec4f(pos + cross(n0,other-pos),1.);
+   let r1 = transform * vec4f(pos + cross(n1,other-pos),1.);
+   profile = boundary || ((facing(a,b,r0)>0.) != (facing(a,b,r1)>0.));
+  }
  }
  if corner.b > 0.5 && !profile {
   var hidden: Out;
