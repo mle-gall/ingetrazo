@@ -271,6 +271,7 @@ class WgpuView(QWidget):
         self.tools.sync()
         if self.source_viewport is not None:
             self.camera = self.source_viewport.camera
+            self._mirror_cursor()
         # R-look 3c: compute each camera matrix once, after updating aspect.
         self.camera.aspect = self.width()/max(1, self.height())
         view = self.camera.view_matrix()
@@ -532,6 +533,28 @@ class WgpuView(QWidget):
             indices = [i for uid in selected for i in self.uid_rows.get(uid, ())]
             self.renderer.set_highlight(indices, list(hover))
             self._selection_signature = signature
+
+    def _mirror_cursor(self):
+        """Wear the cursor the tools set on the (hidden) GL viewport: the
+        tool icons, Orbit's and Pan's hands, a tool's own changes while it
+        works. Copying it once per tool change missed every other change
+        (Orbit chosen over Select kept the arrow, Maxence 2026-11-09)."""
+        source = self.source_viewport
+        if source is None:
+            return
+        if not source.testAttribute(Qt.WA_SetCursor):
+            key = None
+        else:
+            cur = source.cursor()
+            key = (cur.shape(),
+                   cur.pixmap().cacheKey() if cur.shape() == Qt.BitmapCursor else 0)
+        if key == getattr(self, '_cursor_key', object()):
+            return
+        self._cursor_key = key
+        if key is None:
+            self.unsetCursor()
+        else:
+            self.setCursor(source.cursor())
 
     def _parents(self):
         """``{id(child): parent}`` over the scene's groups, per pack."""

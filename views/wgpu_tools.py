@@ -348,7 +348,12 @@ class NativeTools(MeshToolAccess):
 
     def _apply_tool_cursor(self):
         source = self.view.source_viewport
-        apply = getattr(source, '_apply_tool_cursor', None)
+        # A nav mode (Orbit, Pan, Zoom) has no active tool: asking for the
+        # tool cursor then unset the hand the mode had just put on.
+        if getattr(source, 'nav_mode', None):
+            apply = getattr(source, '_apply_nav_cursor', None)
+        else:
+            apply = getattr(source, '_apply_tool_cursor', None)
         if apply is not None:
             apply()
             if hasattr(self.view, 'setCursor'):

@@ -130,6 +130,7 @@ from core.style import (DEFAULT_BACK_COLOR, DEFAULT_FACE_COLOR,
 from core.materials import material_sig as _material_sig
 from core.snap import SnapResult, _AXIS_VECTORS
 from core.texture import face_uv_axes
+from core.layers import is_link_untagged
 from core.triangulate import plane_axes
 from tools.base import Tool, ToolContext
 from tools.select import selection_mode
@@ -4170,7 +4171,14 @@ class Viewport(QOpenGLWidget):
                 # whatever its children are tagged — at ANY depth, not only
                 # below the top-level object: a hidden group two levels down
                 # left its own children on screen.
-                proxy.layer = forced or child.layer or inherited or node.layer
+                # A linked file's «Untagged» is its default tag renamed: for
+                # inheritance it reads as none (the pieces of the facilities
+                # link took that one tag instead of the beams' and arches'
+                # tags above them), and stays the piece's tag only when
+                # nothing above it carries one.
+                own = (None if is_link_untagged(child.layer) else child.layer)
+                proxy.layer = (forced or own or inherited or node.layer
+                               or child.layer)
                 proxy.billboard = child.billboard
                 # Hide on an object takes its whole subtree along, and a
                 # hidden child stays hidden inside a visible parent.

@@ -173,13 +173,28 @@ def layer_color(layer) -> tuple:
     return PALETTE[zlib.crc32(layer.name.encode("utf-8")) % len(PALETTE)]
 
 
+#: The tag a linked file's untagged content wears in the host
+#: (``core.links.tag_name``): «<file> / Untagged». It stands for the
+#: source's default tag, so for colour it reads as none — the piece takes
+#: its owner's tag, as it did in its own file.
+LINK_UNTAGGED_SUFFIX = " / Untagged"
+
+
+def is_link_untagged(name) -> bool:
+    """Whether ``name`` is a linked file's stand-in for the default tag."""
+    return bool(name) and name.endswith(LINK_UNTAGGED_SUFFIX)
+
+
 def object_layer(group) -> str:
     """The layer an object's insides take their colour from: its own, else
     the top-level object's it belongs to (a nested piece of a component on
-    a layer), else the default layer. ``None`` is the loose model."""
+    a layer), else the default layer. ``None`` is the loose model. A linked
+    file's «Untagged» counts as none here: with the source's default tag
+    renamed on linking, every untagged piece of the facilities model took
+    that one tag's colour instead of its owner's (Maxence, 2026-11-09)."""
     for g in (group, getattr(group, "owner", None)):
         name = getattr(g, "layer", None) if g is not None else None
-        if name:
+        if name and not is_link_untagged(name):
             return name
     return DEFAULT_LAYER
 

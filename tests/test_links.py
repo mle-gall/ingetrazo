@@ -206,3 +206,33 @@ def test_a_deferred_mesh_is_relabelled_without_being_built():
     # Built later: the same names.
     assert {layer_of(f) for f in mesh.faces} == {"Site / Wood"}
     assert built
+
+
+def test_a_links_untagged_pieces_take_their_owners_tag_colour():
+    """Linking renames the source's default tag to «<file> / Untagged»; for
+    colour that stand-in reads as none, so a nested untagged piece takes
+    its owner's tag, as in its own file — the facilities model came up in
+    one green instead of its tags' colours (Maxence, 2026-11-09)."""
+    from core.group import Group
+    from core.layers import DEFAULT_LAYER, object_layer
+    from core.materials import effective_attrs
+    from core.mesh import Mesh
+    owner = Group(Mesh(), name="Beam")
+    owner.layer = "Site / Steel"
+    piece = Group(Mesh(), name="Flange")
+    piece.layer = "Site / Untagged"
+    piece.owner = owner
+    assert object_layer(piece) == "Site / Steel"
+    top = Group(Mesh(), name="Loose")
+    top.layer = "Site / Untagged"
+    assert object_layer(top) == DEFAULT_LAYER
+    tagged = Group(Mesh(), name="Rail")
+    tagged.layer = "Site / Wood"
+    tagged.owner = owner
+    assert object_layer(tagged) == "Site / Wood"      # its own tag still wins
+    paint = {"by_layer": {"Site / Steel": (1.0, 0.0, 0.0),
+                          "Site / Untagged": (0.0, 1.0, 0.0)},
+             "color": (1.0, 0.0, 0.0)}
+    assert effective_attrs({"layer": "Site / Untagged"}, paint)["color"] == (1.0, 0.0, 0.0)
+    assert effective_attrs({"layer": "Site / Steel"}, paint)["color"] == (1.0, 0.0, 0.0)
+    assert effective_attrs({}, paint)["color"] == (1.0, 0.0, 0.0)
