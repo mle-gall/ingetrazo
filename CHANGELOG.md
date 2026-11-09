@@ -8,6 +8,10 @@ follow [SemVer](https://semver.org).
 
 ### Añadido
 
+- **Panel Estructura**: organiza los grupos en un árbol de proyecto y deriva
+  sus etiquetas y fichas BIM. Permite revisar los elementos sin clasificar,
+  proponer el árbol a partir de etiquetas y reasignar grupos desde Info de entidad.
+
 - **Navegación con el trackpad y la pantalla táctil** (#248): el pellizco
   hace zoom hacia los dedos con el mismo zoom que la rueda (antes no hacía
   nada en un trackpad de Mac); deslizar **con un dedo en la pantalla
