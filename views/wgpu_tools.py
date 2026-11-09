@@ -23,6 +23,7 @@ TOOL_DISPATCH['PieTool'] = 'mesh'
 TOOL_DISPATCH['FlipTool'] = 'mesh'
 TOOL_DISPATCH['FilletTool'] = 'mesh'
 TOOL_DISPATCH['ProtractorTool'] = 'mesh'
+TOOL_DISPATCH['GeoPathTool'] = 'mesh'
 
 def move_command(groups, delta):
     commands = [MoveGroupCommand(group, delta) for group in groups]
