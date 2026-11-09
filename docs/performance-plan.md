@@ -2386,15 +2386,20 @@ main-window notification costs.
 | Model / context | Commit-to-completed-frame samples (ms) | Command samples (ms) | Re-baked prototypes | Gate |
 | --- | --- | --- | --- | --- |
 | Pusher car, Groupe#167; 1,253 placements | 60.15 / 26.96 / 30.87 | 17.07 / 17.10 / 17.13 | 1 / 1 / 1 | <100 ms: sampled pass |
-| Ride, Groupe#324; 76,029 placements | 1448.38 / 97.16 / 101.19 | 10.79 / 11.70 / 10.31 | 1 / 1 / 1 | <300 ms: **FAIL first edit** |
+| Ride, Groupe#324; 76,029 placements; ID target acquired before commit | 158.16 / 91.87 / 106.04 | 9.92 / 9.68 / 8.71 | 1 / 1 / 1 | <300 ms: sampled pass |
 
 Before mesh journaling the ride samples took 1634 / 1178 / 1109 ms despite
-re-baking only one prototype. The final first sample still spent 579 ms in the
-diff and additional time completing its frame. The cold allocation/inference
-and GPU work has not been isolated enough to attribute that remainder.
-Warm samples alone do not establish the required gate.
+re-baking only one prototype. The first post-journal harness assigned its face
+directly without acquiring the ID target before committing: it measured
+1448 / 97 / 101 ms, including 579 ms in the first diff. A real gesture acquires
+that target before commit. The final harness includes that pre-commit pick;
+the table records its subsequent 158 / 92 / 106 ms run. These runs differ in
+readback preparation and uncontrolled machine workload; the first cold failure
+is retained here rather than attributing all of it to ID acquisition. The
+results establish sampled passes, not an unconditional cold-edit guarantee.
 Raw local logs: `.spike-results/r3a-pusher-local.log` and
-`.spike-results/r3a-ride-local.log`. GUI subprocesses were bounded at 290 s.
+`.spike-results/r3a-ride-picked.log` (earlier cold run:
+`.spike-results/r3a-ride-local.log`). GUI subprocesses were bounded at 290 s.
 
 ### Validation
 
@@ -2412,12 +2417,14 @@ Both release builds succeeded. Focused combined run: **555 passed, 1 skipped,
 2 xfailed**. After native snapping changes: **90 native tests passed**.
 After the final VCB and preview-clearing changes: **53 targeted tests passed**
 (`test_wgpu_mesh_tools.py`, `test_wgpu_interaction.py`, `test_wgpu_updates.py`).
+After native modifier-release routing: **91 native tests passed**.
 Native empty-document overlay smoke passed. No Rust sources changed; no debug
 builds were created. No full-suite batch runner was used.
 
 ### Remaining acceptance and follow-on work
 
-- The ride first-edit latency gate remains unresolved.
+- Both final sampled edit gates pass with an ID target acquired before commit;
+  the earlier cold first-edit failure needs broader latency acceptance.
 - Push/Pull outline preview lacks GL depth-tested fills and base suppression.
 - Picking tests establish transformed/open-context face resolution, but do not
   establish all coplanar-face tie breaks, section cuts, or cross-placement snap

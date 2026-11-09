@@ -38,6 +38,8 @@ view.camera.target = face.centroid()
 view.camera.distance = max(2., (face.vertices[0]-view.camera.target).length()*6)
 for _ in range(3):
     view.draw_frame()
+# A real Push/Pull gesture acquires the ID target before committing.
+view.pick_row(0, 0)
 history = History(scene)
 view._instance_updates.observe(history)
 vp = SimpleNamespace(scene=scene, history=history, camera=view.camera,

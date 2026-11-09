@@ -502,7 +502,12 @@ class WgpuView(QWidget):
         self.update()
 
     def keyReleaseEvent(self, event):
-        if self.tools.sync() == 'inert':
+        mode = self.tools.sync()
+        release = getattr(self.tools.tool, 'on_key_release', None)
+        if mode == 'mesh' and release is not None and release(self.tools, event.key()):
+            self.tools.update()
+            return
+        if mode == 'inert':
             event.ignore()
             return
         if self.source_viewport is not None:
