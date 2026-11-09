@@ -728,6 +728,7 @@ impl Renderer {
     /// Update existing resident rows without replacing geometry or pick IDs.
     fn update_instances(&mut self, ids: Vec<usize>, rows: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
         self.ids_dirty = true;
+        self.stable_frames = 0;
         let rows = rows.as_slice()?;
         let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
         if rows.len() != ids.len() * 80 {
@@ -1072,7 +1073,7 @@ impl Renderer {
         let ao_active = self.ao.active(self.style);
         for edge_only in [false, true] {
             if edge_only && !ao_active { break; }
-            if draw_ids || ao_active {
+            if (draw_ids || ao_active) && (!msaa || !edge_only) {
             let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[
@@ -1112,22 +1113,22 @@ impl Renderer {
                     }),
                 occlusion_query_set: None,
             });
-            pass.set_pipeline(if self.style == 1 {
+            pass.set_pipeline(if self.style == 1 || msaa {
                 &self.xray
             } else {
                 &self.draw
             });
             pass.set_bind_group(
                 0,
-                if self.style == 1 {
+                if self.style == 1 || msaa {
                     &s.xray_draw
                 } else {
                     &s.draw
                 },
                 &[],
             );
-            pass.set_bind_group(1, &self.look_groups[if self.style == 1 { 1 } else { 0 }], &[]);
-            pass.set_bind_group(2, &self.texture_groups[usize::from(self.style == 1)], &[]);
+            pass.set_bind_group(1, &self.look_groups[if self.style == 1 || msaa { 1 } else { 0 }], &[]);
+            pass.set_bind_group(2, &self.texture_groups[usize::from(self.style == 1 || msaa)], &[]);
             pass.set_vertex_buffer(0, s.vertex.slice(..));
             pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
             if !edge_only && self.style != 4 {
@@ -1139,7 +1140,7 @@ impl Renderer {
                     }
                 }
             }
-            if (edge_only || !ao_active) && (self.edges || self.style == 4) {
+            if !msaa && (edge_only || !ao_active) && (self.edges || self.style == 4) {
                 for hidden in [true, false] {
                     if hidden && self.style != 1 && self.look.data[6][2] == 0. { continue; }
                     pass.set_pipeline(if hidden { &self.xray_edge } else { &self.edge });
@@ -1289,11 +1290,54 @@ impl Renderer {
         (self.last_cpu, self.last_gpu, self.last_acquire)
     }
     fn ensure_ids(&mut self) -> PyResult<()> {
-        if self.ids_dirty {
+        if !self.ids_dirty { return Ok(()); }
+        // Wireframe IDs include edge-only geometry; retain its existing semantics.
+        if self.style == 4 {
             self.pick_pending = true;
             let result = self.render(false);
             self.pick_pending = false;
             result?;
+        } else {
+            let s = self.scene.as_ref().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(&s.hard_template, 0, &s.commands, 0, s.p as u64 * 40);
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                pass.set_pipeline(&self.compute);
+                pass.set_bind_group(0, &s.compute, &[]);
+                pass.dispatch_workgroups(s.n.div_ceil(64), 1, 1);
+            }
+            let color = self.offscreen.create_view(&Default::default());
+            let ids = self.ids.create_view(&Default::default());
+            let depth = self.depth.create_view(&Default::default());
+            {
+                // Depth-only color writes retain texture alpha rejection, but no
+                // background, edges, AO, multisampling, overlay or presentation.
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("pick IDs"),
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment { view: &color, resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
+                        Some(wgpu::RenderPassColorAttachment { view: &ids, resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store } }),
+                    ],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth, stencil_ops: None,
+                        depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.), store: wgpu::StoreOp::Store }),
+                    }),
+                    timestamp_writes: None, occlusion_query_set: None,
+                });
+                pass.set_pipeline(&self.xray);
+                pass.set_bind_group(0, &s.xray_draw, &[]);
+                pass.set_bind_group(1, &self.look_groups[1], &[]);
+                pass.set_bind_group(2, &self.texture_groups[1], &[]);
+                pass.set_vertex_buffer(0, s.vertex.slice(..));
+                pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
+                if self.multi { pass.multi_draw_indexed_indirect(&s.commands, 0, s.p); }
+                else { for k in 0..s.p { pass.draw_indexed_indirect(&s.commands, k as u64 * 20); } }
+            }
+            self.queue.submit(Some(encoder.finish()));
+            self.ids_dirty = false;
         }
         Ok(())
     }
