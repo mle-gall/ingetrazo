@@ -266,6 +266,57 @@ class WgpuView(QWidget):
         self.frameReady.emit(cpu, gpu, wall)
         return cpu, gpu, wall
 
+    def render_image(self, width_px, height_px=None, overlays=False,
+                     sharp_shadows=False):
+        """Render sheet pixels without touching the interactive GPU or camera.
+
+        A temporary native host owns a separate device and scene upload. It is
+        never shown: capture targets the renderer's offscreen texture. Sections
+        are not supported by the Metal pipeline yet; fail instead of silently
+        printing an uncut model.
+        """
+        from copy import copy
+        from PySide6.QtGui import QImage
+        from views.wgpu_style import style_payload
+        import ingetrazo_render
+
+        source = self.source_viewport
+        height_px = height_px or round(width_px * self.height() / max(1, self.width()))
+        width_px, height_px = int(width_px), int(height_px)
+        if width_px <= 0 or height_px <= 0:
+            raise ValueError("Image dimensions must be positive")
+        scene = source.scene
+        if scene.active_section() is not None and scene.show_section_cuts:
+            raise NotImplementedError("Metal sheet section cuts are not implemented")
+        camera = copy(source.camera)
+        camera.aspect = width_px / height_px
+        host = QWidget()
+        host.setAttribute(Qt.WA_NativeWindow)
+        renderer = None
+        try:
+            renderer = ingetrazo_render.Renderer(int(host.winId()), width_px, height_px, 1.)
+            packed = pack_scene(scene, getattr(source, 'view_tint', None))
+            if not len(packed.instances):
+                image = QImage(width_px, height_px, QImage.Format_RGBA8888)
+                image.fill(QColor.fromRgbF(*source._effective_style().background))
+                return image
+            packed.upload(renderer)
+            view, projection = camera.view_matrix(), camera.projection_matrix()
+            payload = style_payload(scene, source._effective_style(),
+                                    horizon=source._horizon_ndc_y(projection * view))
+            payload['edge_width'] = float(getattr(source, '_export_edge_px', 1))
+            payload['profile_width'] = float(getattr(source, '_export_profile_px', 1))
+            renderer.set_style(payload)
+            renderer.set_camera(tuple(view.data()), tuple(projection.data()))
+            renderer.request_capture()
+            renderer.render(False)
+            pixels = bytes(renderer.take_capture())
+            return QImage(pixels, width_px, height_px, width_px * 4,
+                          QImage.Format_RGBA8888).copy()
+        finally:
+            renderer = None
+            host.destroy()
+
     def paintEvent(self, event):
         self.draw_frame()
 
