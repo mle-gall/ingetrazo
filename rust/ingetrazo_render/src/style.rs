@@ -4,7 +4,7 @@ use wgpu::util::DeviceExt;
 
 pub struct Style {
     pub buffer: wgpu::Buffer,
-    pub data: [[f32; 4]; 8],
+    pub data: [[f32; 4]; 9],
 }
 impl Style {
     pub fn new(d: &wgpu::Device) -> Self {
@@ -17,6 +17,7 @@ impl Style {
             [0.815, 0.820, 0.815, 0.],
             [1., 1., 0., 4.],
             [0.; 4],
+            [0.7, 0.7, 0.7, 0.],
         ];
         let buffer = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("display style"),
@@ -32,6 +33,20 @@ impl Style {
     ) -> PyResult<(u32, Option<bool>)> {
         let mut next = self.data;
         let (name, edges) = if let Ok(d) = value.cast::<PyDict>() {
+            if let Some(v) = d.get_item("fade_color")? {
+                let rgb: [f32; 3] = v.extract()?;
+                if rgb.iter().any(|x| !x.is_finite() || !(0. ..=1.).contains(x)) {
+                    return Err(PyValueError::new_err("invalid fade color"));
+                }
+                next[8][..3].copy_from_slice(&rgb);
+            }
+            if let Some(v) = d.get_item("fade")? {
+                let fade: f32 = v.extract()?;
+                if !fade.is_finite() || !(0. ..=1.).contains(&fade) {
+                    return Err(PyValueError::new_err("invalid fade factor"));
+                }
+                next[8][3] = fade;
+            }
             if let Some(v) = d.get_item("section_plane")? {
                 let plane: [f32; 4] = v.extract()?;
                 if plane.iter().any(|v| !v.is_finite()) {
@@ -124,10 +139,11 @@ impl Style {
 #[cfg(test)]
 mod section_tests {
     #[test]
-    fn section_uniform_is_a_sixteen_byte_tail() {
-        let data = [[0f32; 4]; 8];
-        assert_eq!(std::mem::size_of_val(&data), 128);
+    fn section_and_fade_uniform_offsets() {
+        let data = [[0f32; 4]; 9];
+        assert_eq!(std::mem::size_of_val(&data), 144);
         assert_eq!(data[7].as_ptr() as usize - data.as_ptr() as usize, 112);
+        assert_eq!(data[8].as_ptr() as usize - data.as_ptr() as usize, 128);
     }
 
     #[test]

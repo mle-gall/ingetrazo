@@ -359,5 +359,8 @@ class NativeTools(MeshToolAccess):
             if hasattr(self.view, 'setCursor'):
                 self.view.setCursor(source.cursor())
 
+    def edit_group_box_contains_pixel(self, x, y):
+        return self.view.edit_group_box_contains_pixel(x, y)
+
     def __getattr__(self, name):
         return getattr(self.view.source_viewport, name)

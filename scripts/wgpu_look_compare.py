@@ -14,7 +14,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ['INGETRAZO_RUST'] = '1'
 os.environ['INGETRAZO_TEXTURE_CACHE'] = str(Path('.look-tmp/textures').resolve())
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QImage, QPainter, QVector3D
 from PySide6.QtWidgets import QApplication
 from core.scene import Scene
@@ -26,6 +26,10 @@ app = QApplication([])
 out = Path('docs/benchmarks/wgpu-look-2026-11-09')
 parser = argparse.ArgumentParser()
 parser.add_argument('model', type=Path)
+parser.add_argument('--edit-group', help='Exact name or slash-separated path; @nested selects first nested placement')
+parser.add_argument('--edit-rest-mode', choices=('fade', 'hide', 'none'), default='fade')
+parser.add_argument('--background', choices=('light', 'dark'))
+parser.add_argument('--edit-benchmark', action='store_true')
 parser.add_argument('--launch-section', action='store_true')
 parser.add_argument('--mode', choices=('shaded', 'hidden_line', 'monochrome', 'wireframe', 'xray'))
 parser.add_argument('--pitch', type=float)
@@ -61,15 +65,41 @@ load_into(scene, source)
 if args.launch_section:
     scene.groups = [g for g in scene.groups if g.name == "Launch System | Launch_System.blend r3"]
     label += "-launch-section"
-if args.mode:
-    scene.display_style.face_mode = args.mode
+scene.display_style.face_mode = args.mode or 'textures'
 if args.edges_off:
     scene.display_style.edges = False
 if args.profiles_off:
     scene.display_style.profiles = False
 if args.back_edges:
     scene.display_style.back_edges = True
+edit_path = []
+if args.edit_group:
+    def paths(groups, parents=()):
+        for group in groups:
+            path = (*parents, group)
+            yield path
+            yield from paths(group.children, path)
+    candidates = list(paths(scene.groups))
+    chosen = next((p for p in candidates if
+                   (args.edit_group == '@nested' and len(p) == 2) or
+                   p[-1].name == args.edit_group or
+                   '/'.join(g.name for g in p) == args.edit_group), None)
+    if chosen is None:
+        raise ValueError('Edit group not found')
+    edit_path = [g.name for g in chosen]
+    for group in chosen:
+        scene.begin_group_edit(group)
+    label += '-' + args.edit_rest_mode
+if args.background:
+    scene.display_style.background = ((.94, .94, .94) if args.background == 'light' else (.08, .08, .08))
+    scene.display_style.sky = False
+    label += '-' + args.background
 metal = WgpuView()
+if args.capture_only:
+    metal.setAttribute(Qt.WA_DontShowOnScreen)
+    # Captures never snap: avoid building a document-sized inference BVH.
+    metal._prepare_inference = lambda: None
+
 metal.resize(1000, 700)
 metal.set_scene(scene)
 if args.pitch is not None:
@@ -77,6 +107,9 @@ if args.pitch is not None:
 camera_state = {k: QVector3D(v) if isinstance(v, QVector3D) else v
                 for k, v in vars(metal.camera).items()}
 gl = Viewport()
+if args.capture_only:
+    gl.setAttribute(Qt.WA_DontShowOnScreen)
+gl._edit_rest_mode = "normal" if args.edit_rest_mode == "none" else args.edit_rest_mode
 gl.resize(1000, 700)
 gl.scene = scene
 gl.camera = metal.camera
@@ -94,12 +127,12 @@ def capture():
         # Restore the fitted camera so paired captures stay comparable.
         vars(metal.camera).update(camera_state)
         metal.draw_frame()
-        metal.renderer.set_highlight([], None)
+        metal.renderer.set_highlight([], [])
         if args.highlight:
             # Instance highlight diagnostic; GL export intentionally omits its
             # selection overlay, so this pair is not selection parity evidence.
             metal.renderer.set_highlight([0] if args.highlight == 'selected' else [],
-                                         0 if args.highlight == 'hovered' else None)
+                                         [0] if args.highlight == 'hovered' else [])
         if args.edge_width is not None:
             from views.wgpu_style import style_payload
             payload = style_payload(scene)
@@ -124,6 +157,29 @@ def capture():
         a = np.frombuffer(reference.constBits(), np.uint8).reshape(h, w, 4)
         b = np.frombuffer(native.constBits(), np.uint8).reshape(h, w, 4)
         result = {'scale': scale, 'size': [w,h], 'rgb_mae': float(np.abs(a[:,:,:3].astype(float)-b[:,:,:3]).mean()), 'frames': {}, 'prototypes': len(metal.packed.bounds), 'vertices': len(metal.packed.vertices), 'material_bytes': metal.packed.materials.nbytes, 'resident_bytes': metal.renderer.gpu_memory}
+        result['face_mode'] = scene.display_style.face_mode
+        result['edit_rest_fade'] = gl.edit_rest_fade
+        result['edit_rest_mode'] = gl.edit_rest_mode
+        result['background'] = list(scene.display_style.background)
+        result['edit_path'] = edit_path
+        result['rest_write_ms'] = getattr(metal, 'rest_write_ms', None)
+        result['rest_rows'] = int(np.count_nonzero(metal.packed.instances['info'][:, 2] & 64))
+        if args.edit_benchmark:
+            (out / f'{label}.json').write_text(json.dumps(result, indent=2))
+            import subprocess
+            result['uptime'] = subprocess.check_output(['uptime'], timeout=5, text=True).strip()
+            result['edit_ab'] = {}
+            for mode in ('normal', 'fade', 'normal', 'fade'):
+                gl._edit_rest_mode = mode
+                metal.sync_edit_context()
+                samples = []
+                for i in range(45):
+                    metal.renderer.render(False)
+                    if i >= 10:
+                        samples.append(metal.renderer.last_timings()[:3])
+                result['edit_ab'].setdefault(mode, []).append({'flag_write_ms': metal.rest_write_ms, 'median_ms': [float(np.median([s[j] for s in samples if s[j] is not None]))
+                               if any(s[j] is not None for s in samples) else None for j in range(3)]})
+                (out / f'{label}.json').write_text(json.dumps(result, indent=2))
         result['camera'] = {k: ([v.x(), v.y(), v.z()] if isinstance(v, QVector3D) else v)
                             for k, v in camera_state.items() if isinstance(v, (QVector3D, float, int, bool, str))}
         for aa in (() if args.capture_only else (False, True)):

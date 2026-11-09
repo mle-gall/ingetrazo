@@ -1,0 +1,40 @@
+{
+  "scale": 2.0,
+  "size": [
+    2000,
+    1400
+  ],
+  "rgb_mae": 0.1155675,
+  "frames": {},
+  "prototypes": 71,
+  "vertices": 665054,
+  "material_bytes": 11043824,
+  "resident_bytes": 110489940,
+  "edit_path": [
+    "Groupe#32",
+    "Groupe#22"
+  ],
+  "rest_write_ms": 0.16570789739489555,
+  "rest_rows": 1234,
+  "camera": {
+    "target": [
+      1.7956702709197998,
+      1.0231391191482544,
+      0.3249250650405884
+    ],
+    "distance": 8.343749046325684,
+    "yaw": -0.7853981633974483,
+    "pitch": 0.5235987755982988,
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "fov_deg": 45.0,
+    "aspect": 1.0,
+    "znear": 0.1,
+    "zfar": 10000.0,
+    "perspective": true,
+    "two_point": false
+  }
+}

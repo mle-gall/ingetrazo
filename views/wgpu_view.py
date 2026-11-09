@@ -118,6 +118,7 @@ class WgpuView(QWidget):
         if delta is not None:
             ids, rows = delta
             tracker.apply(ids, rows, self.renderer)
+            self._rest_signature = None
             from views.wgpu_billboards import Billboards
             self._billboards = Billboards(self.packed)
             if len(ids) or tracker.changed or tracker.removed:
@@ -235,6 +236,7 @@ class WgpuView(QWidget):
             scratch = pack_scene(Scene(groups=[Group(mesh)]))
             scratch.instances['info'][:, 2] = 1
             scratch.upload(self.renderer)
+        self._rest_signature = None
         self._frame_style = None
         self._axes_state = None
         if getattr(self, "_billboards", None) is not None:
@@ -283,22 +285,17 @@ class WgpuView(QWidget):
             payload = style_payload(
                 self.source_viewport.scene, style,
                 horizon=self.source_viewport._horizon_ndc_y(mvp),
-                scale=self.devicePixelRatioF())
+                scale=self.devicePixelRatioF(),
+                edit_rest_fade=getattr(self.source_viewport, 'edit_rest_fade', .75))
             if payload != getattr(self, '_frame_style', None):
                 self.renderer.set_style(payload)
                 self._frame_style = payload
             tint = getattr(self.source_viewport, 'view_tint', None) or {}
-            context = self.scene.edit_group
-            signature = (tuple(sorted(tint.items())), id(context))
+            signature = tuple(sorted(tint.items()))
             if signature != getattr(self, '_tint_signature', None):
                 colors = []
-                from core.group import iter_placements
-                context_ids = ({id(g) for g, _ in iter_placements(context)}
-                               if context is not None else set())
                 for uid, group in zip(self.packed.uids, self.packed.groups):
                     rgb = tint.get(uid)
-                    if context is not None and id(group) not in context_ids:
-                        rgb = (.35, .35, .35)
                     colors.append(int(np.array([*np.clip(np.array(rgb[:3])*255, 0, 255), 255],
                                                np.uint8).view('<u4')[0]) if rgb is not None else 0)
                 if len(colors) == getattr(self, '_resident_count', None):
@@ -310,6 +307,7 @@ class WgpuView(QWidget):
             if getattr(self, "_billboards", None) is not None:
                 self._billboards.key = None
             self._inference_future = None
+        self.sync_edit_context()
         self.sync_selection()
         physical = (self.width(), self.height(), self.devicePixelRatioF())
         if physical != getattr(self, '_physical_size', None):
@@ -335,16 +333,17 @@ class WgpuView(QWidget):
         from views.wgpu_sections import sync
         sync(self)
         section_widgets = bool(getattr(self.scene, 'section_planes', ())) and getattr(self.scene, 'show_section_planes', True)
-        if annotations or self.overlay_primitives or section_widgets or getattr(self, "_had_overlay", False):
+        primitives = self._edit_box_primitives() + self.overlay_primitives
+        if annotations or primitives or section_widgets or getattr(self, "_had_overlay", False):
             from views.wgpu_overlay import rasterize, pixels
             before = time.perf_counter()
-            image = rasterize(self.overlay_primitives, self.width(), self.height(), self.devicePixelRatioF(),
+            image = rasterize(primitives, self.width(), self.height(), self.devicePixelRatioF(),
                               self.tools.draw_annotations if annotations else None)
             if section_widgets:
                 self._paint_section_widgets(image)
             self.renderer.set_overlay(image.width(), image.height(), pixels(image))
             self.overlay_ms = (time.perf_counter() - before) * 1000
-            self._had_overlay = annotations or bool(self.overlay_primitives) or section_widgets
+            self._had_overlay = annotations or bool(primitives) or section_widgets
         # End R3c-2a section widgets.
         cpu, gpu = self.renderer.render()
         wall = (time.perf_counter()-start)*1000
@@ -395,11 +394,18 @@ class WgpuView(QWidget):
         camera.aspect = width_px / height_px
         view, projection = camera.view_matrix(), camera.projection_matrix()
         payload = style_payload(source.scene, source._effective_style(),
-                                horizon=source._horizon_ndc_y(projection * view))
+                                horizon=source._horizon_ndc_y(projection * view),
+                                edit_rest_fade=getattr(source, 'edit_rest_fade', .75))
         payload['edge_width'] = float(getattr(source, '_export_edge_px', 1))
         payload['profile_width'] = float(getattr(source, '_export_profile_px', 1))
         from views.wgpu_sections import capture_rows, geometry
         rows = capture_rows(self.packed, source.scene, getattr(source, 'view_tint', None))
+        from views.wgpu_edit_context import rest_rows
+        mode = getattr(source, 'edit_rest_mode', 'fade')
+        rows['info'][:, 2] &= np.uint32(~192 & 0xffffffff)
+        if mode in ('fade', 'hide'):
+            rows['info'][rest_rows(self.packed.groups, source.scene.edit_group), 2] |= (
+                64 | (128 if mode == 'hide' else 0))
         from views.wgpu_billboards import Billboards
         from views.wgpu_axes import axes_state
         capture = copy(self.packed)
@@ -431,13 +437,14 @@ class WgpuView(QWidget):
         """The resident row identifies both the placement and shared prototype."""
         if self.packed is None or row is None or not 0 <= row < len(self.packed.uids):
             return None
-        if self.packed.instances['info'][row, 2] & 1:
+        if self.packed.instances['info'][row, 2] & 129:
             return None
         return self.packed.groups[row], int(self.packed.instances['info'][row, 0])
 
     def pick_row(self, x, y):
         if self.renderer is None or x < 0 or y < 0:
             return None
+        self.sync_edit_context()
         scale = self.devicePixelRatioF()
         row = self.renderer.pick(int(x*scale), int(y*scale))
         return row if self.resolve(row) is not None else None
@@ -522,6 +529,49 @@ class WgpuView(QWidget):
             _plog("hover", self.hover_ms, extra="renderer=wgpu id-local", floor=0.)
         self.update()
         return self.last_snap
+
+    def sync_edit_context(self):
+        if self.renderer is None or self.packed is None:
+            return
+        mode = getattr(self.source_viewport, 'edit_rest_mode', 'fade')
+        signature = (id(self.packed), id(self.scene.edit_group), mode)
+        if signature == getattr(self, '_rest_signature', None):
+            return
+        from views.wgpu_edit_context import rest_rows
+        rows = rest_rows(self.packed.groups, self.scene.edit_group)
+        before = time.perf_counter()
+        if rows or getattr(self, '_rest_signature', None) is not None:
+            self.renderer.set_rest(rows, mode)
+        self.rest_write_ms = (time.perf_counter() - before) * 1000
+        flags = self.packed.instances['info'][:, 2]
+        flags &= np.uint32(~(64 | 128) & 0xffffffff)
+        if mode in ('fade', 'hide'):
+            flags[rows] |= np.uint32(64 | (128 if mode == 'hide' else 0))
+        self._rest_signature = signature
+
+    def _group_obb(self, group):
+        return self.source_viewport._group_obb(group)
+
+    def _edit_group_box_corners(self):
+        from views.viewport import Viewport
+        return Viewport._edit_group_box_corners(self)
+
+    def edit_group_box_contains_pixel(self, x, y):
+        from views.viewport import Viewport
+        return Viewport.edit_group_box_contains_pixel(self, x, y)
+
+    def _leave_edit_on_empty_click(self, x, y, modifiers):
+        if (self.scene.edit_group is not None and not self.scene.selection
+                and not modifiers & (Qt.ControlModifier | Qt.MetaModifier | Qt.ShiftModifier)
+                and not self.edit_group_box_contains_pixel(x, y)):
+            self.source_viewport.end_one_group_edit()
+            self.update()
+            return True
+        return False
+
+    def _edit_box_primitives(self):
+        from views.wgpu_edit_context import box_primitives
+        return box_primitives(self)
 
     def sync_selection(self):
         if self.renderer is None:
@@ -722,6 +772,11 @@ class WgpuView(QWidget):
                 row = self.pick_row(event.position().x(), event.position().y())
                 rows = [] if row is None else [row]
                 resolved = self.resolve(row)
+                if ((resolved is None or self.context_placement(resolved[0]) is None)
+                        and self._leave_edit_on_empty_click(
+                            event.position().x(), event.position().y(), event.modifiers())):
+                    self.last = None
+                    return
                 if resolved is not None and (resolved[0] is self.scene.edit_group or
                         (resolved[0] is None and self.scene.edit_group is None)):
                     entity = (self.tools.pick_visible_edge(event.position().x(), event.position().y())
@@ -884,7 +939,9 @@ class WgpuView(QWidget):
         scale = self.devicePixelRatioF()
         x0, x1 = sorted((x0, x1))
         y0, y1 = sorted((y0, y1))
-        return self.renderer.pick_rect(*(max(0, int(v*scale)) for v in (x0, y0, x1, y1)))
+        self.sync_edit_context()
+        return [row for row in self.renderer.pick_rect(*(max(0, int(v*scale)) for v in (x0, y0, x1, y1)))
+                if self.resolve(row) is not None]
 
     def pick_rect(self, x0, y0, x1, y1):
         return [self.packed.uids[i] for i in self.rect_rows(x0, y0, x1, y1)]

@@ -38,6 +38,7 @@ def view():
     v.camera.aspect = 800/600
     v.inference_index = prepare(v.packed)
     v.renderer = SimpleNamespace(set_highlight=lambda *a: None,
+                                 set_rest=lambda *a: None,
                                  pick=lambda *a: 0, pick_rect=lambda *a: [0])
     yield v
     v.renderer = None

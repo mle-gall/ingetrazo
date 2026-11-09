@@ -141,7 +141,7 @@ fn grown_capacity(current: usize, needed: usize) -> usize {
 }
 
 fn merge_instance_flags(old: u32, incoming: u32) -> u32 {
-    (old & 6) | (incoming & 9)
+    (old & (6 | 64 | 128)) | (incoming & 9)
 }
 
 fn texture(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
@@ -937,7 +937,7 @@ impl Renderer {
             let selected: std::collections::HashSet<_> = selected_ids.into_iter().collect();
             let hovered: std::collections::HashSet<_> = hovered_ids.into_iter().collect();
             for (i, flag) in s.flags.iter_mut().enumerate() {
-                let next = (*flag & 9)
+                let next = (*flag & !6)
                     | if selected.contains(&i) { 2 } else { 0 }
                     | if hovered.contains(&i) { 4 } else { 0 };
                 if next != *flag {
@@ -946,6 +946,33 @@ impl Renderer {
                     self.queue
                         .write_buffer(&s.inst, i as u64 * 80 + 72, &next.to_le_bytes());
                 }
+            }
+        }
+        Ok(())
+    }
+    /// Edit context bits are independent of visibility, selection and tint.
+    fn set_rest(&mut self, rows: Vec<usize>, mode: &str) -> PyResult<()> {
+        let bits = match mode {
+            "fade" => 64, "hide" => 64 | 128, "none" | "normal" => 0,
+            _ => return Err(PyValueError::new_err("unknown edit rest mode")),
+        };
+        if let Some(s) = &mut self.scene {
+            if rows.iter().any(|&i| i >= s.flags.len()) {
+                return Err(PyValueError::new_err("instance id out of range"));
+            }
+            let mut rest = vec![false; s.flags.len()];
+            for row in rows { rest[row] = true; }
+            let mut changed = false;
+            for (i, flag) in s.flags.iter_mut().enumerate() {
+                let next = (*flag & !(64 | 128)) | if rest[i] { bits } else { 0 };
+                changed |= next != *flag;
+                *flag = next;
+                s.rows[i*80+72..i*80+76].copy_from_slice(&next.to_le_bytes());
+            }
+            // One queue write per context change, rather than N tiny writes.
+            if changed {
+                self.queue.write_buffer(&s.inst, 0, &s.rows);
+                self.ids_dirty = true;
             }
         }
         Ok(())
@@ -1937,6 +1964,7 @@ mod update_tests {
         assert_eq!(merge_instance_flags(0, 6), 0);
         assert_eq!(merge_instance_flags(6, 9), 15);
         assert_eq!(merge_instance_flags(15, 8), 14);
+        assert_eq!(merge_instance_flags(64 | 128 | 6, 9), 64 | 128 | 15);
     }
 }
 
