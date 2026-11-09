@@ -1,6 +1,7 @@
 //! Order independent translucent faces; a separate face depth pass classifies edges.
 pub struct Xray {
     pipeline: wgpu::RenderPipeline,
+    texture_group: Option<wgpu::BindGroup>,
     composite: wgpu::RenderPipeline,
     groups: Option<(wgpu::BindGroup, wgpu::BindGroup)>,
     targets: [wgpu::Texture; 2],
@@ -150,7 +151,7 @@ impl Xray {
         let targets = Self::targets(d, w, h);
         let composite_group = Self::composite_group(d, &composite, &targets);
         Self {
-            pipeline,
+            texture_group: None,            pipeline,
             composite,
             targets,
             composite_group,
@@ -160,6 +161,9 @@ impl Xray {
     pub fn resize(&mut self, d: &wgpu::Device, w: u32, h: u32) {
         self.targets = Self::targets(d, w, h);
         self.composite_group = Self::composite_group(d, &self.composite, &self.targets);
+    }
+    pub fn bind_textures(&mut self, d: &wgpu::Device, textures: &crate::textures::Textures) {
+        self.texture_group = Some(textures.bind(d, &self.pipeline));
     }
     pub fn bind_scene(
         &mut self,
@@ -215,6 +219,7 @@ impl Xray {
             p.set_pipeline(&self.pipeline);
             p.set_bind_group(0, &groups.0, &[]);
             p.set_bind_group(1, &groups.1, &[]);
+            p.set_bind_group(2, self.texture_group.as_ref().unwrap(), &[]);
             p.set_vertex_buffer(0, s.vertex.slice(..));
             p.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
             if multi {

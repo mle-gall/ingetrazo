@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 struct Prepared {
     triangles: Vec<([u32; 3], [V3; 3], [u8; 4])>,
+    faces: Vec<usize>,
     edges: Vec<[u32; 2]>,
     bounds: [f32; 8],
 }
@@ -115,6 +116,7 @@ fn prepare(
         &adjacent,
         h,
     );
+    let faces = triangles.iter().map(|t| t.1).collect();
     let triangles = triangles
         .into_iter()
         .map(|(t, f, color)| {
@@ -129,6 +131,7 @@ fn prepare(
         .collect();
     Prepared {
         triangles,
+        faces,
         edges,
         bounds,
     }
@@ -175,11 +178,14 @@ pub fn bake_scene<'py>(
     offsets: PyReadonlyArray2<'_, i64>,
     attributes: PyReadonlyArray1<'_, i64>,
     hypot: &str,
+    material_maps: PyReadonlyArray2<'_, f32>,
+    material_paints: PyReadonlyArray2<'_, u32>,
 ) -> PyResult<(
     Bound<'py, PyArray1<u8>>,
     Bound<'py, PyArray1<u32>>,
     Bound<'py, PyArray1<f32>>,
     Bound<'py, PyArray1<u32>>,
+    Bound<'py, PyArray1<u8>>,
 )> {
     let invalid = || PyValueError::new_err("invalid scene array shape or offsets");
     let p = pos.as_array();
@@ -249,9 +255,18 @@ pub fn bake_scene<'py>(
             [r[0], r[1], r[2], r[3]]
         })
         .collect();
+    let maps = material_maps.as_array();
+    let paints = material_paints.as_array();
+    if maps.shape() != [f.len(), 16] || paints.shape() != [f.len(), 3] {
+        return Err(invalid());
+    }
+    let maps: Vec<[f32; 16]> = maps.rows().into_iter()
+        .map(|r| std::array::from_fn(|k| r[k])).collect();
+    let mut paints: Vec<[u32; 3]> = paints.rows().into_iter()
+        .map(|r| [r[0], r[1], r[2]]).collect();
     let h = crate::hypot_of(hypot)?;
     // Borrowed read-only NumPy slices stay alive throughout this synchronous call.
-    let (bytes, indices, bounds, table) = py.detach(|| {
+    let (bytes, indices, bounds, table, materials) = py.detach(|| {
         let prepared: Vec<_> = offsets
             .par_windows(2)
             .map(|pair| {
@@ -296,13 +311,47 @@ pub fn bake_scene<'py>(
         }
         jobs.into_par_iter()
             .for_each(|(i, p, dst, idx)| fill(&pts[offsets[i][0]..offsets[i + 1][0]], p, dst, idx));
-        (bytes, indices, bounds, table)
+        // A back matching the front needs no corner data. Reserve alpha 254
+        // in the existing color word; 255 remains front-only explicit paint.
+        for (i, mesh) in prepared.iter().enumerate() {
+            for (triangle, face) in mesh.faces.iter().enumerate() {
+                let f = offsets[i][3] + face;
+                let vertex = table[i*3] as usize + triangle*3;
+                let color = u32::from_le_bytes(bytes[vertex*28+24..vertex*28+28].try_into().unwrap());
+                if paints[f][0] != 0 && paints[f][0] == color && paints[f][1..] == [0, 0] {
+                    for corner in 0..3 { bytes[(vertex+corner)*28+27] = 254; }
+                }
+            }
+            // Clear after marking every triangle of a face, not during it.
+            for face in &mesh.faces {
+                let f = offsets[i][3] + face;
+                let color = u32::from_le_bytes(colors[f]);
+                if paints[f][0] == color && paints[f][1..] == [0, 0] { paints[f][0] = 0; }
+            }
+        }
+        let mut materials = vec![0u8; prepared.len() * 16];
+        for (i, mesh) in prepared.iter().enumerate() {
+            let first_face = offsets[i][3];
+            let special = mesh.faces.iter().any(|f| paints[first_face + f] != [0; 3]);
+            if !special { continue; }
+            let header = [table[i*3], (materials.len()/16) as u32, table[i*3+1], 0];
+            materials[i*16..i*16+16].copy_from_slice(&header.into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>());
+            let points = &pts[offsets[i][0]..offsets[i+1][0]];
+            for ((t, _, _), face) in mesh.triangles.iter().zip(&mesh.faces) {
+                let f = first_face + face;
+                for v in t {
+                    materials.extend_from_slice(&material_vertex(points[*v as usize], &maps[f], paints[f]));
+                }
+            }
+        }
+        (bytes, indices, bounds, table, materials)
     });
     Ok((
         PyArray1::from_vec(py, bytes),
         PyArray1::from_vec(py, indices),
         PyArray1::from_vec(py, bounds),
         PyArray1::from_vec(py, table),
+        PyArray1::from_vec(py, materials),
     ))
 }
 
@@ -376,5 +425,32 @@ mod tests {
             indices,
             (0..n as u32).cycle().take(n * 2).collect::<Vec<_>>()
         );
+    }
+}
+
+// Separate stream preserves the geometry ABI shared with the edge renderer.
+fn material_vertex(p: V3, maps: &[f32; 16], paints: [u32; 3]) -> [u8; 32] {
+    let mut out = [0; 32];
+    for (k, m) in maps.chunks_exact(4).enumerate() {
+        let uv = p.0*m[0] + p.1*m[1] + p.2*m[2] + m[3];
+        out[k*4..k*4+4].copy_from_slice(&uv.to_le_bytes());
+    }
+    for (k, paint) in paints.iter().enumerate() {
+        out[16+k*4..20+k*4].copy_from_slice(&paint.to_le_bytes());
+    }
+    out
+}
+
+#[cfg(test)]
+mod material_tests {
+    #[test]
+    fn corner_affines_and_back_paint_survive_the_stream() {
+        let maps = [2.,0.,0.,0.5, 0.,3.,0.,-1., 0.,0.,4.,2., 1.,1.,0.,0.];
+        let row = super::material_vertex(super::V3(1.,2.,3.), &maps, [0xff332211,7,9]);
+        let floats: Vec<_> = row[..16].chunks_exact(4).map(|v| f32::from_le_bytes(v.try_into().unwrap())).collect();
+        assert_eq!(floats, [2.5,5.,14.,3.]);
+        assert_eq!(&row[16..20], &[0x11,0x22,0x33,0xff]);
+        assert_eq!(u32::from_le_bytes(row[20..24].try_into().unwrap()),7);
+        assert_eq!(u32::from_le_bytes(row[24..28].try_into().unwrap()),9);
     }
 }

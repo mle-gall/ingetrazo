@@ -1,0 +1,14 @@
+   Compiling ingetrazo_core v0.1.0 (/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-4df3a743/rust/ingetrazo_core)
+    Finished `release` profile [optimized] target(s) in 15.84s
+     Running unittests src/lib.rs (rust/ingetrazo_core/target/release/deps/ingetrazo_core-08717441b82b2e08)
+
+running 6 tests
+test scene_bake::material_tests::corner_affines_and_back_paint_survive_the_stream ... ok
+test render_bake::tests::edge_flags_and_bounds ... ok
+test scene_bake::tests::multiple_mesh_offsets_bounds ... ok
+test render_bake::tests::concave_face_and_hole ... ok
+test scene_bake::tests::only_soft_shared_corners_receive_fan_normals ... ok
+test facegeom::resident_tests::indexed_ears_preserve_triangle_order_with_concavity_and_holes ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

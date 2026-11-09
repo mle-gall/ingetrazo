@@ -2,6 +2,7 @@
 //! Geometry is replayed after IDs, trading GPU work for an isolated integration.
 pub struct Antialias {
     pipelines: Vec<wgpu::RenderPipeline>,
+    texture_groups: Vec<wgpu::BindGroup>,
     groups: Vec<(wgpu::BindGroup, wgpu::BindGroup)>,
     background: crate::background::Background,
     color: wgpu::Texture,
@@ -36,6 +37,7 @@ impl Antialias {
             label: Some("4x MSAA shading"),
             source: wgpu::ShaderSource::Wgsl(concat!(include_str!("shading.wgsl"), "\n", include_str!("edges.wgsl")).into()),
         });
+        let face_attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
         let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4,3=>Float32x3,4=>Float32x3];
         let pipelines = (0..4)
             .map(|k| {
@@ -48,11 +50,11 @@ impl Antialias {
                         module: &shader,
                         entry_point: Some(if edge { "edge_vs" } else { "vs" }),
                         compilation_options: Default::default(),
-                        buffers: &[wgpu::VertexBufferLayout {
+                        buffers: &{ let layouts = vec![wgpu::VertexBufferLayout {
                             array_stride: 52,
                             step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &attrs,
-                        }],
+                            attributes: if edge { &attrs } else { &face_attrs },
+                        }]; layouts },
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
@@ -102,12 +104,16 @@ impl Antialias {
             .collect();
         Self {
             pipelines,
+            texture_groups: Vec::new(),
             groups: Vec::new(),
             background: crate::background::Background::new(d, format, style, 4),
             color: target(d, w, h, format),
             depth: target(d, w, h, wgpu::TextureFormat::Depth32Float),
             format,
         }
+    }
+    pub fn bind_textures(&mut self, d: &wgpu::Device, textures: &crate::textures::Textures) {
+        self.texture_groups = self.pipelines[..2].iter().map(|p| textures.bind(d,p)).collect();
     }
     pub fn bind_scene(
         &mut self,
@@ -165,7 +171,7 @@ impl Antialias {
             }),
             timestamp_writes: queries.map(|q| wgpu::RenderPassTimestampWrites {
                 query_set: q,
-                beginning_of_pass_write_index: None,
+                beginning_of_pass_write_index: Some(2),
                 end_of_pass_write_index: Some(3),
             }),
             occlusion_query_set: None,
@@ -178,6 +184,7 @@ impl Antialias {
             }
             let k = usize::from(edge) * 2 + usize::from(mode == 1);
             pass.set_pipeline(&self.pipelines[k]);
+            if !edge { pass.set_bind_group(2, &self.texture_groups[k], &[]); }
             pass.set_bind_group(0, &self.groups[k].0, &[]);
             pass.set_bind_group(1, &self.groups[k].1, &[]);
             let first = if edge { scene.p } else { 0 };

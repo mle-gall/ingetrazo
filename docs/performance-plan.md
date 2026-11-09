@@ -1483,3 +1483,248 @@ ride. X-ray/back edges currently use single-sample rendering; authored hidden-ed
 metadata is absent from the existing upload. Complete GL parity is not claimed.
 
 [Comparison images, before/after cost table, commands and limitations](benchmarks/wgpu-look-2026-11-09/r-look-3c/README.md).
+
+## 2026-11-09 — R-look 3b: textures and back materials
+
+The grey pusher wheels are textured plastic, not missing named-material RGB.
+The archive contains `2038724_Plastic_02_1K_alb.png` (dark red) and
+`Metal028_4K-JPG_Color.jpg` (dark metal). The previous face pass never sampled
+these images. It also replaced all backs with the style tint and did not reverse
+front/back classification for mirrored placements as GL does.
+
+The resident bake now resolves face/container/layer paints through the GL
+`effective_attrs` rules, retaining explicit front colours and separate back
+paint. A separate 32-byte material stream carries front/back corner UVs, packed
+back colour and two texture layer IDs. The original 28-byte geometry and edge
+ABI remains unchanged. UV maps use `face_uv_axes`, including imported leaf
+`uvw` affines, before the native bake evaluates them at each triangle corner.
+Placement paint participates in prototype identity so different inherited
+texture mappings cannot share the wrong UVs.
+
+Images are uploaded once per scene as bottom-up RGBA array layers with repeat,
+linear magnification and trilinear minification. Both single-sample and MSAA
+face passes bind the same material data. Front-only paint retains the style back;
+`back=True`, separate colour backs, separate texture backs and container paint
+resolve independently. Mirrored placements reverse raster front/back classification.
+The GL renderer is unchanged.
+
+Limits: array layers share dimensions capped at 1024×1024, so higher resolution
+source images lose close-up detail. Shaded mode uses the final mip average, which
+can differ slightly from GL's 4×4 average. Translucent material opacity and GL's
+special low-coverage foliage filtering are not yet reproduced: sampled alpha
+uses a 0.5 cutout threshold. These are remaining material-parity differences.
+
+Validation commands (all paths relative to this worktree):
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_core/Cargo.toml --lib
+CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_render/Cargo.toml --lib
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest tests/test_wgpu_scene.py tests/test_wgpu_materials.py -q
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'
+```
+
+Both release builds succeeded; Rust core **6 passed**, renderer **6 passed**
+(including actual Metal pipeline validation); Python handoff **23 passed**.
+The full suite is run through a worktree-local wrapper imposing 30-minute batch
+limits and splitting any timed-out batch. Captures use `wgpu_look_compare.py`
+with a 280-second process limit and worktree-local texture extraction. A local
+copy adds `texture_memory` and `gpu_memory` to its JSON. The shared disk filled
+at the first capture attempt; only this worktree's completed debug build outputs
+were cleaned before retrying.
+
+The ride-section check additionally caught dropped nested container paint: GL's
+placement proxies carry the top-level paint owner and inherited layer. The wgpu
+handoff now uses those same proxies for paint resolution, without modifying
+source groups. A regression test checks the teal inherited colour on both sides.
+
+The full-ride GL comparison exceeded the 280-second limit (the process was
+terminated); its log also reported an NSOpenGLContext sharing warning. The
+comparison below therefore isolates the root named `Launch System | Launch_System.blend r3`.
+Full-ride timing and memory are measured separately in Metal with all original
+scene roots retained. Source documents were only read.
+
+Comparison images, GL left / Metal right:
+
+- [Pusher car](benchmarks/wgpu-look-2026-11-09/r-look-3b/pusher_car_rust-comparison.png): red wheels and dark fittings restored.
+- [Marquee](benchmarks/wgpu-look-2026-11-09/r-look-3b/marquee-comparison.png): textured masonry and mirrored gold fittings.
+- [Ride launch section](benchmarks/wgpu-look-2026-11-09/r-look-3b/space_asbuilt_ride-launch-section-comparison.png): nested container paint.
+
+Matching individual images and measurement JSON files are in the same directory.
+
+Full ride, 2000×1400 physical pixels, edges enabled: **27.56 ms GPU** without
+MSAA and **89.53 ms GPU** with 4× MSAA. CPU submission medians were 4.15 ms and
+7.70 ms respectively. Measurements discard ten warmup frames and take the median
+of 35 frames, paced by 120 ms so asynchronous GPU queries have completed; this
+pacing is not included in the reported submission time. Total resident GPU memory
+is **3,228,224,520 bytes**, including the separate material stream. The ride has
+no resolved image materials, so its array is only the **4-byte white fallback**.
+For textured documents the array uses **72,701,252 bytes** on pusher and
+**16,777,212 bytes** on marquee (including all mips and the fallback layer).
+
+[Full ride Metal frame and measurements](benchmarks/wgpu-look-2026-11-09/r-look-3b/space_asbuilt_ride-metal-only.json)
+are recorded separately from the launch-section comparison. Lighting/edge and
+background differences remain outside this material change; GL's reference also
+shows its axis overlay. No claim of pixel-identical final frames is made.
+
+Full offscreen suite completed in **2051 seconds**, all six batches:
+**7,150 passed, 18 failed, 142 skipped, 2 xfailed, 805 deselected**.
+All 18 failures match the supplied 19-failure baseline: 14 translation cases
+(including `[ar]`), cached cursor pick, extension-preview wrapping, hidden-panel
+retention and extension-toolbar bold text. The baseline swatch-tooltip failure
+did not reproduce. No new failures were observed. The longest batch was 534.51
+seconds; no batch reached 30 minutes and no split was needed.
+The final focused material/handoff run passed **23 tests** after the nested
+container-paint correction. The complete local suite log is
+`.look-tmp/full-suite.log` (not committed).
+
+
+## R-look 3b-fix — 2026-11-09
+
+Integrated `renderer/look-textures` at `1138e447` into `94814b50` on
+`renderer/look-textures-2`. All four merge conflicts are resolved. The 52-byte
+3c resident edge/face layout, profiles, hidden-edge dash interpolation and
+weighted-blended X-ray remain in use. X-ray accumulation now binds the same
+material textures as opaque and MSAA faces. Mirrored facing, corner UVs,
+separate backs and nested container paint remain supported. The GL viewport
+implementation was not changed.
+
+Plain placement colors no longer participate in prototype identity. They use
+the existing packed instance RGBA word; its alpha distinguishes painted from
+unpainted containers. Explicit face paint wins. Unpainted backs inherit the
+same container color. Inherited texture mappings still participate in the key;
+by-layer mappings remain document-level bake inputs, with per-placement fallback
+color removed from that key.
+
+Material storage is sparse: a 16-byte header per prototype points to 32-byte
+corner records only for prototypes with textures or differing back materials.
+A matching front/back color uses alpha 254 in the existing vertex color word;
+255 means explicit front-only paint, and zero means unpainted. The ride allocates
+**zero per-vertex material records**: only 254,496 header bytes. This equivalent
+scheme retains float32 UV precision instead of introducing f16 rounding and
+avoids a material vertex stream for expanded edge vertices. Untextured fragments
+also skip sampling the fallback image. Geometry's public input ABI stays 28 bytes;
+the existing 3c resident expansion stays 52 bytes.
+
+MSAA does not replay geometry into the single-sample ID target on every frame.
+An explicit point/rectangle pick requests fresh IDs if dirty; otherwise one
+refresh occurs after two frames with an unchanged camera. Subsequent settled
+frames reuse the target. Scene, camera, resize, material, style and override
+changes invalidate it. Single-sample color still produces IDs in its normal pass.
+Cached picking is fast, but a pick immediately after camera movement may still
+wait for a full scene draw: the strict sub-5-ms cold-pick requirement is **not
+claimed as met**. The final ride run measured cached picks at 1.17–3.14 ms
+and a fresh pick after camera movement at **105.72 ms**. R2b must invalidate
+`ids_dirty` from its forthcoming transform/visibility instance-update API.
+
+### Measurements and baseline discrepancy
+
+All rows below were rerun with isolated native builds from the stated commits,
+using the same read-only documents, 2000×1400 physical pixels, edges enabled,
+ten warmup frames and 35 measured frames paced by 120 ms. CPU is the renderer
+call; head/after use offscreen submission, while old 3b has only the presenting
+API. Other work on the shared machine was not stopped. GPU timings therefore
+must not be compared as controlled machine-isolated results to earlier sessions.
+JSON includes cached and cold pick samples. The first after-run is retained in
+`after-first-run/`: ride GPU 45.04/53.21 ms (off/4×), versus 58.17/59.61 ms in
+the final run. Both observed MSAA ratios are within 25% (18.1% and 2.5%).
+Timing variability on this shared machine precludes claiming the earlier 12 ms
+absolute frame floor was recovered. Counts refer to source geometry before
+3c's edge expansion. Memory is renderer-accounted owned buffers/image textures,
+not a driver residency measurement; depth/ID/color/MSAA/OIT targets are additional.
+
+| Model | Revision | GPU ms, off / 4× | CPU ms, off / 4× | Owned bytes | Prototypes | Vertices | Material bytes |
+|---|---|---:|---:|---:|---:|---:|---:|
+| space_asbuilt_ride | head-rerun | 39.91 / 98.48 | 2.06 / 3.93 | 4,158,922,452 | 15,906 | 31,658,602 | 0 |
+| space_asbuilt_ride | 3b-rerun | 29.64 / 47.68 | 2.19 / 4.01 | 3,228,224,520 | 15,959 | 31,680,542 | 1,013,777,344 |
+| space_asbuilt_ride | after | 58.17 / 59.61 | 2.42 / 2.04 | 4,159,176,952 | 15,906 | 31,658,602 | 254,496 |
+| marquee | head-rerun | 0.71 / 1.62 | 0.31 / 0.36 | 24,816,588 | 30 | 183,559 | 0 |
+| marquee | 3b-rerun | 0.97 / 1.27 | 0.36 / 0.44 | 36,640,016 | 30 | 183,559 | 5,873,888 |
+| marquee | after | 1.28 / 1.18 | 0.24 / 0.28 | 43,334,088 | 30 | 183,559 | 1,740,288 |
+| pusher_car_rust | head-rerun | 3.46 / 7.06 | 0.28 / 0.34 | 96,843,004 | 70 | 665,059 | 0 |
+| pusher_car_rust | 3b-rerun | 2.92 / 5.33 | 0.36 / 0.47 | 134,065,976 | 70 | 665,059 | 21,281,888 |
+| pusher_car_rust | after | 5.42 / 5.47 | 0.28 / 0.30 | 180,588,064 | 70 | 665,059 | 11,043,808 |
+
+**The supplied absolute memory baseline is not the supplied head.** An isolated
+build of `94814b50` owns 4,158,922,452 bytes for this ride, before texture support.
+The 783.97 MiB figure earlier in this plan belongs to R1, before 3c's 52-byte
+resident layout and six-vertex edge/profile expansion. After this fix the ride
+owns 4,159,176,952 bytes, only 254,500 bytes (0.0061%) above the rerun head. The
+15,906 prototype gate and the relative-to-current-head memory gate pass. The
+literal 0.8 GB absolute gate does **not** pass; attaining it also requires
+redesigning the inherited 3c geometry representation outside this material fix.
+Old 3b lacks that 3c expansion, so its total memory can be below the integrated
+result despite its wasteful material stream.
+
+The supplied historical ride timings were approximately 12/19 ms for head and
+27.56/89.53 ms for 3b. These are retained as historical evidence, not substituted
+for the new measurements. Raw reruns live in `head-rerun/`, `3b-rerun/`, and
+`after/` beneath the capture directory.
+
+### Visual checks
+
+GL is on the left, Metal on the right:
+
+- [Marquee, textures and profiles](benchmarks/wgpu-look-2026-11-09/r-look-3b-fix/marquee-comparison.png).
+- [Marquee, dashed back edges](benchmarks/wgpu-look-2026-11-09/r-look-3b-fix/marquee-back-edges-comparison.png).
+- [Pusher, red wheels](benchmarks/wgpu-look-2026-11-09/r-look-3b-fix/pusher_car_rust-comparison.png).
+- [Pusher, weighted X-ray](benchmarks/wgpu-look-2026-11-09/r-look-3b-fix/pusher_car_rust-xray-comparison.png).
+- [Ride launch, inherited teal supports](benchmarks/wgpu-look-2026-11-09/r-look-3b-fix/space_asbuilt_ride-launch-section-comparison.png).
+
+Images preserve the known 3c contour/depth differences on pusher and the GL
+axis overlay; they are not pixel-identical parity claims. Existing 3b limits
+remain: capped texture-array resolution, average-mip shaded texture colors,
+cutout alpha rather than general material opacity, and foliage filtering.
+
+### Validation and reproduction
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work cargo test --release --manifest-path rust/ingetrazo_core/Cargo.toml --lib
+CARGO_HOME=$PWD/.cargo-work cargo test --release --manifest-path rust/ingetrazo_render/Cargo.toml --lib
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_scene.py tests/test_wgpu_materials.py tests/test_wgpu_style.py tests/test_wgpu_interaction.py
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'
+```
+
+Both release builds succeeded. Core Rust: **6 passed**; renderer Rust: **10
+passed**, including actual Metal pipeline validation and ID scheduling. Focused
+Python: **48 passed**, including paint-independent geometry, sparse allocation,
+matching and distinct backs, nested paint, and existing 3b/3c tests. GUI
+subprocesses were bounded to 290 seconds. No debug builds were created; only
+release targets were used. All extracted documents and baseline builds remain
+inside this worktree's ignored `.look-tmp` directory. No push or PR was made.
+
+Full offscreen suite, run once in six bounded batches: **7,164 passed, 18
+failed, 142 skipped, 2 xfailed, 805 deselected**, in **1,577 seconds**. All 18
+failures match the supplied 19-failure baseline: 14 translation cases (including
+`[ar]`), cached cursor pick, extension-preview wrapping, hidden-panel retention,
+and toolbar bold text. The swatch-tooltip failure did not reproduce. No new
+failures, crashes, or timeouts occurred. Longest batch: 340.24 seconds; no
+30-minute split was needed. [Full suite log](benchmarks/wgpu-look-2026-11-09/r-look-3b-fix/validation-full-suite.log).
+Marquee and pusher additionally verified that re-uploading an unchanged scene
+leaves owned-memory accounting unchanged.
+
+Outstanding gates: the literal **0.8 GB memory target** and **sub-5-ms fresh
+picks after camera movement** are not met. The former requires changes to the
+inherited 3c geometry representation, beyond material/ID wiring; the latter
+requires an asynchronous picking path or spatially restricted pick rendering.
+These are explicit handover limitations, not completed acceptance criteria.
+
+
+Implementation commits (chronological; the handover head also commits this report):
+
+- `5f255f6a`: merge textures with profiles and weighted X-ray.
+- `756ec8cd`: shared paint-independent meshes, sparse materials, on-demand IDs.
+- `f4fa263a`: settled-camera ID refresh and color-free UV keys.
+- `4382235a`: matching backs in the existing color word.
+- `ced61b78`: skip fallback sampling and add reproducible measurements.
+- `353b779f`: invalidate IDs after material/style changes.
+- `8fc79036`: distinguish cold from cached pick measurements.
+- `e9ddef26`: correct replacement-scene memory accounting.
+- `0630a0ce`: verify stable memory after re-upload.

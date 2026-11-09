@@ -115,6 +115,12 @@ def test_upload_borrows_contiguous_arrays():
             assert np.shares_memory(arrays[0], packed.vertices)
             assert np.shares_memory(instances, packed.instances)
             assert len(arrays[3]) == 40
+        def set_materials(self, materials):
+            assert materials.dtype == np.uint8 and materials.flags.c_contiguous
+            assert len(materials) == len(packed.bounds)*16
+        def set_textures(self, width, height, layers, levels):
+            assert (width, height, layers) == (1,1,1)
+            assert levels == [bytes([255])*4]
     packed.upload(Receiver())
 
 
@@ -261,3 +267,45 @@ def test_front_tint_remains_style_not_material():
     scene.groups[0].mesh.faces[0].attrs['color'] = (0.3, 0.7, 0.9)
     painted = pack_scene(scene)
     assert np.all(painted.vertices['color'][:3, 3] == 255)
+
+
+def test_nested_default_faces_inherit_gl_proxy_owner_paint():
+    child = Group(triangle())
+    root = Group(Mesh())
+    root.material = {'color': (0.0, 0.6, 0.5)}
+    root.children = [child]
+    packed = pack_scene(Scene(groups=[root]))
+    assert np.all(packed.vertices['color'][:3, 3] == 0)
+    assert int(packed.instances['info'][0, 1]) == 0xff7f9900
+    assert len(packed.materials) == 16
+    assert getattr(child, 'owner', None) is None
+
+
+def test_container_colors_share_geometry_without_material_vertices():
+    mesh = triangle()
+    a, b = Group(mesh), Group(mesh)
+    a.material = {'color': (1, 0, 0)}
+    b.material = {'color': (0, 1, 0)}
+    packed = pack_scene(Scene(groups=[a, b]))
+    assert len(packed.bounds) == 1
+    assert len(packed.vertices) == 9
+    assert packed.instances['info'][:, 1].tolist() == [0xff0000ff, 0xff00ff00]
+    assert len(packed.materials) == 16
+    assert not packed.materials.any()
+
+
+def test_matching_back_uses_color_flag_without_material_rows():
+    mesh = triangle()
+    mesh.faces[0].attrs.update(color=(1, 0, 0), back=True)
+    packed = pack_scene(Scene(groups=[Group(mesh)]))
+    assert len(packed.materials) == 16
+    assert not packed.materials.any()
+    np.testing.assert_array_equal(packed.vertices['color'][:3], [[255, 0, 0, 254]]*3)
+
+
+def test_distinct_back_allocates_only_face_material_rows():
+    mesh = triangle()
+    mesh.faces[0].attrs.update(color=(1, 0, 0), back={'color': (0, 1, 0)})
+    packed = pack_scene(Scene(groups=[Group(mesh)]))
+    assert len(packed.materials) == 16 + 3*32
+    assert packed.materials[:16].view('<u4').tolist() == [0, 1, 3, 0]
