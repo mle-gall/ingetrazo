@@ -3632,7 +3632,8 @@ class MainWindow(QMainWindow):
         self.viewport.set_active_tool(tool)
         if key == "tape" and not metal:
             tool.start_from_hover(self.viewport)
-        if metal and key not in ("select", "orbit", "pan", "zoom", "tape", "move"):
+        from views.wgpu_tools import TOOL_DISPATCH
+        if metal and type(tool).__name__ not in TOOL_DISPATCH:
             self.statusBar().showMessage(
                 tr("{name} is not yet available on the Metal renderer.",
                    name=tr(tool.name)), 4000)
@@ -6243,10 +6244,9 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self, step)
 
     def _install_wgpu_display(self, doc):
-        """Use a document stand-in for the opt-in, display-only Metal spike.
+        """Install the native input/presentation view over shared document state.
 
-        The hidden viewport retains document state; no tool receives native
-        view input. Scene changes coalesce before rebuilding resident arrays.
+        Scene changes coalesce before updating resident arrays.
         """
         from views.wgpu_view import WgpuView
         from PySide6.QtCore import QTimer
@@ -6254,9 +6254,6 @@ class MainWindow(QMainWindow):
         display.frameReady.connect(lambda *_: self._document_first_frame(doc))
         display.source_viewport = doc.viewport
         display.camera = doc.viewport.camera
-        display.frameReady.connect(lambda cpu, gpu, wall:
-            self.statusBar().showMessage(f"wgpu CPU {cpu:.2f} ms | GPU {gpu or 0:.2f} ms")
-            if doc is self._doc else None)
         # Menu presets mutate the shared camera. A light repaint timer also
         # presents changes made by document actions while the GL view is hidden.
         repaint = QTimer(display)

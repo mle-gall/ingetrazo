@@ -21,7 +21,7 @@ class Primitive:
     fill: str | None = None
 
 
-def rasterize(primitives, width, height, scale):
+def rasterize(primitives, width, height, scale, annotations=None):
     """Return an owned image at physical resolution, drawing in logical units."""
     image = QImage(max(1, int(width * scale)), max(1, int(height * scale)),
                    QImage.Format_RGBA8888)
@@ -30,6 +30,8 @@ def rasterize(primitives, width, height, scale):
     painter = QPainter(image)
     painter.setRenderHint(QPainter.Antialiasing)
     try:
+        if annotations is not None:
+            annotations(painter)
         for primitive in primitives:
             painter.setPen(QPen(QColor(primitive.color), primitive.width))
             painter.setBrush(QColor(primitive.fill) if primitive.fill else Qt.NoBrush)

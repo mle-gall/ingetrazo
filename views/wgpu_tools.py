@@ -12,7 +12,7 @@ from tools.base import ToolContext
 from tools.tape import TapeMeasureTool
 from views.wgpu_overlay import Primitive
 
-TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh', 'EraserTool': 'mesh'}
+TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh', 'EraserTool': 'mesh', 'RotateTool': 'mesh', 'ScaleTool': 'mesh', 'OffsetTool': 'mesh', 'CircleTool': 'mesh', 'PolygonTool': 'mesh', 'ArcTool': 'mesh', 'PaintTool': 'mesh', 'DimensionTool': 'mesh', 'TextTool': 'mesh', 'FollowMeTool': 'mesh'}
 
 
 def move_command(groups, delta):
@@ -150,25 +150,14 @@ class NativeTools(MeshToolAccess):
 
     def key(self, event):
         if self.mode == 'mesh':
-            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                from views.viewport import Viewport
-                value = Viewport._parse_value_buffer(
-                    self.value_buffer, comma_lists=getattr(self.tool, "vcb_comma_lists", False))
-                if value is not None:
-                    self.tool.on_value(self, value)
-                self.value_buffer = ''
+            from views.viewport import Viewport
+            self._value_buffer = self.value_buffer
+            if Viewport._handle_value_key(self, event):
+                self.value_buffer = self._value_buffer
                 self.start_point = getattr(self.tool, 'start_point', None)
                 self.view.overlay_primitives = []
                 self.update()
-                return True
-            text = event.text()
-            if text and not (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)) and (text[0].isdigit() or text in '.-+,; /\"\'' or
-                    (self.value_buffer and text.lower() in ('m', 'c', 'f', 't', 'i', 'n'))):
-                self.value_buffer += text
-                self.measurementChanged.emit(self.value_buffer)
-                return True
-            if event.key() == Qt.Key_Backspace and self.value_buffer:
-                self.value_buffer = self.value_buffer[:-1]
+                self.mesh_feedback()
                 return True
             return self.tool.on_key(self, event.key(), event.modifiers())
         if self.mode != 'move' or self.start_point is None:
@@ -198,6 +187,26 @@ class NativeTools(MeshToolAccess):
             return True
         return False
 
+    def _current_token_tail(self):
+        from views.viewport import Viewport
+        return Viewport._current_token_tail(self)
+
+    def _array_pending(self):
+        return getattr(self.tool, 'array_pending', lambda vp: False)(self)
+
+    def _release_axis_lock_after_operation(self, committed=False):
+        release = getattr(self.view.source_viewport, '_release_axis_lock_after_operation', None)
+        if release is not None:
+            release(committed=committed)
+
+    def _set_value_buffer(self, value):
+        self._value_buffer = self.value_buffer = value
+        self.measurementChanged.emit(value)
+
+    def _parse_value_buffer(self, *args, **kwargs):
+        from views.viewport import Viewport
+        return Viewport._parse_value_buffer(*args, **kwargs)
+
     def write_rows(self, rows):
         if self.view.renderer is not None:
             self.view.renderer.update_instances(self.ids.tolist(), rows.view(np.uint8).reshape(-1))
@@ -212,6 +221,7 @@ class NativeTools(MeshToolAccess):
         if self.mode == 'mesh' and self.tool is not None:
             self.tool.on_cancel(self)
             self._mesh_hover = None
+            self.update()
         if isinstance(self.tool, TapeMeasureTool):
             self.tool.on_cancel(self)
         self.original = None

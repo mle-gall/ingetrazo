@@ -133,8 +133,8 @@ def test_new_prototype_preserves_resident_ids():
 
 
 def test_dispatch_is_explicit():
-    assert TOOL_DISPATCH == {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh', 'EraserTool': 'mesh'}
-    assert TOOL_DISPATCH.get('RotateTool', 'inert') == 'inert'
+    assert {k: TOOL_DISPATCH[k] for k in ('SelectTool', 'TapeMeasureTool', 'MoveTool', 'LineTool', 'RectangleTool', 'PushPullTool', 'EraserTool')} == {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh', 'EraserTool': 'mesh'}
+    assert TOOL_DISPATCH.get('TexturePositionTool', 'inert') == 'inert'
 
 
 def test_history_journal_limits_move_discovery(monkeypatch):

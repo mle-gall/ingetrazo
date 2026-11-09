@@ -1,12 +1,27 @@
 """Document-tool facade for native mesh editing; no GL picking or drawing."""
 import numpy as np
-from PySide6.QtGui import QVector3D, QMatrix4x4
+from PySide6.QtGui import QColor, QVector3D, QMatrix4x4
 from views.wgpu_overlay import Primitive
 from core.group import iter_placements
 
 
 class MeshToolAccess:
     mesh_outline_preview = True
+    _OCCLUSION_STEP_PX = 12.
+    _OCCLUSION_MAX_SAMPLES = 128
+    _OCCLUSION_SPLIT = 8
+    _OCCLUSION_ROUNDS = 2
+
+    @staticmethod
+    def _text_block_x(*args):
+        from views.viewport import Viewport
+        return Viewport._text_block_x(*args)
+
+    @staticmethod
+    def _format_dim_value(*args):
+        from views.viewport import Viewport
+        return Viewport._format_dim_value(*args)
+
 
     def inference_meshes(self, x, y):
         picked = self._picked_mesh(x, y)
@@ -36,10 +51,14 @@ class MeshToolAccess:
         self._last_work_plane = plane
         return self._ray_hit_plane((x, y), plane)
 
+    def _segment_to_pixels(self, a, b):
+        pa, pb = self._world_to_pixel(a), self._world_to_pixel(b)
+        return (pa, pb) if pa is not None and pb is not None else None
+
     def _pixel_to_ray(self, x, y):
         return self.view._pixel_to_ray(x, y)
 
-    def _world_to_pixel(self, point):
+    def _world_to_pixel(self, point, mvp=None):
         return self.view._world_to_pixel(point)
 
     def _project_to_lock_line(self, *args):
@@ -152,7 +171,7 @@ class MeshToolAccess:
         hit = surface(self.view.inference_index, row, origin, direction)
         return hit is not None and (hit-origin).length() + 1e-4 < (point-origin).length()
 
-    def set_hover(self, entity):
+    def set_hover(self, entity, placement=None):
         self._mesh_hover = entity
 
     def set_suppressed_faces(self, faces):
@@ -161,6 +180,22 @@ class MeshToolAccess:
 
     def mesh_feedback(self):
         lines = list(self.tool.rubber_band_lines())
+        # Sweep faces also need a visible envelope, beyond the path itself.
+        for face in getattr(self.tool, 'preview_faces', lambda: [])():
+            points = list(getattr(face, 'vertices', face))
+            lines.extend(zip(points, points[1:] + points[:1]))
+
+        state = getattr(self.tool, 'scale_box_state', lambda: None)()
+        if state:
+            lines.extend(state['segments'])
+            for point, role in state['grips']:
+                pixel = self._world_to_pixel(point)
+                if pixel is not None:
+                    x, y = pixel
+                    color = '#55dd55' if role == 'idle' else '#ff5555'
+                    self.view.overlay_primitives.append(Primitive(
+                        'rectangle', ((x-4, y-4), (x+4, y+4)), color, fill=color))
+
         entity = getattr(self, '_mesh_hover', None)
         if entity is not None:
             if hasattr(entity, 'vertices'):
@@ -168,11 +203,15 @@ class MeshToolAccess:
                 lines.extend(zip(points, points[1:] + points[:1]))
             elif hasattr(entity, 'a'):
                 lines.append((entity.a, entity.b))
+        rgba = getattr(self.tool, 'wireframe_color', None)
+        color = QColor.fromRgbF(*rgba).name() if rgba else '#00dfff'
+        if type(self.tool).__name__ == 'EraserTool':
+            color = '#ff5555'
         for a, b in lines:
             pa, pb = self._world_to_pixel(a), self._world_to_pixel(b)
             if pa is not None and pb is not None:
                 self.view.overlay_primitives.append(Primitive(
-                    'polyline', (pa, pb), '#ff5555' if type(self.tool).__name__ == 'EraserTool' else '#00dfff'))
+                    'polyline', (pa, pb), color))
         label = self.tool.value_label() if hasattr(self.tool, 'value_label') else None
         if label is not None:
             text, point = label
@@ -181,18 +220,57 @@ class MeshToolAccess:
                 self.view.overlay_primitives.append(Primitive('text', (pixel,), text=text))
             self.measurementChanged.emit(text)
 
-    # These annotations are outside R3a. Never fall through to the GL index.
+    def draw_annotations(self, painter):
+        from views.viewport import Viewport
+        self._hover_entity = getattr(self, '_mesh_hover', None)
+        Viewport._draw_dimensions(self, painter)
+        Viewport._draw_text_labels(self, painter)
+
+    def _draw_occluded_segment(self, painter, a, b):
+        from views.viewport import Viewport
+        Viewport._draw_occluded_segment(self, painter, a, b)
+
+    def _project_samples(self, points):
+        return [(self._world_to_pixel(p), not self._is_occluded(p)) for p in points]
+
+    def _occluded_on_screen(self, point):
+        return self._is_occluded(point)
+
     def pick_dimension(self, *args, **kwargs):
+        from views.viewport import Viewport
+        return Viewport.pick_dimension(self, *args, **kwargs)
+
+    def pick_text_label(self, *args, **kwargs):
+        from views.viewport import Viewport
+        return Viewport.pick_text_label(self, *args, **kwargs)
+
+    def _unsupported_pick(self, *args, **kwargs):
         return None
 
-    pick_geopath = pick_dimension
-    pick_text_label = pick_dimension
-    pick_section_plane = pick_dimension
-    pick_image = pick_dimension
-    pick_image_plane = pick_dimension
-    _group_obb = pick_dimension
-    end_groups_preview = pick_dimension
-    image_plane_at = pick_dimension
+    pick_geopath = _unsupported_pick
+    pick_section_plane = _unsupported_pick
+    pick_image = _unsupported_pick
+    pick_image_plane = _unsupported_pick
+    _group_obb = _unsupported_pick
+    def begin_groups_preview(self, groups):
+        selected = {g.uid for root in groups for g, _ in iter_placements(root)}
+        self.ids = np.asarray([row for uid in selected
+                               for row in self.view.uid_rows.get(uid, ())], np.int64)
+        self.original = self.view.packed.instances[self.ids].copy()
+
+    def set_groups_preview_matrix(self, matrix):
+        if self.original is None:
+            return
+        transform = np.asarray(matrix.data(), np.float32).reshape(4, 4).T
+        rows = self.original.copy()
+        rows['world'] = (transform @ rows['world'].transpose(0, 2, 1)).transpose(0, 2, 1)
+        self.write_rows(rows)
+
+    def end_groups_preview(self):
+        self.restore()
+        self.original = None
+
+    image_plane_at = _unsupported_pick
 
     def _nearby_loose_edges(self, *args, **kwargs):
         return []
