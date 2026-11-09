@@ -211,7 +211,10 @@ class StructureDock(QDockWidget):
             if key in nodes:
                 direct[key].append(g)
                 counts[key] += 1
-                problems[key] += int(not structure._has_status(g.ifc or {})) + int(review)
+                # A class-less node (fasteners, reference) expects no record:
+                # only nodes that promise a class count a missing Status.
+                expects_record = recipes[key].get('class') is not None
+                problems[key] += int(expects_record and not structure._has_status(g.ifc or {})) + int(review)
             if i % 128 == 127:
                 yield
         order, stack = [], list(reversed(children[None]))
