@@ -35,6 +35,7 @@ TOOL_DISPATCH['UnionTool'] = 'mesh'
 TOOL_DISPATCH['SubtractTool'] = 'mesh'
 TOOL_DISPATCH['TrimTool'] = 'mesh'
 TOOL_DISPATCH['IntersectTool'] = 'mesh'
+TOOL_DISPATCH['SplitTool'] = 'mesh'
 
 def move_command(groups, delta):
     commands = [MoveGroupCommand(group, delta) for group in groups]
