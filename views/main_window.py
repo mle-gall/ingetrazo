@@ -842,8 +842,8 @@ class MainWindow(WorksessionMixin, QMainWindow):
         self.tray = Tray(self)
         self.bim_tray = BimTray(self)
         self.georef_tray = GeorefTray(self)
-        from views.navigator import NavigatorDock
-        self.navigator_dock = NavigatorDock(self)
+        from views.structure_panel import StructureDock
+        self.structure_dock = StructureDock(self)
         from views.outliner import ProjectBrowser
         self.project_browser = ProjectBrowser(self)
         from views.layers_panel import LayersDock
@@ -857,7 +857,7 @@ class MainWindow(WorksessionMixin, QMainWindow):
         # it. An empty title-bar widget removes the duplicate (a clean tray
         # look); panels are toggled from the View menu, not dragged around.
         for dock in (self.tray, self.bim_tray, self.georef_tray,
-                     self.project_browser, self.layers_dock, self.navigator_dock):
+                     self.project_browser, self.layers_dock, self.structure_dock):
             dock.setTitleBarWidget(QWidget(dock))
         self.tray.raise_()
         self._build_sidebar_handle()
@@ -1936,7 +1936,7 @@ class MainWindow(WorksessionMixin, QMainWindow):
     #: Panels): the specialised workspaces. Properties, the Browser and
     #: the bundled AI and Render tabs open. An extension may
     #: ask the same for a panel of its own (``add_panel(start_hidden=True)``).
-    DEFAULT_HIDDEN_TRAYS = frozenset({"tray_bim", "tray_georef", "NavigatorDock"})
+    DEFAULT_HIDDEN_TRAYS = frozenset({"tray_bim", "tray_georef"})
 
     def _show_default_trays(self, st) -> None:
         """The trays open at start-up as the user left them in Window ▸
@@ -1948,6 +1948,11 @@ class MainWindow(WorksessionMixin, QMainWindow):
         (``DEFAULT_HIDDEN_TRAYS``)."""
         hidden = self._hidden_tray_names(st)
         self._seat_new_trays()
+        known = st.value("ui/known_trays", []) or []
+        if self.structure_dock.objectName() not in known:
+            self.removeDockWidget(self.structure_dock)
+            self.addDockWidget(Qt.RightDockWidgetArea, self.structure_dock)
+            self.tabifyDockWidget(self.tray, self.structure_dock)
         docks = self._sidebar_docks()
         for d in docks:
             self._keep_docked(d)
@@ -2050,7 +2055,7 @@ class MainWindow(WorksessionMixin, QMainWindow):
     #: Properties first, the model's tree next, then the workspaces.
     def _default_tray_order(self) -> list:
         return [self.tray, self.project_browser, self.layers_dock,
-                self.bim_tray, self.georef_tray, self.navigator_dock]
+                self.bim_tray, self.georef_tray, self.structure_dock]
 
     def _lay_out_trays(self) -> None:
         """The trays in their factory place: every one on the right, tabbed
@@ -2184,7 +2189,7 @@ class MainWindow(WorksessionMixin, QMainWindow):
                             getattr(self, "georef_tray", None),
                             getattr(self, "project_browser", None),
                             getattr(self, "layers_dock", None),
-                            getattr(self, "navigator_dock", None),
+                            getattr(self, "structure_dock", None),
                             *getattr(self, "_extension_docks", ()))
                 if d is not None]
 
@@ -2484,6 +2489,7 @@ class MainWindow(WorksessionMixin, QMainWindow):
             tb.setUsesScrollButtons(True)
             if not tb.property("ingetrazo_watched"):
                 tb.setProperty("ingetrazo_watched", True)
+                tb.setChangeCurrentOnDrag(True)
                 tb.setAcceptDrops(True)
                 tb.installEventFilter(self)
             self._add_panels_button(tb)
@@ -6379,7 +6385,7 @@ class MainWindow(WorksessionMixin, QMainWindow):
         vp.projectionChanged.connect(live(self._sync_projection_buttons))
         vp.smartZoomRequested.connect(live(self._on_smart_zoom))
         for name in ("tray", "bim_tray", "georef_tray", "project_browser",
-                     "layers_dock", "layers_toolbar", "profile_dock"):
+                     "layers_dock", "layers_toolbar", "profile_dock", "structure_dock"):
             panel = getattr(self, name, None)
             if panel is not None:
                 vp.sceneVersionChanged.connect(

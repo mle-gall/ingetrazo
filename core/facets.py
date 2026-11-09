@@ -23,6 +23,14 @@ class Index(dict):
         self.lazy = set()
 
     def prepare(self, facet):
+        if facet == 'structure' and facet not in self.lazy:
+            from core import bim_registry, structure
+            registry = bim_registry.get(self.scene)
+            roots = {k: structure._lineage(registry, k)[0] for k in structure._nodes(registry)}
+            for group, _, _, key in structure._memberships(self.scene, registry):
+                if key in roots:
+                    self[group.uid][facet] = roots[key]
+            self.lazy.add(facet)
         if facet not in ('material', 'problems') or facet in self.lazy:
             return
         from core import record, bim_registry

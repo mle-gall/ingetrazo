@@ -8435,8 +8435,11 @@ class Viewport(QOpenGLWidget):
         memo = getattr(self, "_selected_placements_cache", None)
         if memo is None or memo[0] != key:
             pv = getattr(self, "_preview_groups", None) or ()
+            # Structure can select members from several containment contexts.
+            # A rendered proxy retains its placement UID across those contexts.
+            selected_uids = {g.uid for g in selected}
             groups = [g for g in self._placements()
-                      if self._owner_of(g) in selected
+                      if (self._owner_of(g) in selected or g.uid in selected_uids)
                       and self.scene.entity_visible(g)
                       and not getattr(g, "billboard", False)
                       and id(g) not in pv]

@@ -3959,6 +3959,19 @@ class EntityInfoPanel(QWidget):
         row.addWidget(self._layer_caption)
         row.addWidget(self._layer_box, 1)
         lay.addLayout(row)
+        self._structure_row = QWidget()
+        structure_layout = QHBoxLayout(self._structure_row)
+        structure_layout.setContentsMargins(0, 0, 0, 0)
+        structure_layout.addWidget(QLabel(tr("Structure")))
+        self._structure_path = QLabel()
+        self._structure_path.setTextFormat(Qt.PlainText)
+        self._structure_path.setWordWrap(True)
+        structure_layout.addWidget(self._structure_path, 1)
+        self._refile_button = QPushButton(tr("Re-file under…"))
+        self._refile_button.clicked.connect(self._refile)
+        structure_layout.addWidget(self._refile_button)
+        lay.addWidget(self._structure_row)
+        self._structure_row.hide()
         # A steady height. Selecting something used to resize this panel —
         # one line for nothing, two for an edge, four and a layer row for a
         # face — and everything below it (layers, scenes, the materials
@@ -3993,6 +4006,43 @@ class EntityInfoPanel(QWidget):
         self._first_row.setVisible(self._named is not None
                                    or self._curve is not None)
         self._refresh_layer(sel)
+        self._refresh_structure(sel)
+
+    def _refresh_structure(self, sel):
+        from core import bim_registry, links, structure
+        groups = [g for g in sel if isinstance(g, Group)]
+        self._structure_row.setVisible(bool(groups))
+        if not groups:
+            return
+        scene = self._window.viewport.scene
+        registry = bim_registry.get(scene)
+        nodes = structure._nodes(registry)
+        keys = {structure.node_of(g) for g in groups}
+        linked = any(links.linked_ancestor(g) for g in groups)
+        if linked:
+            mounts = structure._mount_index(registry)
+            keys = {structure._membership(g, (links.link_of(links.linked_ancestor(g)) or {}).get('path'), mounts)
+                    for g in groups}
+        label = tr("(several)")
+        if len(keys) == 1:
+            key, = keys
+            label = ' › '.join(structure.path(registry, key)) if key in nodes else tr("Unsorted")
+        self._structure_path.setText(label)
+        self._refile_button.setEnabled(not linked and any('source' not in n for n in nodes.values()))
+
+    def _refile(self):
+        from core import bim_registry, structure
+        from views.structure_panel import execute, pick_node
+        vp = self._window.viewport
+        uids = [g.uid for g in vp.scene.selection if isinstance(g, Group)]
+        key = pick_node(self, bim_registry.get(vp.scene))
+        if key:
+            try:
+                execute(vp, structure.file(vp.scene, uids, key))
+            except ValueError as exc:
+                QMessageBox.warning(self, tr("Structure"), str(exc))
+        self.refresh()
+
 
     # ---- Name field ---------------------------------------------------------
     def _refresh_name(self, sel: list) -> None:
@@ -4108,6 +4158,11 @@ class EntityInfoPanel(QWidget):
         targets = [e for e in taggable(scene.selection)
                    if layer_of(e) != name]
         if not targets:
+            return
+        from core import links, structure
+        if any(isinstance(g, Group) and (structure.node_of(g) or links.linked_ancestor(g))
+               for g in targets):
+            self._refile()
             return
         self._window.viewport.history.execute(AssignLayerCommand(targets, name))
         self._window.viewport.update()

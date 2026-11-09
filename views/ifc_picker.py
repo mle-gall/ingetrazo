@@ -3,6 +3,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QComboBox, QDialog, QVBoxLayout, QLineEdit, QListWidget, QListWidgetItem
 from core.bim_registry import ordered_classes
+from core.i18n import tr
 from core.ifc_tables import TABLES
 
 
@@ -24,7 +25,7 @@ class ClassPicker(QComboBox):
         self.clear()
         self.addItems(classes)
         self.insertSeparator(self.count())
-        self.addItem('All classes…')
+        self.addItem(tr("All classes…"))
         if selected in TABLES:
             self.setCurrentText(selected)
         self.blockSignals(False)
@@ -37,14 +38,14 @@ class ClassPicker(QComboBox):
         super().setCurrentText(text)
 
     def _pick(self, index):
-        if self.itemText(index) != 'All classes…':
+        if self.itemText(index) != tr("All classes…"):
             return
         self.setCurrentIndex(0)
         dialog = QDialog(self)
-        dialog.setWindowTitle('IFC classes')
+        dialog.setWindowTitle(tr("IFC classes"))
         layout = QVBoxLayout(dialog)
         search = QLineEdit()
-        search.setPlaceholderText('Filter class or domain')
+        search.setPlaceholderText(tr("Filter class or domain"))
         rows = QListWidget()
         layout.addWidget(search)
         layout.addWidget(rows)
