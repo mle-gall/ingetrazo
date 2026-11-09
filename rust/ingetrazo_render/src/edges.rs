@@ -162,6 +162,41 @@ fn silhouette(a: f32, b: f32, boundary: bool) -> bool {
 #[cfg(test)]
 mod classification_tests {
     #[test]
+    fn coplanar_triangulation_does_not_create_a_profile_diagonal() {
+        let mut vertices = Vec::new();
+        for p in [[0f32, 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]] {
+            vertices.extend_from_slice(bytemuck::cast_slice(&p));
+            vertices.extend_from_slice(&[0; 16]);
+        }
+        let indices = [0u32, 1, 2, 0, 2, 3];
+        let commands = [
+            crate::Command {
+                count: 6,
+                instances: 0,
+                first: 0,
+                base: 0,
+                start: 0,
+            },
+            crate::Command {
+                count: 0,
+                instances: 0,
+                first: 6,
+                base: 0,
+                start: 0,
+            },
+        ];
+        let (_, _, expanded) = super::expand(
+            &vertices,
+            bytemuck::cast_slice(&indices),
+            bytemuck::cast_slice(&commands),
+            1,
+        )
+        .unwrap();
+        let edge: crate::Command = bytemuck::pod_read_unaligned(&expanded[20..]);
+        assert_eq!(edge.count, 4 * 6); // Four boundaries, no interior diagonal.
+    }
+
+    #[test]
     fn boundary_and_opposed_faces_are_profiles() {
         assert!(super::silhouette(1., 1., true));
         assert!(super::silhouette(-1., 1., false));
