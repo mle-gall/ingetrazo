@@ -3,6 +3,9 @@
 The ABI is little endian: 28-byte vertices, 32-byte prototype bounds,
 80-byte instances and 20-byte indexed indirect commands. Alpha zero marks
 unpainted faces so container tint never overwrites explicit face colour.
+Alpha 254 marks a matching front/back paint; 255 marks front-only paint.
+Materials use 16-byte prototype headers followed by 32-byte corner records
+only for prototypes with textures or backs that differ from their fronts.
 """
 from dataclasses import dataclass
 from types import SimpleNamespace

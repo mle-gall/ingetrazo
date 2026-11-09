@@ -26,6 +26,7 @@ app = QApplication([])
 out = Path('docs/benchmarks/wgpu-look-2026-11-09')
 parser = argparse.ArgumentParser()
 parser.add_argument('model', type=Path)
+parser.add_argument('--launch-section', action='store_true')
 parser.add_argument('--mode', choices=('shaded', 'hidden_line', 'monochrome', 'wireframe', 'xray'))
 parser.add_argument('--pitch', type=float)
 parser.add_argument('--capture-only', action='store_true')
@@ -57,6 +58,9 @@ if args.highlight:
     label += '-' + args.highlight
 scene = Scene()
 load_into(scene, source)
+if args.launch_section:
+    scene.groups = [g for g in scene.groups if g.name == "Launch System | Launch_System.blend r3"]
+    label += "-launch-section"
 if args.mode:
     scene.display_style.face_mode = args.mode
 if args.edges_off:
@@ -85,6 +89,7 @@ failed = []
 def capture():
     try:
         metal.draw_frame()
+        metal.renderer.set_highlight([], None)
         if args.highlight:
             # Instance highlight diagnostic; GL export intentionally omits its
             # selection overlay, so this pair is not selection parity evidence.
@@ -113,7 +118,7 @@ def capture():
         pair.save(str(out / f'{label}-comparison.png'))
         a = np.frombuffer(reference.constBits(), np.uint8).reshape(h, w, 4)
         b = np.frombuffer(native.constBits(), np.uint8).reshape(h, w, 4)
-        result = {'scale': scale, 'size': [w,h], 'rgb_mae': float(np.abs(a[:,:,:3].astype(float)-b[:,:,:3]).mean()), 'frames': {}}
+        result = {'scale': scale, 'size': [w,h], 'rgb_mae': float(np.abs(a[:,:,:3].astype(float)-b[:,:,:3]).mean()), 'frames': {}, 'prototypes': len(metal.packed.bounds), 'vertices': len(metal.packed.vertices), 'material_bytes': metal.packed.materials.nbytes, 'resident_bytes': metal.renderer.gpu_memory}
         for aa in (() if args.capture_only else (False, True)):
             metal.renderer.set_antialias(aa)
             for edges in (False, True):
@@ -131,6 +136,13 @@ def capture():
                     'gpu_median_ms': float(np.median([s[1] for s in samples if s[1] is not None])),
                     'wall_median_ms': float(np.median([s[2] for s in samples]))}
         if not args.capture_only:
+            picks = []
+            for _ in range(5):
+                metal.draw_frame()
+                begin = time.perf_counter()
+                metal.renderer.pick(w//2, h//2)
+                picks.append((time.perf_counter()-begin)*1000)
+            result['pick_ms'] = picks
             offscreen = []
             for i in range(45):
                 before = time.perf_counter()

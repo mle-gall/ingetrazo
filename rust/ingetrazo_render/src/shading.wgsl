@@ -44,11 +44,12 @@ fn face_pixel(i: Out, facing: bool) -> Pixel {
  if !front && camera.size.z != 2 && (i.decorated & 8u) == 0u { c = select(style.back.rgb, i.back.rgb, i.back.a > 0.5 && camera.size.z != 3) * select(i.shade,1.,camera.size.z == 3); }
  let tex = select(i.textures.y,i.textures.x,front);
  let uv = select(i.uv.zw,i.uv.xy,front);
- var sampled = textureSample(material_images,material_sampler,uv,i32(tex));
- if camera.size.w > 0.5 {
-  sampled = textureSampleLevel(material_images,material_sampler,vec2f(0.5),i32(tex),f32(textureNumLevels(material_images)-1u));
- }
+ let uv_dx = dpdx(uv); let uv_dy = dpdy(uv);
  if tex != 0u && camera.size.z < 2 && (i.decorated & 8u) == 0u {
+  var sampled = textureSampleGrad(material_images,material_sampler,uv,i32(tex),uv_dx,uv_dy);
+  if camera.size.w > 0.5 {
+   sampled = textureSampleLevel(material_images,material_sampler,vec2f(0.5),i32(tex),f32(textureNumLevels(material_images)-1u));
+  }
   if sampled.a < 0.5 { discard; }
   c = sampled.rgb * i.shade;
  }
