@@ -84,6 +84,22 @@ struct Renderer {
     #[pyo3(get)]
     adapter: String,
 }
+fn row_runs(mut ids: Vec<usize>) -> Vec<(usize, usize)> {
+    ids.sort_unstable();
+    ids.dedup();
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for id in ids {
+        if let Some(last) = runs.last_mut() {
+            if last.1 == id {
+                last.1 += 1;
+                continue;
+            }
+        }
+        runs.push((id, id + 1));
+    }
+    runs
+}
+
 fn grown_capacity(current: usize, needed: usize) -> usize {
     current.max(needed.max(1).next_power_of_two())
 }
@@ -131,6 +147,27 @@ fn buffer(d: &wgpu::Device, bytes: &[u8], usage: wgpu::BufferUsages) -> wgpu::Bu
         usage,
     })
 }
+fn capacity_buffer(d: &wgpu::Device, bytes: &[u8], capacity: usize, usage: wgpu::BufferUsages) -> wgpu::Buffer {
+    let mut padded = vec![0; capacity];
+    padded[..bytes.len()].copy_from_slice(bytes);
+    buffer(d, &padded, usage)
+}
+
+fn bind_prototypes(d: &wgpu::Device, layout: &wgpu::BindGroupLayout,
+    buffers: &[&wgpu::Buffer], count: u32) -> wgpu::BindGroup {
+    // arrayLength(proto) defines the edge-command offset in the shader.
+    // Bind the logical range even when its allocation has spare capacity.
+    let entries: Vec<_> = buffers.iter().enumerate().map(|(i, b)| wgpu::BindGroupEntry {
+        binding: i as u32,
+        resource: if i == 2 {
+            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: b, offset: 0, size: std::num::NonZeroU64::new(count as u64 * 32),
+            })
+        } else { b.as_entire_binding() },
+    }).collect();
+    d.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout, entries: &entries })
+}
+
 fn bind(
     d: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -428,6 +465,12 @@ impl Renderer {
         }
         let n = instances.len() / 80;
         let count = p.len() / 32;
+        let capacity = grown_capacity(0, n);
+        let prototype_capacity = grown_capacity(0, count);
+        let limit = self.device.limits().max_storage_buffer_binding_size as usize;
+        if capacity * 80 > limit || prototype_capacity * 40 > limit {
+            return Err(PyValueError::new_err("scene capacity exceeds storage binding limit"));
+        }
         let mut counts = vec![0u32; count];
         for row in instances.chunks_exact(80) {
             let id = u32::from_le_bytes(row[64..68].try_into().unwrap()) as usize;
@@ -464,8 +507,7 @@ impl Renderer {
         }
         let vertex = buffer(&self.device, v, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
         let index = buffer(&self.device, ix, wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST);
-        let protos = buffer(&self.device, p, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
-        let capacity = grown_capacity(0, n);
+        let protos = capacity_buffer(&self.device, p, prototype_capacity * 32, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
         let mut padded = vec![0; capacity * 80];
         for row in padded.chunks_exact_mut(80) {
             row[72] = 1;
@@ -476,19 +518,21 @@ impl Renderer {
             &padded,
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         );
-        let commands = buffer(
+        let commands = capacity_buffer(
             &self.device,
             cmd,
+            prototype_capacity * 40,
             wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::INDIRECT
                 | wgpu::BufferUsages::COPY_DST,
         );
-        let template = buffer(&self.device, cmd, wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
+        let template = capacity_buffer(&self.device, cmd, prototype_capacity * 40, wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
         let survivors = buffer(&self.device, &vec![0; capacity * 4], wgpu::BufferUsages::STORAGE);
-        let compute = bind(
+        let compute = bind_prototypes(
             &self.device,
             &self.compute.get_bind_group_layout(0),
             &[&self.camera, &inst, &protos, &commands, &survivors],
+            count as u32,
         );
         let draw = bind(
             &self.device,
@@ -567,18 +611,31 @@ impl Renderer {
         }
         if id == s.p as usize {
             let old_p = s.p as usize;
+            let capacity = grown_capacity(s.protos.size() as usize / 32, old_p + 1);
+            if capacity * 40 > self.device.limits().max_storage_buffer_binding_size as usize {
+                return Err(PyValueError::new_err("prototype capacity exceeds storage binding limit"));
+            }
             s.p += 1;
             s.prototype_data.extend_from_slice(bounds);
-            s.protos = buffer(&self.device, &s.prototype_data, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
+            if s.prototype_data.len() as u64 > s.protos.size() {
+                s.protos = capacity_buffer(&self.device, &s.prototype_data, capacity * 32,
+                    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
+            }
             let old = std::mem::take(&mut s.template_data);
             s.template_data.extend_from_slice(&old[..old_p*20]);
             s.template_data.extend_from_slice(&[0; 20]);
             s.template_data.extend_from_slice(&old[old_p*20..]);
             s.template_data.extend_from_slice(&[0; 20]);
-            s.commands = buffer(&self.device, &s.template_data, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST);
-            s.template = buffer(&self.device, &s.template_data, wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
-            s.compute = bind(&self.device, &self.compute.get_bind_group_layout(0),
-                &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors]);
+            if s.template_data.len() as u64 > s.template.size() {
+                s.commands = capacity_buffer(&self.device, &s.template_data, capacity * 40,
+                    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST);
+                s.template = capacity_buffer(&self.device, &s.template_data, capacity * 40,
+                    wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
+            } else {
+                self.queue.write_buffer(&s.template, 0, &s.template_data);
+            }
+            s.compute = bind_prototypes(&self.device, &self.compute.get_bind_group_layout(0),
+                &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors], s.p);
         }
         s.prototype_data[id*32..(id+1)*32].copy_from_slice(bounds);
         let base = s.vertex_data.len()/28;
@@ -646,8 +703,8 @@ impl Renderer {
             padded[..s.rows.len()].copy_from_slice(&s.rows);
             s.inst = buffer(&self.device, &padded, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
             s.survivors = buffer(&self.device, &vec![0; s.capacity*4], wgpu::BufferUsages::STORAGE);
-            s.compute = bind(&self.device, &self.compute.get_bind_group_layout(0),
-                &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors]);
+            s.compute = bind_prototypes(&self.device, &self.compute.get_bind_group_layout(0),
+                &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors], s.p);
             s.draw = bind(&self.device, &self.draw.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
             s.edge_draw = bind(&self.device, &self.edge.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
             s.xray_draw = bind(&self.device, &self.xray.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
@@ -663,7 +720,9 @@ impl Renderer {
             value[72..76].copy_from_slice(&s.flags[id].to_le_bytes());
             value[76..80].copy_from_slice(&s.rows[id*80+76..id*80+80]);
             s.rows[id*80..(id+1)*80].copy_from_slice(&value);
-            self.queue.write_buffer(&s.inst, id as u64 * 80, &value);
+        }
+        for (first, end) in row_runs(ids) {
+            self.queue.write_buffer(&s.inst, first as u64 * 80, &s.rows[first*80..end*80]);
         }
         if structure {
             let mut counts = vec![0u32; s.p as usize];
@@ -731,6 +790,9 @@ impl Renderer {
                 return Err(PyValueError::new_err("one override per instance required"));
             }
             for (i, color) in colors.iter().enumerate() {
+                if s.rows[i*80+76..i*80+80] == color.to_le_bytes() {
+                    continue;
+                }
                 s.rows[i*80+76..i*80+80].copy_from_slice(&color.to_le_bytes());
                 self.queue
                     .write_buffer(&s.inst, i as u64 * 80 + 76, &color.to_le_bytes());
@@ -1384,6 +1446,13 @@ mod update_tests {
         assert_eq!(grown_capacity(16, 4), 16);
         assert_eq!(grown_capacity(8, 33), 64);
         assert_eq!(grown_capacity(0, 0), 1);
+    }
+
+    #[test]
+    fn writes_join_adjacent_rows_without_touching_gaps() {
+        assert_eq!(row_runs(vec![4, 1, 2, 2, 8]), vec![(1, 3), (4, 5), (8, 9)]);
+        assert!(row_runs(vec![]).is_empty());
+        assert_eq!(row_runs((0..1000).rev().collect()), vec![(0, 1000)]);
     }
 
     #[test]
