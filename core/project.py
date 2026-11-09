@@ -109,3 +109,35 @@ def sync_files(scene, host_path):
                           select=deepcopy(rec.get('select'))))
     value['files'], value['links'] = list(files.values()), edges
     _write(scene, path, value)
+
+
+def save_worksession(path, files, active_file):
+    """Merge session state into the latest envelope, preserving registry edits."""
+    path = Path(path).resolve()
+    value = storage.load(path)
+    def relative(p):
+        return os.path.relpath(Path(p).resolve(), path.parent)
+    value['worksession'] = {
+        'files': [dict(path=relative(entry['path']), camera=entry.get('camera'))
+                  for entry in files],
+        'active_file': relative(active_file) if active_file else None,
+    }
+    storage.save(path, value)
+    return value['worksession']
+
+
+def worksession(path):
+    """Resolve portable paths; absent state opens the project's host documents."""
+    path = Path(path).resolve()
+    value = storage.load(path)
+    state = deepcopy(value.get('worksession', {}))
+    rows = state.get('files', [dict(path=e['path']) for e in value['files']
+                               if e['role'] == 'host'])
+    roles = {str((path.parent / e['path']).resolve()): e['role'] for e in value['files']}
+    for row in rows:
+        row['path'] = str((path.parent / row['path']).resolve())
+        row['role'] = roles.get(row['path'], 'host')
+    active = state.get('active_file')
+    return dict(project=str(path), files=rows,
+                active_file=str((path.parent / active).resolve()) if active else
+                (rows[0]['path'] if rows else None))

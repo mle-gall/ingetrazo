@@ -26,6 +26,21 @@ def load(path):
             raise ValueError('links require host, source and placement_uid')
         from core.links import validate_select
         validate_select(edge.get('select'))
+    session = value.get('worksession')
+    if session is not None:
+        if not isinstance(session, dict) or not isinstance(session.get('files'), list):
+            raise ValueError('worksession requires a files array')
+        paths = []
+        for entry in session['files']:
+            if not isinstance(entry, dict) or not isinstance(entry.get('path'), str):
+                raise ValueError('worksession files require paths')
+            camera = entry.get('camera')
+            if camera is not None and not isinstance(camera, dict):
+                raise ValueError('worksession camera must be an object')
+            paths.append(entry['path'])
+        active = session.get('active_file')
+        if len(set(paths)) != len(paths) or (active is not None and active not in paths):
+            raise ValueError('worksession requires unique files and an open active file')
     from core.bim_registry import validate
     errors = validate(value['bim_registry'])
     if errors:
