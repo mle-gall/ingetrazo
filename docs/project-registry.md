@@ -32,6 +32,7 @@ objects or scene pointers are serialized. See [project-file.md](project-file.md)
 | types | Type key → name, ifc_class, predefined_type, object_type, psets, classifications, description |
 | systems | System key → name, ifc_class (IfcSystem, IfcDistributionSystem, IfcGroup or IfcZone), description |
 | project | name, description, phase, author, organization strings |
+| structure | Ordered project filing nodes and optional active node. See [Project Structure](project-structure.md). |
 | export_profiles | Profile key → schema (IFC4 or IFC4X3_ADD2), view, ids_files list of paths, description |
 
 Keys are stable strings referenced by object records; names are editable labels.
