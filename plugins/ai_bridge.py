@@ -245,6 +245,9 @@ class _Bridge(QObject, InspectionTools, RecordTools, FacetTools):
             entry = self.registry.get(tool) or self._extension_tools.get(tool)
             if entry is None:
                 raise ValueError(f"unknown tool {tool!r}")
+            if (entry['mutates'] and tool not in ('set_active_file', 'open_project')
+                    and getattr(self._viewport.scene, 'worksession_read_only', False)):
+                raise ValueError('Choose this file in Worksession before editing it')
             from core.agent_tools import json_value
             if entry["mutates"] and tool not in self.registry:
                 from core.ai import run_callable_transactional

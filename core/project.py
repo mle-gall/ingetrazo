@@ -99,7 +99,7 @@ def sync_files(scene, host_path):
         return os.path.relpath(Path(p).resolve(), path.parent)
     host = relative(host_path)
     files = {entry['path']: entry for entry in value['files']}
-    files[host] = dict(path=host, role='host')
+    files.setdefault(host, dict(path=host, role='host'))
     edges = [edge for edge in value['links'] if edge['host'] != host]
     for group in linked_groups(scene):
         rec = link_of(group)

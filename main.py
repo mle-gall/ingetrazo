@@ -194,6 +194,9 @@ def _open_document_in(window, doc: "Path") -> None:
     if hasattr(window, "load_extensions"):
         window.load_extensions()
     ext = doc.suffix.lower()
+    if ext == ".igzproj":
+        window.open_path(doc)
+        return
     if hasattr(window, "documents") and (
             ext in (".igz", ".skp", ".dae", ".dxf", ".dwg")
             or ext in getattr(window, "file_openers", {})):
@@ -696,7 +699,8 @@ def main() -> int:
         # it: the load lets events through to move its bar, the question
         # came up in the middle of it, and the document stayed frozen at
         # 5 % behind it, the view blank, until it was answered.
-        QTimer.singleShot(0, window.offer_units_at_start)
+        if not arg and window._current_path is None:
+            QTimer.singleShot(0, window.show_home)
 
     QTimer.singleShot(0, _after_first_frame)
     _offer_appimage_integration(window)
