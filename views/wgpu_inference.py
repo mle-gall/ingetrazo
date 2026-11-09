@@ -372,6 +372,28 @@ def _screen_rows(index, packed, mvp, width, height, x, y, radius, rows):
     return rows[np.einsum('ij,ij->i', gap, gap) < radius*radius]
 
 
+def context_hit(view, context, x, y):
+    from views.viewport import _moller_trumbore
+    index = view.inference_index
+    rows = np.asarray(view._rows_for_group(context), np.int64)
+    flags = view.packed.instances['info'][rows, 2]
+    rows = rows[(flags & 129) == 0]
+    camera = view.camera
+    mvp = camera.projection_matrix() * camera.view_matrix()
+    radius = getattr(view.tools, "pick_threshold_px", 8.)
+    rows = _screen_rows(index, view.packed, mvp, view.width(), view.height(), x, y, radius, rows)
+    origin, direction = view._pixel_to_ray(x, y)
+    placements, _, v0, e1, e2 = index.ray_cands(
+        rows, origin.toTuple(), direction.toTuple(), float('inf'))
+    if len(v0):
+        t, hit = _moller_trumbore(np.array(origin.toTuple()), np.array(direction.toTuple()), v0, e1, e2)
+        if np.any(hit):
+            return int(placements[np.argmin(np.where(hit, t, np.inf))])
+    placements, *_ = index.edges_near(rows, mvp.data(), float(view.width()),
+        float(view.height()), float(x), float(y), float(radius), 1)
+    return int(placements[0]) if len(placements) else None
+
+
 def nearby_edges(index, packed, camera, width, height, x, y, *,
                  radius_px=48., cap=48, rows=None, edit_group=None):
     """World-space pseudo edges, nearest first; row/edge_id identify source."""

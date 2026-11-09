@@ -792,3 +792,29 @@ def test_a_file_without_components_changes_nothing(tmp_path):
         assert not win.viewport.history.undo_stack
     finally:
         _close(win)
+
+
+def test_clipped_component_list_does_not_build_thumbnails(monkeypatch):
+    from PySide6.QtGui import QRegion
+    from views.main_window import MainWindow
+    from views import component_thumbs
+    win = MainWindow()
+    try:
+        _, _, chairs, _, _, _ = _model()
+        win.viewport.scene.groups.extend(chairs)
+        panel = win.tray.components
+        panel.refresh_in_model()
+        vp = panel._in_model.viewport()
+        calls = []
+        real = component_thumbs.thumbnail
+        monkeypatch.setattr(component_thumbs, 'thumbnail',
+                            lambda g: (calls.append(g), real(g))[1])
+        monkeypatch.setattr(vp, 'visibleRegion', QRegion)
+        panel._draw_visible_thumbs()
+        assert not calls
+        monkeypatch.setattr(vp, 'visibleRegion', lambda: QRegion(vp.rect()))
+        panel._draw_visible_thumbs()
+        assert calls
+    finally:
+        win._saved_version = win.viewport.scene.version
+        win.close()

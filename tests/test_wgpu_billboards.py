@@ -156,6 +156,11 @@ def test_shared_billboard_prototype_edit_rebuilds_without_affecting_ordinary():
     scene = Scene(groups=[sprite, Group(sprite.mesh)])
     packed = pack_scene(scene, texture_images=False)
     updates = InstanceUpdates(scene, packed)
+    sprite.xform = QMatrix4x4()
+    sprite.xform.translate(1, 0, 0)
+    updates.apply(*updates.diff(scene))
+    np.testing.assert_array_equal(packed.instances, pack_scene(scene, texture_images=False).instances)
+    sprite.mesh.move_vertex(sprite.mesh.vertices[0], QVector3D(0, 0, 1))
     assert updates.diff(scene) is None
 
 

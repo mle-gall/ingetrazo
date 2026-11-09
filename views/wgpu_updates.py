@@ -6,8 +6,8 @@ of mutated prototypes uses one R1b bake; transform previews only write rows.
 import numpy as np
 from core.group import Group, iter_placements
 from core.scene import Scene
-from views.wgpu_scene import (_placement_state, _baked_paint, pack_scene, INSTANCE, COMMAND,
-                              OBJECT_HIDDEN, VISIBILITY_FILTERED)
+from views.wgpu_scene import (COMMAND, INSTANCE, _baked_paint, _placement_records,
+                              _placement_state, pack_scene)
 
 
 class InstanceUpdates:
@@ -25,12 +25,8 @@ class InstanceUpdates:
         # the renderer supports replacing all four ranges together.
         self.hidden_streams = bool(np.any(packed.hidden_commands['count'])
                                    or np.any(packed.hidden_edge_commands['count']))
-        from types import SimpleNamespace
-        from views.viewport import _paint_of
-        vp = SimpleNamespace(scene=scene)
-        self.parity_repack = any(_baked_paint(_paint_of(vp, g)) is not None
-                                  or bool(getattr(g, 'children', None))
-                                  for g in [None, *scene.groups])
+        self.parity_repack = (any(key[1] != repr(None) for key in packed.prototype_lookup)
+                              or any(g.children for g in scene.groups))
         for row, group in enumerate(packed.groups):
             mesh = group.mesh if group is not None else scene.loose_mesh
             mode = getattr(group, 'billboard', False)
@@ -44,6 +40,7 @@ class InstanceUpdates:
         all_meshes.extend(g.mesh for root in scene.groups for g, _ in iter_placements(root))
         for mesh in all_meshes:
             self.meshes.setdefault(id(mesh), (mesh, mesh._mut_serial, -1))
+        self.mesh_revisions = {key: mesh.revision for key, (mesh, _, _) in self.meshes.items()}
         self.rows = {uid: i for i, uid in enumerate(packed.uids)}
         self.active = set(self.rows)
         self.changed = []
@@ -87,10 +84,12 @@ class InstanceUpdates:
             from core.history import (MoveGroupCommand, CompoundCommand, SetRecordCommand,
                                       SetRegistryCommand, InsertGroupCommand, DeleteGroupCommand,
                                       SnapshotMutation, MoveVerticesCommand, AddEdgeCommand,
-                                      AddFaceCommand, EraseSelectionCommand)
+                                      AddFaceCommand, EraseSelectionCommand, HideCommand, AssignLayerCommand)
             def visit(command):
-                from core.history import SetFaceTextureCommand, SetFaceBackCommand
-                if isinstance(command, (SetFaceTextureCommand, SetFaceBackCommand)):
+                from core.history import (SetFaceTextureCommand, SetFaceBackCommand,
+                                          SetFaceColorCommand, SetFaceOpacityCommand)
+                if isinstance(command, (SetFaceTextureCommand, SetFaceBackCommand,
+                                        SetFaceColorCommand, SetFaceOpacityCommand)):
                     # Attribute commands deliberately leave geometry serials alone.
                     target = material_targets.get(command)
                     if target is None:
@@ -103,6 +102,16 @@ class InstanceUpdates:
                     self.pending_materials.add(target)
                     return True
 
+                if isinstance(command, (HideCommand, AssignLayerCommand)):
+                    entities = command._entities
+                    if all(isinstance(entity, Group) for entity in entities):
+                        # These commands also dirty all GL chunk revisions.
+                        # The command journal tells us only placements changed.
+                        self.pending.update(entities if self.roots.issuperset(entities) else self.roots)
+                        self.mesh_revisions = {key: mesh.revision
+                                               for key, (mesh, _, _) in self.meshes.items()}
+                        return True
+                    return False
                 if isinstance(command, CompoundCommand):
                     return all(visit(c) for c in command.commands)
                 if isinstance(command, (SnapshotMutation, MoveVerticesCommand,
@@ -134,17 +143,23 @@ class InstanceUpdates:
 
     def diff(self, scene):
         """Return changed resident rows, retaining prototype and placement IDs."""
-        if scene is not self.scene or self.shared_variants or self.parity_repack:
+        if scene is not self.scene:
             return None
         local = self.unsubscribe is not None and self.journal_valid and scene.content_version == self.version
-        placements = [] if local else [(None, None, False)]
+        placements = [] if local else [(None, None, None, 0)]
+        if not local and self.parity_repack and any(
+                mesh.revision != self.mesh_revisions.get(key)
+                for key, (mesh, _, _) in self.meshes.items()):
+            return None  # attribute-only changes also invalidate baked variants
         state = _placement_state(scene)
         loose = self.meshes.get(id(scene.loose_mesh))
         if local and (loose is None or loose[1] != scene.loose_mesh._mut_serial):
-            placements.append((None, None, False))
-        for root in (self.pending if local else scene.groups):
-            hidden = not state(root)[0]
-            placements.extend((g, matrix, hidden) for g, matrix in iter_placements(root))
+            placements.append((None, None, None, 0))
+        from types import SimpleNamespace
+        from views.viewport import _paint_of
+        vp = SimpleNamespace(scene=scene)
+        roots = self.pending if local else scene.groups
+        placements.extend(_placement_records(scene, roots, vp, state))
         seen, ids, values, changed = (self.active if local else set()), [], [], {}
         if local:
             changed.update((key, self.meshes[key]) for key in self.pending_meshes
@@ -153,12 +168,17 @@ class InstanceUpdates:
         self.pending_materials.clear()
         self.pending_meshes.clear()
         additions = []
-        for group, matrix, hidden in placements:
+        for group, matrix, proxy, flags in placements:
             mesh = group.mesh if group is not None else scene.loose_mesh
-            if id(mesh) in self.billboard_modes and self.billboard_modes[id(mesh)] != getattr(group, 'billboard', False):
-                return None
-            self.billboard_modes[id(mesh)] = getattr(group, 'billboard', False)
+            mode = getattr(group, 'billboard', False)
+            key = (id(mesh), repr(_baked_paint(_paint_of(vp, proxy))), mode)
             old = self.meshes.get(id(mesh))
+            code = self.packed.prototype_lookup.get(key)
+            if old is not None and code is None:
+                return None  # new paint or billboard variant
+            if old is None and (self.parity_repack or self.shared_variants or key[1] != 'None'):
+                return None
+            self.billboard_modes[id(mesh)] = mode
             uid = getattr(group, 'uid', 'loose')
             if old is not None and old[2] == -1:
                 if old[1] == mesh._mut_serial:
@@ -168,6 +188,7 @@ class InstanceUpdates:
                 code = len(self.packed.bounds)
                 old = (mesh, -1, code)
                 self.meshes[id(mesh)] = old
+                self.packed.prototype_lookup[key] = code
                 self.packed.bounds = np.concatenate((self.packed.bounds, np.zeros((1, 2, 4), np.float32)))
                 self.packed.commands = np.concatenate((self.packed.commands, np.zeros(1, COMMAND)))
                 self.packed.edge_commands = np.concatenate((self.packed.edge_commands, np.zeros(1, COMMAND)))
@@ -185,14 +206,11 @@ class InstanceUpdates:
             value = np.zeros((), INSTANCE)
             value['world'] = (np.eye(4, dtype=np.float32) if matrix is None
                               else np.asarray(matrix.data(), np.float32).reshape(4, 4))
-            visible, paint = state(group)
-            value['info'][:3] = (old[2], paint, int(hidden or not visible) | (8 if getattr(group, 'billboard', False) else 0)
-                | (OBJECT_HIDDEN if getattr(group, 'hidden', False) else 0)
-                | (VISIBILITY_FILTERED if group is not None and (not scene._layer_state(group)[0]
-                    or scene.similar_hidden(group) or (getattr(scene, '_navigator_allowed', None) is not None
-                    and group.uid not in scene._navigator_allowed)) else 0))
+            _, paint = state(proxy)
+            value['info'][:3] = (code, paint, flags | (8 if mode else 0))
             if row < len(self.packed.instances):
                 value['info'][3] = self.packed.instances['info'][row, 3]
+                value['info'][2] |= self.packed.instances['info'][row, 2] & 192
             if row >= len(self.packed.instances) or value.tobytes() != self.packed.instances[row].tobytes():
                 ids.append(row)
                 values.append(value)
@@ -209,7 +227,7 @@ class InstanceUpdates:
         self.version = scene.content_version
         self.journal_valid = True
         self.roots = set(scene.groups) if not local else self.roots
-        if changed and self.hidden_streams:
+        if changed and (self.hidden_streams or self.parity_repack or self.shared_variants):
             return None
         for mesh, _, _ in changed.values():
             src = mesh.__dict__.get('_deferred_source')

@@ -9,6 +9,7 @@ class MeshToolAccess:
     mesh_outline_preview = True
     # Do not borrow the GL viewport's cached loose-edge screen projection.
     _ledge_screen = None
+    _group_chunk = None  # SelectTool uses its model-space box traversal.
     _OCCLUSION_STEP_PX = 12.
     _OCCLUSION_MAX_SAMPLES = 128
     _OCCLUSION_SPLIT = 8
@@ -61,7 +62,10 @@ class MeshToolAccess:
         return self.view._pixel_to_ray(x, y)
 
     def _world_to_pixel(self, point, mvp=None):
-        return self.view._world_to_pixel(point)
+        if mvp is None:
+            return self.view._world_to_pixel(point)
+        from views.viewport import Viewport
+        return Viewport._world_to_pixel(self, point, mvp)
 
     def _project_to_lock_line(self, *args):
         return self.view._project_to_lock_line(*args)
@@ -71,13 +75,17 @@ class MeshToolAccess:
         return Viewport._ray_hit_plane(self, cursor, plane)
 
     def _picked_mesh(self, x, y):
-        row = self.view.pick_row(x, y)
+        row = self._selection_row(x, y) if self.mode == 'select' else self.view.pick_row(x, y)
         resolved = self.view.resolve(row)
         if resolved is None:
             return None
-        group, code = resolved
+        group, _ = resolved
         matrix = QMatrix4x4(self.view.packed.instances['world'][row].T.flatten().tolist())
         mesh = group.mesh if group is not None else self.scene.loose_mesh
+        if group is self.scene.edit_group and group is not None:
+            # The editing mesh is in world coordinates even if the retained
+            # GPU row still draws its local-space definition.
+            matrix = QMatrix4x4()
         return mesh, group, matrix
 
     def pick_face_placement(self, x, y):
@@ -112,7 +120,7 @@ class MeshToolAccess:
         if picked is None:
             return None, None
         mesh, group, _ = picked
-        if mesh is self.scene.mesh:
+        if group is self.scene.edit_group:
             return face, None
         return (face, group) if group is not None else (None, None)
 
@@ -120,11 +128,23 @@ class MeshToolAccess:
         face, group = self.pick_face_any(x, y)
         return face if group is None and self.scene.entity_selectable(face) else None
 
+    def _selection_row(self, x, y):
+        row = self.view.pick_row(x, y)
+        context = self.scene.edit_group
+        if context is not None:
+            group = self.view.packed.groups[row] if row is not None else None
+            if group is not context and self.view.context_placement(group) is None:
+                # Fade retains depth. GL picks only the editable subtree,
+                # even when another placement covers it in the ID pass.
+                from views.wgpu_inference import context_hit
+                row = (context_hit(self.view, context, x, y)
+                       if self.view.inference_index is not None else None)
+        return row
+
     def pick_group(self, x, y):
-        picked = self._picked_mesh(x, y)
-        if picked is None or picked[0] is self.scene.mesh:
-            return None
-        group = picked[1]
+        row = self._selection_row(x, y)
+        self.view.hovered_row = row
+        group = self.view.packed.groups[row] if row is not None else None
         target = self.view.context_placement(group)
         return target if target is not None and self.scene.entity_selectable(target) else None
 
@@ -313,7 +333,22 @@ class MeshToolAccess:
         return Viewport.pick_section_plane(self, x, y)
 
     pick_image = _unsupported_pick
-    pick_image_plane = _unsupported_pick
+    def pick_image_plane(self, x, y):
+        from views.viewport import Viewport
+        return Viewport.image_plane_at(self, x, y, selectable_only=True)
+
+    def image_in_front_of(self, face, x, y):
+        from views.viewport import Viewport
+        return Viewport.image_in_front_of(self, face, x, y)
+
+    def edge_point_under_cursor(self, edge, x, y):
+        from views.viewport import Viewport
+        return Viewport.edge_point_under_cursor(self, edge, x, y)
+
+    def pick_extension_item(self, x, y):
+        from views.viewport import Viewport
+        return Viewport.pick_extension_item(self, x, y)
+
     _group_obb = _unsupported_pick
     def begin_groups_preview(self, groups):
         selected = {g.uid for root in groups for g, _ in iter_placements(root)}

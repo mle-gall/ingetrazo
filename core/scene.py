@@ -41,6 +41,8 @@ class Scene:
     #: and need every bump; "unsaved changes" must not: a click on empty
     #: space after Ctrl+S asked to save again (issue #159).
     view_version: int = 0
+    # Context changes which preserve resident placement geometry.
+    _placement_context_bumps: int = field(default=0, init=False, repr=False)
     # Encapsulated chunks (own meshes), isolated from the main mesh's welding.
     groups: list = field(default_factory=list)
     # Annotation entities (static dimensions) — not geometry, drawn as overlays.
@@ -403,6 +405,7 @@ class Scene:
         if self.edit_group is not None and not anidando:
             self.end_group_edit()
         self._refresh_dimension_holds()
+        entry_mesh = group.mesh
         anterior = self.mesh
         self._edit_share = None
         # The context's own axes (issue #44), read BEFORE anything below
@@ -441,7 +444,9 @@ class Scene:
             self._loose_mesh = anterior
         self._edit_stack.append(
             {"group": group, "mesh": anterior, "share": self._edit_share,
-             "frame": frame, "definition": definition})
+             "frame": frame, "definition": definition,
+             "world_copy": group.mesh if entry_mesh is not group.mesh else None})
+        self._placement_context_bumps += 1
         self.mesh = group.mesh
         self.edit_group = group
         self._refresh_dimension_holds()
@@ -508,6 +513,7 @@ class Scene:
         share = nivel["share"]
         nivel["share"] = None
         self._edit_share = None
+        unchanged = True
         if share is not None:
             # Headless callers (tests, the AI bridge): share back directly.
             # The viewport takes the share first and wraps it in a command.
@@ -515,7 +521,10 @@ class Scene:
             if group.mesh.capture_state() == state0:
                 self.restore_sharing(group, proto, xform)
             else:
+                unchanged = False
                 self.share_back(group, proto, xform, group.mesh)
+        if unchanged:
+            self._placement_context_bumps += 1
         self.mesh = nivel["mesh"]
         self.edit_group = (self._edit_stack[-1]["group"] if self._edit_stack
                            else None)
