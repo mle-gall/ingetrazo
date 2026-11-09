@@ -959,51 +959,79 @@ panels, swatch tooltip, and toolbar bold. Batch 6 has no completed summary;
 this is **not a complete full-suite pass or a complete regression comparison**.
 The suite was not rerun. The focused native tests completed separately.
 
+
 ## R2b — 2026-11-09: resident updates and first native tools
 
-This is an implementation increment, **not full R2b acceptance**. The measured
-end-to-end move and dispatched drag gates remain unresolved; isolated matrix
-submission is insufficient to establish interactive tool performance.
+Tape, placement Move and explicit tool dispatch are implemented on the native
+view. Move/tag/insertion gates pass in the recorded ride run. The strict drag
+gate remains **unresolved**: the final sample reached 35.12 ms,
+above 33 ms, despite earlier sampled runs passing. This is not full R2b
+acceptance.
 
-`InstanceUpdates` retains mesh identity/serial and uid-to-row tables. It bakes
-a changed prototype set in one R1b call and appends replacement geometry while
-retaining prototype IDs. Added placements reuse prototypes; removed rows become
-hidden tombstones. Empty containers have serial sentinels instead of GPU rows.
+**R2c integration checkpoint:** this worktree's `MainWindow._activate_tool`
+still disables tool activation when `INGETRAZO_WGPU=1`. R2c owns that file;
+it was not edited here. Its integration must remove that legacy guard and
+avoid the GL-only Tape `start_from_hover` pickup on the native path. Native
+activation observes the source viewport's existing measurement signal and
+queues status refresh after the main-window action completes.
+
+### Resident update contract
+
+`InstanceUpdates` retains mesh identity/serial and uid-to-row tables. Mutated
+prototypes use one R1b bake for the changed set. Replacements retain prototype
+IDs; removed placements become hidden tombstones. Empty containers have serial
+sentinels instead of GPU rows. New group objects carrying an existing uid
+refresh row resolution without changing the row ID.
+
 The native APIs are `update_instances(ids, rows)`, `remove_instances(ids)` and
-`replace_prototype(id, vertices, indices, bounds, face_count)`. Instance and
-geometry allocations grow to power-of-two capacity. New prototype tables and
-indirect-command tables are rebuilt when their schema grows; these allocations
-are not yet amortized by doubling. Highlight and override state survives row
-updates and allocation growth. Replacement geometry is append-only and still
-needs reclamation for sustained mesh editing.
+`replace_prototype(id, vertices, indices, bounds, face_count)`. Native instance,
+geometry, prototype and indirect allocations grow by doubling. Prototype
+bindings expose their logical length so spare capacity does not change the
+shader's edge-command offset. Adjacent updated rows share queue writes;
+unchanged color overrides submit no writes. Highlight and override state
+survives row updates and allocation growth.
 
-History's existing listener API identifies root-placement Move commands and
+History's existing listeners identify root Move, Insert/Delete and
 record/registry commands, including compound commands and undo/redo. Known
 record edits do not scan placements or submit GPU work. Untracked edits use a
-conservative full placement scan, without rebaking unchanged prototypes. Bounds
-updates touch changed rows; a full reduction is needed when an edited row held
-a scene extremum. Untracked edit discovery still scans the resident table.
+conservative full placement scan, without rebaking unchanged prototypes.
+Bounds update locally, with a full bounds reduction when an edited row held a
+scene extremum. Host array append/storage and command-range bookkeeping still
+have costs proportional to table size for structural changes.
+
 Initial exact inference still waits for background preparation. Once ready,
 `ResidentInference` retains the initial acceleration and unchanged prototype
 BVHs. Edited rows get small placement sets on their next query; only mutated
-prototype BVHs rebuild. This avoids destroying a document-sized index during
-input. The initial acceleration retains its original geometry until scene
-release, another reclamation consideration for sustained editing.
+prototype BVHs rebuild. A placement edit no longer destroys a document-sized
+index during input. Replacement geometry is append-only, and the initial
+inference acceleration retains its original geometry until scene release.
+Reclamation remains necessary for sustained mesh editing.
 
-The dispatch adapter invokes the existing Tape tool with snapped world points;
-rubber lines, labels and inference markers use the overlay. It does not acquire
-GL edges to create parallel guides. Move previews write instance matrices only,
-then restore those matrices before committing `MoveGroupCommand` (or the same
-`CompoundCommand` wrapper as GL). Esc restores the preview; numeric Move input
-accepts Enter. The production GL viewport implementation is unchanged. Select
-and existing navigation retain their native paths. Other tools flash
-"not yet available on the Metal renderer" and receive no native spatial input.
-Full keyboard/inference parity, guide modes, nested-placement preview semantics
-and renderer-switch GUI parity still need acceptance coverage.
+### Tools and document semantics
 
-### Validation and measurements
+The adapter invokes the existing Tape tool with snapped world points; its
+rubber line and length label use the overlay, alongside the R2a inference
+lines. Completed measurements remain in the measurement field. The supported
+R2b workflow is two-point measurement; parallel-guide acquisition through GL
+edge picking is not invoked by this adapter.
 
-The private Python 3.13 environment and Cargo cache were built with:
+Move previews update resident instance matrices without mutating the document.
+Commit first restores the preview, then executes `MoveGroupCommand`, or the
+same `CompoundCommand` wrapper used by GL. Esc restores the preview; typed
+numeric input accepts Enter. Pickup presents its zero-distance feedback;
+unchanged preview matrices are not rewritten. Hiding the native view cancels
+an uncommitted preview. The source tool receives the native anchor for keyboard
+inference. Select and navigation retain their existing native paths. Other
+tools show "not yet available on the Metal renderer" and remain inert.
+
+The GL viewport implementation is unchanged. Full application shortcut and
+renderer-switch GUI acceptance still depends on the R2c integration above.
+R2a's documented limitations for cross-placement and reference inference
+remain; these tests do not establish exhaustive inference parity.
+
+### Builds and tests
+
+Private Python 3.13 environment and Cargo cache:
 
 ```sh
 python3.13 -m venv .venv-work
@@ -1014,27 +1042,66 @@ QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2b-tmp .venv-work/bin/python -m pytest -
 PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_core/Cargo.toml
 PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_render/Cargo.toml
 QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2b-tmp .venv-work/bin/python scripts/pytest_batches.py -m 'not slow' --batches 60
+.venv-work/bin/python scripts/wgpu_r2b_smoke.py
 .venv-work/bin/python scripts/wgpu_r2b_measure.py /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz
 ```
 
-Both release builds passed. Focused Python: **44 passed**. Rust: **4 core,
-6 renderer passed**. Device-free tests cover record-only no-ops, changed/shared
-prototypes, new prototypes, stable row IDs, additions/removals, History command
-identity and undo, direct Tape versus native adapter measurement, dispatch, and
-History-guided discovery. Rust tests cover capacity growth and flag preservation;
-they do not exercise a device-backed reallocation in the unit test harness.
-A separate native-window smoke (`scripts/wgpu_r2b_smoke.py`, externally bounded
-to 120 seconds) completed instance growth, prototype insertion/replacement and
-removal without a wgpu validation error.
+Both release builds passed. Focused Python: **50 passed**. Rust: **4 core,
+7 renderer passed**. Coverage includes shared and new prototypes, stable row
+IDs, insertion/deletion/undo/redo, record-only no-ops, Tape versus direct GL
+tool measurement, native Move preview/commit, Esc/Enter dispatch, immediate
+unsupported-tool status, local inference hits and unchanged-prototype reuse.
+Rust checks include growth, flag preservation and contiguous write ranges.
+The native-window smoke, bounded externally to 120 seconds, exercised instance
+and prototype growth (including spare capacity), replacement and removal
+without a wgpu validation error.
 
-The ride diagnostic is externally bounded to 290 seconds per process and loads
-the input read-only. It records command/submission timings, renderer calls,
-1,000-row matrix frames and actual dispatched Move hover/overlay frames. It uses
-the same History record command as the bridge, but does not measure bridge
-transport. Measurements run concurrently with other agents' test workloads, so
-contention is uncontrolled. Raw samples are in
-[ride.json](benchmarks/wgpu-r2b-2026-11-09/ride.json).
+The broad suite ran once. Batches 1–59 completed; the runner hit **ENOSPC while
+reporting batch 60**. Only this worktree's temporary/debug outputs were removed.
+The final 12 files were then rerun in four groups of three: **197 passed,
+4 skipped**. No batch exceeded 30 minutes; the longest completed batch was
+600.87 seconds. Aggregate across the 59 completed batches and recovery:
+**7,133 passed, 19 failed, 138 skipped, 2 xfailed, 805 deselected, 56 warnings**.
 
-R3 remains live mesh tools (push/pull, line and erase), loose-face transforms,
-and sheets. The unfinished R2b acceptance items above are prerequisites, not
-features silently deferred to R3.
+This is not an exact match to the supplied 19-failure baseline: **18 baseline
+failures reproduced** (14 translations including Arabic, cursor pick, extension
+wrapping, hidden panels and toolbar bold). The swatch-tooltip failure did not
+reproduce in recovery. One additional extension-catalog test exceeded its
+15-second worker wait; its isolated rerun passed (**1 passed, 2.10 s**).
+Final inference, allocation and dispatch refinements followed the broad run;
+the focused Python, Rust, native smoke and ride checks were rerun afterward.
+The broad suite was not run a second time.
+
+[Validation, failure names and implementation commits](benchmarks/wgpu-r2b-2026-11-09/validation.json)
+and [batch/recovery summaries](benchmarks/wgpu-r2b-2026-11-09/suite-summary.txt)
+retain the exact hand-over evidence.
+
+### Ride measurements
+
+Read-only input: 76,029 resident placements, 1000×700 logical pixels at 2×,
+MSAA disabled. Each native diagnostic was externally bounded to 290 seconds.
+The model and initial inference settle before editing; the pickup frame is
+presented before measuring drag. The final run follows this agent's suite;
+other machine workloads are not controlled. GPU timestamp samples are
+asynchronous and may repeat. OS compositor presentation is not measured.
+
+| Operation | Final measurement | Gate |
+| --- | --- | --- |
+| One leaf placement, History through row submission | 1.94 ms; one row | Local update |
+| Same move through render and synchronous ID readback | 22.24 ms | Under 50 ms |
+| Tag 1,000 placements through the bridge's History command | 19.92 ms; zero renderer calls | No GPU work |
+| Insert shared component through History | 4.21 ms; one instance row | No geometry bake/upload |
+| 1,000-placement dispatched drag, 30 frames | mean 26.84, p95 34.64, max 35.12 ms | **33 ms gate not consistently met** |
+
+The tag diagnostic exercises the same record command used by the bridge;
+bridge transport itself is excluded. During dispatched drag, preview submission
+max was 0.61 ms, hover max 30.25 ms and GPU sample max
+35.90 ms. Earlier settled samples passed the drag gate, but the final
+sample above is retained rather than selecting the fastest run. Readback and
+renderer timing under the shared workload need further work with R-look.
+[Raw final samples](benchmarks/wgpu-r2b-2026-11-09/ride.json) include per-stage
+hover, preview, frame and overlay timings.
+
+R3 remains live mesh tools (push/pull, line, erase), loose-face transforms and
+sheets. The unresolved drag gate and R2c activation checkpoint remain R2b
+acceptance work; they are not silently deferred to R3. No PR or push was made.
