@@ -143,6 +143,25 @@ class WgpuView(QWidget):
             self.camera.distance = max(float(np.linalg.norm(hi-lo))*1.4, 1.)
         self._upload()
 
+    def blank(self):
+        """Only the background, while another document loads into this
+        view: the previous model stayed on screen until the new pack went
+        up, which on a big file is a minute after its tab took the name."""
+        from core.scene import Scene
+        tracker = getattr(self, '_instance_updates', None)
+        if tracker is not None and tracker.unsubscribe is not None:
+            tracker.unsubscribe()
+        self._instance_updates = None
+        self.packed = pack_scene(Scene())
+        self._content_token = None
+        self._selection_signature = None
+        self._tint_signature = None
+        self.uid_rows = {}
+        self.inference_index = None
+        self._scene_dirty = True
+        self._upload()
+        self.update()
+
     def _refresh_inference(self):
         self._inference_queued = False
         if getattr(self, "_closed", False):
@@ -172,6 +191,7 @@ class WgpuView(QWidget):
         start = time.perf_counter()
         if self.renderer is None:
             self.renderer = ingetrazo_render.Renderer(int(self.winId()), self.width(), self.height(), self.devicePixelRatioF())
+        self._resident_count = len(self.packed.instances) or 1
         if len(self.packed.instances):
             self.packed.upload(self.renderer)
         else:
@@ -205,6 +225,16 @@ class WgpuView(QWidget):
         if self.renderer is None:
             return None
         start = time.perf_counter()
+        # A scene packed since the last frame goes up BEFORE anything is
+        # written per instance: the override write below is sized by the
+        # new pack, and the renderer rejected it against the old resident
+        # scene («one override per instance required») on every frame, so
+        # the previous document stayed on screen and the first-frame hook
+        # never fired (a new document never finished laying out its trays).
+        if self._scene_dirty:
+            self._upload()
+            if self.renderer is None:
+                return None
         self.tools.sync()
         if self.source_viewport is not None:
             self.camera = self.source_viewport.camera
@@ -237,8 +267,9 @@ class WgpuView(QWidget):
                         rgb = (.35, .35, .35)
                     colors.append(int(np.array([*np.clip(np.array(rgb[:3])*255, 0, 255), 255],
                                                np.uint8).view('<u4')[0]) if rgb is not None else 0)
-                self.renderer.set_overrides(colors)
-                self._tint_signature = signature
+                if len(colors) == getattr(self, '_resident_count', None):
+                    self.renderer.set_overrides(colors)
+                    self._tint_signature = signature
         future = getattr(self, '_inference_future', None)
         if future is not None and future.done():
             self.inference_index = future.result()

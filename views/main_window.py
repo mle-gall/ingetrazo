@@ -7047,6 +7047,10 @@ class MainWindow(WorksessionMixin, QMainWindow):
         self.viewport.setUpdatesEnabled(False)
         self._opening_document = True
         self._doc._resident_scene_ready = False
+        if getattr(self._doc, "_renderer_wgpu", False):
+            stand_in = getattr(self._doc, "stand_in", None)
+            if stand_in is not None and hasattr(stand_in, "blank"):
+                stand_in.blank()        # not the previous model while this one loads
         try:
             try:
                 igz_format.load_into(self.viewport.scene,
