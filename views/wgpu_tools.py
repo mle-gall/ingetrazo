@@ -61,6 +61,8 @@ class NativeTools(MeshToolAccess):
                  else view._world_under_cursor(event.position().x(), event.position().y()))
         if point is None:
             return None
+        if self.tool is not None:
+            self.tool.snap_kind = getattr(view.last_snap, "kind", None)
         return ToolContext(self, point, event.position(), event.modifiers(), view.last_snap)
 
     def click(self, event):
@@ -73,6 +75,7 @@ class NativeTools(MeshToolAccess):
             self.tool.on_click(ctx)
             self.start_point = getattr(self.tool, 'start_point', None)
             self.update()
+            self.view.overlay_primitives = []
             self.mesh_feedback()
         elif mode == 'tape':
             self.tool.on_click(ctx)
@@ -149,7 +152,8 @@ class NativeTools(MeshToolAccess):
         if self.mode == 'mesh':
             if event.key() in (Qt.Key_Return, Qt.Key_Enter):
                 from views.viewport import Viewport
-                value = Viewport._parse_value_buffer(self.value_buffer)
+                value = Viewport._parse_value_buffer(
+                    self.value_buffer, comma_lists=getattr(self.tool, "vcb_comma_lists", False))
                 if value is not None:
                     self.tool.on_value(self, value)
                 self.value_buffer = ''
@@ -158,7 +162,8 @@ class NativeTools(MeshToolAccess):
                 self.update()
                 return True
             text = event.text()
-            if text and not (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)) and (text[0].isdigit() or text in '.-+,;'):
+            if text and not (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)) and (text[0].isdigit() or text in '.-+,; /\"\'' or
+                    (self.value_buffer and text.lower() in ('m', 'c', 'f', 't', 'i', 'n'))):
                 self.value_buffer += text
                 self.measurementChanged.emit(self.value_buffer)
                 return True
@@ -231,6 +236,12 @@ class NativeTools(MeshToolAccess):
     def update(self):
         if self.mode == 'mesh':
             self.view.set_scene(self.scene)
+            revision = self.history.revision
+            if revision != getattr(self, '_notified_revision', revision):
+                notify = getattr(self.view.source_viewport, 'notify_scene_changed', None)
+                if notify is not None:
+                    notify()
+            self._notified_revision = revision
         self.view.update()
 
     # R2b measures points, not guide creation from GL edge picking.

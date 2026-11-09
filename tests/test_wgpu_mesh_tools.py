@@ -163,3 +163,21 @@ def test_move_loose_preview_cancel_commit(inside, target):
     history.undo()
     native.update()
     assert geometry(scene.mesh) == before
+
+
+def test_rectangle_vcb_dimensions_and_units():
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtCore import QEvent
+    scene, history, native, _ = harness(RectangleTool())
+    click(native, (0, 0, 0))
+    native.view.last_snap = SimpleNamespace(point=QVector3D(1, 1, 0), kind='endpoint', context=None)
+    native.hover(event())
+    for char in '200cm;300cm':
+        assert native.key(QKeyEvent(QEvent.KeyPress, 0, Qt.NoModifier, char))
+    assert native.key(QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
+    assert len(scene.mesh.faces) == 1
+    points = [v.position for v in scene.mesh.vertices]
+    assert max(p.x() for p in points) == pytest.approx(2.)
+    assert max(p.y() for p in points) == pytest.approx(3.)
+    assert not native.value_buffer
+    assert history.undo_stack

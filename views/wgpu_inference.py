@@ -131,6 +131,14 @@ def snap(index, row, view, x, y, **options):
              or group is view.scene.edit_group)
     edges = [SimpleNamespace(a=QVector3D(*aa), b=QVector3D(*bb), in_group=not loose,
                              context=None if loose else 'group') for aa, bb in zip(a, b)]
+    tool = getattr(getattr(view, 'tools', None), 'tool', None)
+    moving = getattr(tool, '_verts', ()) if getattr(tool, 'grab', None) is not None else ()
+    if loose and moving and not getattr(tool, '_copy', False):
+        from core.topology import _key
+        excluded = {_key(v.position) for v in moving}
+        edges = [e for e in edges if _key(e.a) not in excluded and _key(e.b) not in excluded]
+        point = view.tools.work_point(x, y) or point
+        on_face = False
     if group is not None and group.is_instance():
         origin = QVector3D(*view.packed.instances['world'][row, 3, :3])
         edges.insert(0, SimpleNamespace(a=origin, b=origin, component_origin=True))

@@ -2341,3 +2341,93 @@ not a full visual regression suite. The cache moves floating-point matrix
 work to the compute pass; duplicate MSAA edge rendering is also removed.
 [Current capture](benchmarks/wgpu-perf-2026-11-09/marquee-metal-ao-half-wgpu.png),
 [comparison metrics](benchmarks/wgpu-perf-2026-11-09/capture-comparison.json).
+
+## R3a — 2026-11-09: native mesh-tool routing
+
+Local implementation on `renderer/r3a-mesh-tools`; **not full R3a acceptance**.
+No renderer crate changes or new renderer API. Line and Rectangle share the
+existing ToolContext/History paths. Rubber bands and labels are projected into
+the native overlay. Native VCB parsing supports rectangle tuples and unit
+suffixes. Empty documents upload a hidden scratch row so the first rubber
+band can render before there is document geometry.
+
+Push/Pull resolves the ID-picked placement, transforms the ray into its mesh,
+and tests that prototype's face triangles. The open context resolves as loose
+geometry. Its preview uses the existing sweep outline, including hole rings;
+it is **not** the GL filled/depth-tested preview, and does not suppress the
+resident base. Numeric commits use the existing SnapshotMutation. Erase retains
+GL stroke/release semantics: edges (and incident faces) and groups, not a new
+face-interior deletion gesture. Loose Move uses MoveTool's deformation preview
+and commands; selected placement-only Move retains R2b's resident matrix path.
+Native reference projection/occlusion no longer falls through to GL picking.
+Moving vertex candidates are excluded from the native edge snap candidates.
+
+Mesh History commands now journal their target mesh, so an existing prototype
+can be replaced without enumerating all placements. Unknown commands still use
+the conservative diff. Relink-edge and relink-face mutation primitives in
+`core/mesh.py` needed a small additional fix outside the routing files: redo
+previously changed topology without advancing the mutation serial. Both now
+call `mark_modified`. The regression demonstrates a single replacement on
+undo/redo without placement enumeration.
+
+### Edit latency
+
+`scripts/wgpu_r3a_measure.py` loads the supplied files read-only, opens a leaf
+group, pushes its first face by 0.01 m through PushPullTool, submits the diff,
+renders, then synchronously reads a pick ID to bound GPU completion. Three
+samples per model, undo between samples. 1000×700 logical pixels, MSAA off,
+AO off; model profile settings retained. Loading, opening the edit context,
+and initial inference preparation are outside the timed interval. Command
+execution is reported separately; commit-to-frame starts after command return.
+These are sampled measurements, not a visual inspection of the resulting face
+or a scanout timestamp. The measured facade calls the same command but excludes
+main-window notification costs.
+
+| Model / context | Commit-to-completed-frame samples (ms) | Command samples (ms) | Re-baked prototypes | Gate |
+| --- | --- | --- | --- | --- |
+| Pusher car, Groupe#167; 1,253 placements | 60.15 / 26.96 / 30.87 | 17.07 / 17.10 / 17.13 | 1 / 1 / 1 | <100 ms: sampled pass |
+| Ride, Groupe#324; 76,029 placements | 1448.38 / 97.16 / 101.19 | 10.79 / 11.70 / 10.31 | 1 / 1 / 1 | <300 ms: **FAIL first edit** |
+
+Before mesh journaling the ride samples took 1634 / 1178 / 1109 ms despite
+re-baking only one prototype. The final first sample still spent 579 ms in the
+diff and additional time completing its frame. The cold allocation/inference
+and GPU work has not been isolated enough to attribute that remainder.
+Warm samples alone do not establish the required gate.
+Raw local logs: `.spike-results/r3a-pusher-local.log` and
+`.spike-results/r3a-ride-local.log`. GUI subprocesses were bounded at 290 s.
+
+### Validation
+
+Private interpreter and Cargo cache:
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_render/Cargo.toml --features extension-module
+QT_QPA_PLATFORM=offscreen .venv-work/bin/pytest -q tests/test_wgpu_*.py tests/test_pushpull*.py tests/test_line*.py tests/test_eras*.py tests/test_move*.py tests/test_rectangle*.py
+```
+
+Both release builds succeeded. Focused combined run: **555 passed, 1 skipped,
+2 xfailed**. After native snapping changes: **90 native tests passed**.
+After the final VCB and preview-clearing changes: **53 targeted tests passed**
+(`test_wgpu_mesh_tools.py`, `test_wgpu_interaction.py`, `test_wgpu_updates.py`).
+Native empty-document overlay smoke passed. No Rust sources changed; no debug
+builds were created. No full-suite batch runner was used.
+
+### Remaining acceptance and follow-on work
+
+- The ride first-edit latency gate remains unresolved.
+- Push/Pull outline preview lacks GL depth-tested fills and base suppression.
+- Picking tests establish transformed/open-context face resolution, but do not
+  establish all coplanar-face tie breaks, section cuts, or cross-placement snap
+  parity. Exact face picking currently walks the ID-picked mesh's triangles.
+- Loose Move preview still mutates/re-bakes its working mesh; large-context
+  continuous-drag latency needs GUI acceptance. Copy/grip/array variants and
+  exhaustive keyboard/inference parity are not covered by this increment.
+- New tests compare Line/Rectangle direct-tool commands and mesh results;
+  Push/Pull, Erase and Move cover commit, undo and cancellation but do not
+  exhaustively compare every GL gesture. Full application UI acceptance remains.
+- R3b: sheets, composer, and their annotation/selection paths. The mesh facade
+  intentionally supplies no annotation picks for those features.
+- R3c: default renderer switch and GL fallback, plus full UI acceptance.

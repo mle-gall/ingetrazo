@@ -10,7 +10,9 @@ class MeshToolAccess:
 
     def inference_meshes(self, x, y):
         picked = self._picked_mesh(x, y)
-        return [self.scene.mesh] if picked is None else [self.scene.mesh, picked[0]]
+        # Other placements are queried through their world-space face plane;
+        # their local vertices must not be projected as world coordinates.
+        return [self.scene.mesh]
 
     def work_point(self, x, y):
         from core import axes
@@ -71,7 +73,10 @@ class MeshToolAccess:
         origin = inverse.map(origin)
         direction = inverse.mapVector(direction)
         best, distance = None, float('inf')
+        excluded = getattr(self.tool, 'moving_face_ids', lambda: set())()
         for face in mesh.faces:
+            if id(face) in excluded:
+                continue
             if getattr(face, 'hidden', False):
                 continue
             for triangle in face.triangulate():
@@ -88,7 +93,7 @@ class MeshToolAccess:
         mesh, group, _ = picked
         if mesh is self.scene.mesh:
             return face, None
-        return face, group
+        return (face, group) if group is not None else (None, None)
 
     def pick_face(self, x, y):
         face, group = self.pick_face_any(x, y)
@@ -99,12 +104,11 @@ class MeshToolAccess:
         if picked is None or picked[0] is self.scene.mesh:
             return None
         group = picked[1]
-        # Resolve nested placements to the selectable context owner.
-        while group is not None and not self.scene.entity_selectable(group):
-            group = next((g for root in self.scene.groups
-                          for g, _ in iter_placements(root)
-                          if group in (g.children or ())), None)
-        return group
+        roots = (self.scene.edit_group.children if self.scene.edit_group is not None
+                 else self.scene.groups)
+        return next((root for root in roots or ()
+                     if self.scene.entity_selectable(root)
+                     and any(g is group for g, _ in iter_placements(root))), None)
 
     def pick_edge(self, x, y):
         picked = self._picked_mesh(x, y)
@@ -121,11 +125,32 @@ class MeshToolAccess:
             d = b-a
             t = np.clip(np.dot(np.array([x, y])-a, d)/max(np.dot(d, d), 1e-12), 0, 1)
             dist = np.linalg.norm(a+t*d-[x, y])
-            if dist < distance:
+            if dist < distance and not self._is_occluded(edge.a + (edge.b-edge.a)*float(t)):
                 best, distance = edge, dist
         return best
 
     pick_visible_edge = pick_edge
+
+    def _project_px(self, pts):
+        matrix = np.asarray((self.view.camera.projection_matrix() *
+                             self.view.camera.view_matrix()).data()).reshape(4, 4).T
+        clip = pts @ matrix[:, :3].T + matrix[:, 3]
+        ok = clip[:, 3] > 0
+        w = np.where(ok, clip[:, 3], 1.)
+        return ((clip[:, 0]/w*.5+.5)*self.view.width(),
+                (1.-(clip[:, 1]/w*.5+.5))*self.view.height(), ok)
+
+    def _is_occluded(self, point):
+        from views.wgpu_inference import surface
+        pixel = self._world_to_pixel(point)
+        if pixel is None:
+            return True
+        row = self.view.pick_row(*pixel)
+        if row is None or self.view.inference_index is None:
+            return False
+        origin, direction = self._pixel_to_ray(*pixel)
+        hit = surface(self.view.inference_index, row, origin, direction)
+        return hit is not None and (hit-origin).length() + 1e-4 < (point-origin).length()
 
     def set_hover(self, entity):
         self._mesh_hover = entity

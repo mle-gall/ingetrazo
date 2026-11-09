@@ -174,7 +174,18 @@ class WgpuView(QWidget):
             self.renderer = ingetrazo_render.Renderer(int(self.winId()), self.width(), self.height(), self.devicePixelRatioF())
         if len(self.packed.instances):
             self.packed.upload(self.renderer)
-            self._frame_style = None
+        else:
+            # The renderer ABI requires one row. A hidden scratch row lets
+            # an empty document show the first tool rubber band.
+            from core.mesh import Mesh
+            from core.group import Group
+            from core.scene import Scene
+            mesh = Mesh()
+            mesh.add_edge(QVector3D(), QVector3D(1, 0, 0))
+            scratch = pack_scene(Scene(groups=[Group(mesh)]))
+            scratch.instances['info'][:, 2] = 1
+            scratch.upload(self.renderer)
+        self._frame_style = None
         self.upload_seconds = time.perf_counter()-start
         self._scene_dirty = False
         self.update()
@@ -191,7 +202,7 @@ class WgpuView(QWidget):
         self.update()
 
     def draw_frame(self):
-        if self.renderer is None or not len(self.packed.instances):
+        if self.renderer is None:
             return None
         start = time.perf_counter()
         self.tools.sync()
@@ -294,6 +305,7 @@ class WgpuView(QWidget):
         tool = getattr(source, 'active_tool', None)
         inference = getattr(source, 'inference', None)
         options = dict(start_point=self.tools.start_point,
+                       chain_first_point=getattr(tool, 'chain_first_point', None),
                        acquired_point=getattr(inference, '_acquired_point', None),
                        acquired_points=getattr(inference, '_encouraged', None),
                        axis_lock=getattr(inference, 'axis_lock', None),
@@ -440,6 +452,8 @@ class WgpuView(QWidget):
         if self.tools.mode == 'mesh':
             self.tools.tool.on_release(self.tools)
             self.tools.update()
+            self.overlay_primitives = []
+            self.tools.mesh_feedback()
         self.last = None
         if self.tools.mode == 'select':
             self.overlay_primitives = []

@@ -174,3 +174,20 @@ def test_wheel_and_window_match_gl(view):
     assert view.camera.view_matrix().data() == gl.camera.view_matrix().data()
     view.source_viewport = None
     gl.close()
+
+
+def test_native_face_pick_resolves_prototype_and_edit_context(view):
+    from types import SimpleNamespace
+    view.source_viewport = SimpleNamespace(scene=view.scene)
+    pixel = view._world_to_pixel(QVector3D(5, 4, 0))
+    face, group = view.tools.pick_face_any(*pixel)
+    assert face is view.scene.groups[0].mesh.faces[0]
+    assert group is view.scene.groups[0]
+    assert view.tools.pick_face(*pixel) is None
+    view.scene.begin_group_edit(group)
+    view.packed = pack_scene(view.scene)
+    face, owner = view.tools.pick_face_any(*pixel)
+    assert face is view.scene.mesh.faces[0]
+    assert owner is None
+    assert view.tools.pick_face(*pixel) is face
+    view.source_viewport = None
