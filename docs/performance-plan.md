@@ -2645,3 +2645,163 @@ Handover is local only on `renderer/perf-face-pass`: instrumentation commit
 measurement/validation report commit. No push, PR, issue or remote comment.
 This is a partial implementation with explicit remaining gates, not completion
 of the full renderer performance brief.
+
+## Renderer — MSAA resolve, edges — 2026-11-09
+
+Worktree branch `renderer/perf-msaa-edges`. This is a partial implementation,
+not a claim that all performance or pixel-parity gates are satisfied.
+
+MSAA color now submits each face and edge once, with separate native face and
+edge pass boundaries for GPU timing. Both passes use 4× color/depth attachments
+and resolve color to the single-sample output. AO obtains depth with a fullscreen
+minimum-of-four-samples depth resolve instead of replaying faces. Settled IDs
+are generated independently once after the camera stabilizes; they remain
+single-sampled. The MSAA face path also uses the existing plain/textured
+prototype classification. AO's minimum-sample depth is not identical to the old
+center-sampled depth at silhouettes, so AO pixel identity is not established.
+
+The hard-edge vertex variant compiles out profile classification and normal
+fetches. The existing hard-only indirect template remains authoritative.
+`last_timings()` now reports `edge_quads_input` and `edge_quads_surviving` (after
+instance culling, before per-edge rasterization). The ride reports 7,774,875 and
+6,307,807 respectively at the measured camera. These counters are geometry
+counts, not measured covered pixels or overdraw, and still describe available
+edges when the edge style is disabled. Average quad pixels and overdraw remain
+unimplemented. Back-facing-placement rejection and width reduction were not
+introduced: two-sided and open geometry can expose those edges.
+
+A tested half-pixel edge cutoff changed 1,140 marquee pixels and 840 pusher
+pixels at default width. It was removed. The final screen-size rejection only
+eliminates zero-length projected edges; nonzero subpixel coverage is retained.
+No claim of an effective subpixel cull is made.
+
+Explicit non-wireframe point picks use a one-pixel full-resolution scissor and
+an ID fragment shader that performs texture alpha rejection but no face shading,
+selection dots or color conversion. A cursor-only refresh deliberately leaves
+the full ID cache dirty. Rectangle picks and settled-cache preparation still
+render the complete ID target; loose line prototypes retain their existing pick
+semantics. Wireframe retains a complete single-sample pick render. Picks cannot
+preempt color work already submitted to the same GPU queue: the existing cold
+benchmark calls `draw_frame()` before `pick()` and includes that queue wait.
+Thus scissoring the ID pass alone does not establish the cold-pick latency gate.
+
+Validation uses the worktree's Python 3.13 `.venv-work`, isolated `.cargo-work`,
+and release builds only. Commands (from this worktree):
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_render/Cargo.toml --features extension-module
+CARGO_HOME=$PWD/.cargo-work CARGO_PROFILE_RELEASE_STRIP=none cargo test --release --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_*.py
+```
+
+Timing matrix: `scripts/wgpu_perf_measure.py MODEL OUTPUT.json`, 2000×1400,
+10 warm-up frames, 20 measured frames, 120 ms pacing. Every GUI subprocess was
+bounded externally with `subprocess.run(..., timeout=290)`. The baseline and
+changed native binaries were measured consecutively in this session; other
+applications were left untouched. No own capture job overlapped the final timing
+runs. Raw JSON includes the load average before and after each configuration.
+The earlier `before.json` run overlapped a capture and is not used for the final
+comparison. GPU frame timestamps exclude the separately submitted settled-ID
+preparation; AO depth resolution is included in frame span but is not separately
+timestamped. Individual pass medians are not additive on Metal.
+
+### Final ride timing tables
+
+GPU milliseconds; load is the starting 1/5/15-minute average per row.
+
+| Binary | AA / AO / edges / profiles | Faces | Edges | MSAA faces | MSAA edges | Frame | Load |
+|---|---|---:|---:|---:|---:|---:|---|
+| Before | False / off / True / False | 17.11 | 10.91 | 0.00 | 0.00 | 30.33 | 6.54/7.92/7.67 |
+| Before | False / half / True / False | 19.84 | 11.24 | 0.00 | 0.00 | 36.90 | 6.18/7.82/7.64 |
+| Before | False / full / True / False | 17.79 | 7.33 | 0.00 | 0.00 | 33.79 | 6.33/7.83/7.64 |
+| Before | True / off / True / False | 0.00 | 0.00 | 45.57 | 0.00 | 48.65 | 6.22/7.78/7.63 |
+| Before | True / half / True / False | 14.78 | 0.00 | 23.30 | 13.34 | 55.82 | 6.22/7.78/7.63 |
+| Before | True / full / True / False | 14.59 | 0.00 | 27.35 | 11.00 | 55.19 | 5.80/7.67/7.59 |
+| Before | False / off / False / False | 24.32 | 0.00 | 0.00 | 0.00 | 27.73 | 6.54/7.79/7.63 |
+| Before | False / off / True / True | 21.45 | 28.88 | 0.00 | 0.00 | 50.89 | 6.09/7.68/7.59 |
+| Final | False / off / True / False | 20.95 | 11.03 | 0.00 | 0.00 | 34.02 | 12.66/9.50/8.30 |
+| Final | False / half / True / False | 17.33 | 7.81 | 0.00 | 0.00 | 34.02 | 11.65/9.35/8.25 |
+| Final | False / full / True / False | 17.87 | 9.82 | 0.00 | 0.00 | 31.79 | 10.87/9.22/8.21 |
+| Final | True / off / True / False | 0.00 | 0.00 | 18.85 | 12.20 | 38.37 | 10.87/9.22/8.21 |
+| Final | True / half / True / False | 0.00 | 0.00 | 20.24 | 9.66 | 39.84 | 10.16/9.10/8.18 |
+| Final | True / full / True / False | 0.00 | 0.00 | 19.16 | 11.11 | 35.53 | 9.83/9.05/8.16 |
+| Final | False / off / False / False | 19.68 | 0.00 | 0.00 | 0.00 | 22.25 | 9.20/8.93/8.13 |
+| Final | False / off / True / True | 19.26 | 29.94 | 0.00 | 0.00 | 49.34 | 9.20/8.93/8.13 |
+
+| Binary | Cold pick median (ms) | Settled median (ms) | Ending load (1/5/15) |
+|---|---:|---:|---|
+| Before | 35.41 | 1.41 | 5.77/7.58/7.56 |
+| Final | 41.89 | 1.40 | 8.62/8.82/8.09 |
+
+Raw tables: [baseline](benchmarks/msaa-edges-2026-11-09/before-final.json),
+[final](benchmarks/msaa-edges-2026-11-09/optimized.json).
+The intervening `after-final.json` measures split passes before eliminating the
+remaining normal fetch; `after.json` is the rejected half-pixel experiment.
+
+Final no-AO MSAA/off ratio is 1.128 (within 15% in this run). Half-AO is
+1.171 (outside 15%); full-AO is 1.118. Hard edges are 11.03 ms without AO,
+and profiles add 18.91 ms. The <8 ms hard-edge and +8 ms profile gates fail.
+The 41.89 ms cold pick after a submitted frame also fails <20 ms; settled
+pick remains approximately 1.4 ms. Large load changes prohibit attributing
+all before/after differences to these changes.
+
+### Cursor culling follow-up and image validation
+
+A subsequent pick-only change rejects placements whose projected bounds do not
+intersect the cursor region. The cursor bounds include the full pixel and a
+conservative style-width margin for loose edge geometry. Near-plane/eye-plane
+crossings retain the original conservative handling. A separate uniform and
+compute pipeline preserve the normal camera transforms, and full-frame/rectangle
+ID generation continues to use ordinary frustum culling.
+
+The [isolated probe](benchmarks/msaa-edges-2026-11-09/pick_probe.py) drains color
+work before issuing camera updates and point picks. Run it from the repository
+root with `.venv-work/bin/python PROBE MODEL OUTPUT.json`, bounded externally.
+[Before cursor culling](benchmarks/msaa-edges-2026-11-09/direct-pick.json):
+last-five median 24.79 ms, load 7.93/8.46/7.99.
+[After](benchmarks/msaa-edges-2026-11-09/direct-pick-final.json): last-five median
+8.64 ms, load 6.69/7.69/7.77; first request 30.17 ms. This isolates the ID path;
+it is **not** a passing result for the original cold-after-frame gate.
+Frame tables and captures above precede this pick-only follow-up.
+
+`wgpu_look_compare.py --capture-only --output DIRECTORY` was rerun for all three
+reference models. Camera metadata matches. Exact native-image comparison:
+
+| Model | Changed RGB pixels | RGB MAE (0–255) | Result |
+|---|---:|---:|---|
+| marquee | 0 | 0 | identical |
+| pusher car | 0 | 0 | identical |
+| ride | 9,694 | 0.123632 | exact-image gate fails |
+
+[Machine-readable differences](benchmarks/msaa-edges-2026-11-09/pixel-diff.json).
+The ride difference has not been attributed; no claim of unchanged ride pixels
+is made. Final images were visually inspected for gross corruption.
+
+| Model | Baseline native image | Final native image | Final GL/native comparison |
+|---|---|---|---|
+| marquee | [before](benchmarks/msaa-edges-2026-11-09/before/marquee-wgpu.png) | [after](benchmarks/msaa-edges-2026-11-09/final/marquee-wgpu.png) | [comparison](benchmarks/msaa-edges-2026-11-09/final/marquee-comparison.png) |
+| pusher car | [before](benchmarks/msaa-edges-2026-11-09/before/pusher_car_rust-wgpu.png) | [after](benchmarks/msaa-edges-2026-11-09/final/pusher_car_rust-wgpu.png) | [comparison](benchmarks/msaa-edges-2026-11-09/final/pusher_car_rust-comparison.png) |
+| ride | [before](benchmarks/msaa-edges-2026-11-09/before/space_asbuilt_ride-wgpu.png) | [after](benchmarks/msaa-edges-2026-11-09/final/space_asbuilt_ride-wgpu.png) | [comparison](benchmarks/msaa-edges-2026-11-09/final/space_asbuilt_ride-comparison.png) |
+
+Final focused validation: **30 Rust tests passed**, plus zero doc tests;
+**91 Python tests passed** with four existing deprecation warnings. Tests cover
+MSAA attachment sample counts and resolve targets, one submission of each
+geometry stage, Metal validation of depth resolve, zero-length edge rejection,
+and cursor bounds/cache scheduling. The GPU attachment test initially dropped
+its queue before encoder validation; retaining the queue fixed that test fixture.
+Both crates built successfully in release mode. No debug outputs are retained.
+
+Remaining work: hard edges <8 ms across configurations, profiles within +8 ms,
+quad-area/overdraw attribution, useful nonzero screen-size culling compatible
+with the pixel contract, safe style-dependent back-face/width reductions,
+ride pixel identity, half-AO MSAA within 15%, and cold-after-frame/first-request
+pick latency <20 ms. No PR, issue, comment, or push was created.
+
+An additional [ride cursor/full-frame ID check](benchmarks/msaa-edges-2026-11-09/pick_correctness_probe.py)
+passed four successive camera updates, comparing point-pick IDs against a
+full ID refresh read at the same pixel. Its [raw samples](benchmarks/msaa-edges-2026-11-09/pick-correctness.json)
+again show a slow first request (48.68 ms), reinforcing that the first-request
+gate remains open despite the faster subsequent cursor-only work.
