@@ -6191,9 +6191,9 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_renderer_label"):
             self._renderer_label = QLabel(self)
             self.statusBar().addPermanentWidget(self._renderer_label)
-        self._renderer_label.setText(
-            "Metal via wgpu (experimental)" if getattr(doc, "_renderer_wgpu", False)
-            else "OpenGL")
+        from core import renderer_settings
+        self._renderer_label.setText(renderer_settings.status_text(
+            getattr(doc, "_renderer_wgpu", False)))
 
     def _document_first_frame(self, doc):
         """Release optional work only after the renderer reports presentation.

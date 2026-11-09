@@ -10,8 +10,13 @@ def test_shared_menus_and_dock_selection(monkeypatch):
     from views.main_window import MainWindow, _prompts
     from views.scale_dialog import ScaleDialog
     monkeypatch.setattr(_prompts, 'get_text', lambda *a, **k: ('R3c component', True))
-    win = MainWindow()
     import os
+    if os.environ.get('INGETRAZO_R3_GUI') != '1':
+        # This device-free menu test exercises routing, not adapter discovery.
+        from core import renderer_settings
+        monkeypatch.setattr(renderer_settings, 'capability',
+                            lambda: renderer_settings.Capability(True))
+    win = MainWindow()
     if os.environ.get('INGETRAZO_R3_GUI') == '1':
         win.show()
         QApplication.processEvents()
