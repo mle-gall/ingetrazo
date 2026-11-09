@@ -49,7 +49,7 @@ def write(scene, path: Path | None, untitled: int = 1) -> Path:
     """Save ``scene`` into the document's slot; returns the slot path."""
     from formats import igz
     slot = slot_for(path, untitled)
-    igz.save_scene(scene, slot)
+    igz.save_scene(scene, slot, backup=False)
     return slot
 
 
