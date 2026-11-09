@@ -285,7 +285,7 @@ if args.capture_only:
                   resident_bytes=metal.renderer.gpu_memory, size=[1000, 700],
                   method=('unshown interactive passes, state injected' if args.live_frame
                           else 'unshown offscreen export; excludes interactive overlays'),
-                  case=args.audit_case, overlays=args.overlays)
+                  case=args.audit_case, overlays=(args.overlays or args.audit_case == 'export-overlays'))
     report['live_frame'] = args.live_frame
     report['gl_first_capture_seconds'] = gl_first_seconds
     if args.measure_audit and args.live_frame:

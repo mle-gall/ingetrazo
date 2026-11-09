@@ -481,6 +481,7 @@ bytes; peak-process RSS is measured separately in the P7 report.
 `wgpu_annotations.py` is now scheduled in production (including guides-only and
 tool-only documents); exports use its output-aspect layout and omit interactive
 feedback. Tape/guide/axis/reference and nearby-edge facade paths use resident
-inference or shared projection-only GL helpers; no GL pick cache is consulted.
+inference or shared projection-only GL helpers; Arc continuation queries bounded
+resident curve tangents rather than GL placements. No GL pick cache is consulted.
 See `docs/benchmarks/metal-parity/wave1/p7/REPORT.md` for actual capture limits,
 performance samples, and remaining partial findings.

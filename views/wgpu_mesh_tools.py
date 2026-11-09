@@ -358,3 +358,19 @@ class MeshToolAccess:
 
     def _nearby_group_edges(self, px, py, radius_px=48., cap=48):
         return [e for e in self._resident_nearby_edges(px, py, radius_px, cap) if e.in_group]
+
+    def reference_tangent(self, point):
+        """Arc continuation from bounded resident curve features, not GL scans."""
+        from views.wgpu_inference import tangent_direction
+        v = self.view
+        if getattr(v, 'inference_index', None) is None:
+            return None
+        pixel = v._world_to_pixel(point)
+        if pixel is None:
+            return None
+        edges = self._resident_nearby_edges(*pixel, radius_px=12., cap=48)
+        for row in dict.fromkeys(edge.row for edge in edges):
+            direction = tangent_direction(v.inference_index, v.packed, row, point)
+            if direction is not None:
+                return direction
+        return None

@@ -3455,7 +3455,8 @@ Selection uses native face stipple and edge-only group flags; recessed
 Push/Pull suppresses base triangles without rebuilding the pack. P4 live and
 output-aspect export annotation helpers are wired, including real Qt drag box
 events. P6 resident reference/nearby inference is connected to the tool facade;
-no picked face is required for guide/neighbor candidates. Document sun settings
+no picked face is required for guide/neighbor candidates, and Arc continuation
+uses resident curve tangents rather than scanning GL placements. Document sun settings
 and reference-ground visibility drive shadows. Unrelated tag effects no longer
 turn the default unpainted front into explicit grey container paint.
 

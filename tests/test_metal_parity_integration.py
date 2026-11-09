@@ -198,3 +198,18 @@ def test_eraser_guide_click_and_undo(view):
     assert guide not in view.scene.guides
     view.source_viewport.history.undo()
     assert guide in view.scene.guides
+
+
+
+def test_arc_uses_resident_tangent_without_gl_placement_scan(view):
+    from tools.arc import ArcTool
+    from views.wgpu_inference import prepare
+    points=[QVector3D(np.cos(t),np.sin(t),0) for t in np.linspace(0,np.pi/2,9)]
+    for a,b in zip(points,points[1:]):
+        view.scene.mesh.add_edge(a,b).curve=42
+    view.scene.version+=1;view.set_scene(view.scene)
+    view.inference_index=prepare(view.packed,view.scene)
+    view.tools._placements=lambda:pytest.fail('must not scan GL placements')
+    tool=ArcTool();tool.start_point=points[0]
+    direction=tool._tangent_at_start(view.tools)
+    assert direction is not None and abs(direction.y()) > .999
