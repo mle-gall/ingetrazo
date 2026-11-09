@@ -1,0 +1,9 @@
+{
+  "reference": "../wgpu-integration-2026-11-09/marquee-ao-half-wgpu.png",
+  "size": [
+    2000,
+    1400
+  ],
+  "rgb_mae": 0.0015401190476190475,
+  "changed_pixels": 272
+}

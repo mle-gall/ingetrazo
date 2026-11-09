@@ -2208,3 +2208,136 @@ match the supplied baseline: 14 translations (including Arabic), cursor pick,
 extension wrap, hidden panels and toolbar bold. The baseline swatch-tooltip
 failure did not reproduce; **zero new failures**. No batch timed out or needed
 splitting. The full log and focused/native-test evidence are in the report.
+
+## Renderer — perf: edges, pick, AO — 2026-11-09
+
+Local work on `renderer/perf-edges-pick`; **the four performance gates remain
+open**. No push or PR. This is a partial implementation and measurement report,
+not acceptance of the requested renderer performance work.
+
+### Changes that now hold
+
+- Filled-mode cold picks submit culling and full-resolution face IDs/depth
+  separately from rendering. Texture alpha rejection remains enabled. Line-only
+  prototypes remain pickable; wireframe retains its edge-inclusive fallback.
+  No display background, AO, MSAA, overlay or presentation is submitted by the
+  filled-mode ID refresh. An earlier frame on the same GPU queue can still delay
+  the synchronous readback. The target is **not** half resolution.
+- MSAA's single-sample AO input pass suppresses color writes and no longer
+  replays hard/profile edges. MSAA draws the final edges once after AO. AO still
+  requires the extra single-sample face/depth pass.
+- Culling caches the clip-from-local matrix once per surviving placement. Edge
+  vertices read it instead of multiplying two matrices at every quad corner.
+  The cull-to-edge record grows from 16 to 80 bytes per allocated placement;
+  the 28-byte face, 48-byte edge and 80-byte instance ABIs are unchanged.
+- Scattered instance updates issue one enclosing-range `write_buffer`, using the
+  CPU mirror to preserve untouched rows, highlights and overrides. This trades
+  more uploaded bytes for fewer queue calls; widely separated selections can
+  upload almost the entire instance buffer. Transform updates reset the MSAA
+  ID-settle counter. Existing Python bounds updates already touch changed rows.
+
+### Method and before/after samples
+
+Apple M1 Max, Metal, full ride read-only, 2000×1400 physical pixels. Command:
+
+```sh
+.venv-work/bin/python scripts/wgpu_perf_measure.py \
+  /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz \
+  docs/benchmarks/wgpu-perf-2026-11-09/after.json
+```
+
+Every native process was wrapped in Python `subprocess.run(timeout=290)`.
+Each frame configuration uses 10 warm-up frames, 20 retained frames and 120 ms
+sleep after submission. Frames use offscreen rendering; GPU timestamps are
+asynchronous and may refer to earlier frames. Picking uses five camera changes
+per case; settled picking includes an 80 ms pause, a second frame and a 120 ms
+pause. No capture readback is included in frame timing. Source documents were
+never written. No debug build output directories were generated.
+
+Machine load was uncontrolled: the owner's other processes were left alone.
+Release compilation overlapped portions of the baseline run. The after matrix
+ran without this agent's builds/tests. Frame variability is large enough that
+AO half/full can appear faster than AO off; these are **not causal pass-cost
+measurements** and do not establish isolated AO or MSAA gates. The after matrix
+includes the independent pick pass, duplicate-edge removal and transform cache;
+it precedes the enclosing-range upload and line-only pick preservation changes.
+
+| Whole-frame GPU median, hard edges on / profiles off | Before (ms) | After (ms) |
+| --- | ---: | ---: |
+| MSAA off, AO off | 48.91 | 43.84 |
+| MSAA off, AO half | 41.87 | 36.53 |
+| MSAA off, AO full | 39.57 | 38.55 |
+| MSAA on, AO off | 52.41 | 35.85 |
+| MSAA on, AO half | 72.61 | 54.73 |
+| MSAA on, AO full | 78.33 | 53.09 |
+| MSAA off, AO off, edges off | 26.75 | 33.77 |
+| MSAA off, AO off, hard edges + profiles | 62.29 | 55.76 |
+
+| Pick wall median | Before (ms) | After (ms) | Gate |
+| --- | ---: | ---: | --- |
+| Immediately after camera frame | 36.67 | 43.74 | **Not met: <20 ms** |
+| After settle | 1.42 | 1.43 | Essentially unchanged in this sample |
+
+The original integrated measurements remain the reference: hard-edge pass
+31.39 ms, cold pick 90.90 ms, dispatched drag p95 38.36 ms. They used different
+style/pacing/load conditions and must not be compared directly to the whole-frame
+medians above. Subtracting separate noisy frame medians is not a stage timestamp.
+[Raw frame and pick samples](benchmarks/wgpu-perf-2026-11-09/after.json) and
+[baseline samples](benchmarks/wgpu-perf-2026-11-09/before.json) are retained.
+
+### Validation and outstanding work
+
+Isolated environment and builds:
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_*.py
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --release --manifest-path rust/ingetrazo_render/Cargo.toml
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --release --manifest-path rust/ingetrazo_core/Cargo.toml
+```
+
+Python: **74 passed**. Renderer: **22 passed**, zero doc tests. Core: **6 passed**.
+The new Python test verifies a 1,000-row sparse preview makes one update call
+and no render/pick call; it does not assert that the complete hover/frame loop
+never writes IDs. Rust checks the enclosing upload range and cached transform
+math including mirrors and near-plane crossings. No broader suite was run.
+
+Still required: GPU stage timestamps and submitted/surviving quad/overdraw
+counters; isolated classification/fill ablations; per-edge screen-size culling
+and its tests; half-resolution IDs with exact cursor refinement and tests;
+removing the extra MSAA AO depth raster or reducing its cost; a full drag-loop
+ID-scheduling regression; and controlled runs establishing all four gates.
+No far-placement edge simplification or width change is included. Hard-only
+command templates and shared face/edge placement culling already existed.
+
+Final native checks used `scripts/wgpu_r2b_smoke.py` and
+`scripts/wgpu_r2b_measure.py` with the same external 290-second cap. The smoke
+passed cache invalidation, growth, prototype replacement/insertion and removal.
+The drag script uses MSAA/AO off, 20 warm-up frames with 16 ms pacing, then 30
+dispatched preview frames with 16 ms sleeps. It selected **1,000 placements**.
+Scene loading and preparation are excluded. Other machine workloads were
+uncontrolled; this agent's final Rust recheck overlapped process startup.
+
+| Dispatched drag (1,000 placements) | Integrated reference | This run |
+| --- | ---: | ---: |
+| End-to-end p95 | 38.36 ms | **39.71 ms — gate not met** |
+| Hover p95 | Not isolated | 34.41 ms |
+| Matrix preview submission p95 | Not isolated | 0.36 ms |
+| View/frame submission p95 | Not isolated | 5.34 ms |
+| Overlay raster/upload p95 (inside frame) | Not isolated | 2.38 ms |
+
+The sampled drag remains dominated by hover, including the synchronous ID
+readback waiting on previous GPU work. Batching matrix writes does not solve
+that dependency. Component p95s are not additive.
+[Raw drag samples](benchmarks/wgpu-perf-2026-11-09/drag.txt).
+
+The bounded marquee AO-half capture was visually inspected. Against the
+committed integration capture at 2000×1400, RGB MAE is **0.00154012**, with
+**272 / 2,800,000 pixels** changed. This is close, but not pixel-identical and
+not a full visual regression suite. The cache moves floating-point matrix
+work to the compute pass; duplicate MSAA edge rendering is also removed.
+[Current capture](benchmarks/wgpu-perf-2026-11-09/marquee-metal-ao-half-wgpu.png),
+[comparison metrics](benchmarks/wgpu-perf-2026-11-09/capture-comparison.json).

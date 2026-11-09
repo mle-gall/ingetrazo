@@ -1,0 +1,3 @@
+loaded 19
+packed 237
+{"scale": 2.0, "size": [2000, 1400], "rgb_mae": null, "frames": {}}
