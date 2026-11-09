@@ -7,6 +7,8 @@ from core.group import iter_placements
 
 class MeshToolAccess:
     mesh_outline_preview = True
+    # Do not borrow the GL viewport's cached loose-edge screen projection.
+    _ledge_screen = None
     _OCCLUSION_STEP_PX = 12.
     _OCCLUSION_MAX_SAMPLES = 128
     _OCCLUSION_SPLIT = 8
@@ -123,19 +125,35 @@ class MeshToolAccess:
         if picked is None or picked[0] is self.scene.mesh:
             return None
         group = picked[1]
-        roots = (self.scene.edit_group.children if self.scene.edit_group is not None
-                 else self.scene.groups)
-        return next((root for root in roots or ()
-                     if self.scene.entity_selectable(root)
-                     and any(g is group for g, _ in iter_placements(root))), None)
+        target = self.view.context_placement(group)
+        return target if target is not None and self.scene.entity_selectable(target) else None
+
+    def pick_locked_group(self, x, y):
+        picked = self._picked_mesh(x, y)
+        target = self.view.context_placement(picked[1]) if picked else None
+        if target is not None and getattr(target, 'locked', False):
+            visible, layer_locked = self.scene._layer_state(target)
+            if visible and not layer_locked:
+                return target
+        return None
+
+    def pick_locked_image_plane(self, x, y):
+        from views.viewport import Viewport
+        return Viewport.pick_locked_image_plane(self, x, y)
+
+    def _face_or_image_in_front(self, x, y):
+        return self.pick_face(x, y)
+
+    def _context_pick(self, x, y):
+        from views.viewport import Viewport
+        return Viewport._context_pick(self, x, y)
 
     def pick_edge(self, x, y):
-        picked = self._picked_mesh(x, y)
-        if picked is None or picked[0] is not self.scene.mesh:
-            return None
         best, distance = None, 12.
-        for edge in picked[0].edges:
-            if getattr(edge, 'hidden', False) or getattr(edge, 'soft', False):
+        for edge in self.scene.mesh.edges:
+            if not self.scene.entity_selectable(edge) or (
+                    (getattr(edge, 'hidden', False) or getattr(edge, 'soft', False))
+                    and not self.scene.show_hidden_geometry):
                 continue
             a, b = self._world_to_pixel(edge.a), self._world_to_pixel(edge.b)
             if a is None or b is None:
@@ -172,23 +190,38 @@ class MeshToolAccess:
         return hit is not None and (hit-origin).length() + 1e-4 < (point-origin).length()
 
     def set_hover(self, entity, placement=None):
-        self._mesh_hover = entity
+        self._mesh_hover = self._hover_entity = entity
 
     def set_suppressed_faces(self, faces):
-        # The native sweep is an outline; the resident base remains visible.
-        pass
+        if type(getattr(self, 'tool', None)).__name__ == 'TexturePositionTool':
+            # TexturePreview replaces the resident material stream itself;
+            # suppressing the base would also suppress its mapped preview.
+            return
+        faces = tuple(faces or ())
+        if {id(f) for f in faces} == {id(f) for f in getattr(self.view, 'suppressed_faces', ())}:
+            return
+        self.view.suppressed_faces = faces
+        # The existing packer accepts per-face paint overrides. Hide only the
+        # preview's base faces without mutating the document or its history.
+        self.view.set_scene(self.scene)
+        self.view.update()
 
     def mesh_feedback(self):
         lines = list(self.tool.rubber_band_lines())
         lines.extend(self.tool.guide_preview_lines())
-        # Sweep faces also need a visible envelope, beyond the path itself.
-        for face in getattr(self.tool, 'preview_faces', lambda: [])():
+        faces = list(getattr(self.tool, 'preview_faces', lambda: [])())
+        self.view.preview_faces = faces
+        # TODO(P2): set_preview_faces accepts world-space triangle float3s;
+        # an empty (0,3,3) array clears the depth-tested transient pass.
+        transient = getattr(getattr(self.view, 'renderer', None), 'set_preview_faces', None)
+        if transient is not None:
+            triangles = [tuple(p.toTuple() for p in tri)
+                         for face in faces for tri in face.triangulate()]
+            transient(np.asarray(triangles, np.float32).reshape(-1, 3, 3))
+        # Until P2 lands, show the outline, never an unoccluded face fill.
+        for face in faces:
             points = list(getattr(face, 'vertices', face))
             lines.extend(zip(points, points[1:] + points[:1]))
-            pixels = tuple(self._world_to_pixel(p) for p in points)
-            if len(pixels) >= 3 and all(p is not None for p in pixels):
-                self.view.overlay_primitives.append(Primitive(
-                    'polygon', pixels, '#d8cbb0', fill='#a0d8cbb0'))
 
         state = getattr(self.tool, 'scale_box_state', lambda: None)()
         if state:
@@ -228,6 +261,9 @@ class MeshToolAccess:
     def draw_annotations(self, painter):
         from views.viewport import Viewport
         self._hover_entity = getattr(self, '_mesh_hover', None)
+        marks = getattr(self.view, '_draw_selection_marks', None)
+        if marks is not None:
+            marks(painter)
         Viewport._draw_dimensions(self, painter)
         Viewport._draw_text_labels(self, painter)
         Viewport._draw_geo_paths(self, painter)
@@ -243,6 +279,16 @@ class MeshToolAccess:
                     pixels = self._segment_to_pixels(*segment)
                     if pixels is not None:
                         painter.drawLine(QPointF(*pixels[0]), QPointF(*pixels[1]))
+        if getattr(self, 'reference_mode', None) is not None:
+            Viewport._draw_reference_label(self, painter)
+        elif getattr(self, 'axis_lock', None) is not None:
+            Viewport._draw_axis_lock_label(self, painter)
+        elif getattr(self.tool, 'plane_lock', None) is not None:
+            Viewport._draw_plane_lock_label(self, painter)
+        elif self.last_snap is not None:
+            Viewport._draw_inference_label(self, painter)
+        if getattr(self, 'linear_inference_mode', 'all') != 'all':
+            Viewport._draw_linear_mode_label(self, painter)
         hook = getattr(self.tool, 'draw_overlay', None)
         if hook is not None:
             hook(self, painter)
@@ -276,7 +322,18 @@ class MeshToolAccess:
         from views.viewport import Viewport
         return Viewport._draw_geo_path_label(self, *args)
 
-    pick_section_plane = _unsupported_pick
+    def section_plane_frame(self, plane):
+        from views.viewport import Viewport
+        return Viewport.section_plane_frame(self, plane)
+
+    def _clip_segment_front(self, a, b):
+        from views.viewport import Viewport
+        return Viewport._clip_segment_front(self, a, b)
+
+    def pick_section_plane(self, x, y):
+        from views.viewport import Viewport
+        return Viewport.pick_section_plane(self, x, y)
+
     pick_image = _unsupported_pick
     pick_image_plane = _unsupported_pick
     _group_obb = _unsupported_pick
@@ -289,6 +346,11 @@ class MeshToolAccess:
             billboards.restore()
             billboards.key = None
         self.original = self.view.packed.instances[self.ids].copy()
+
+    def set_groups_preview_offset(self, delta):
+        matrix = QMatrix4x4()
+        matrix.translate(delta)
+        self.set_groups_preview_matrix(matrix)
 
     def set_groups_preview_matrix(self, matrix):
         if self.original is None:

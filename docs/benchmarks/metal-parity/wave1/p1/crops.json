@@ -1,0 +1,93 @@
+[
+  {
+    "case": "selected-face",
+    "path": "selected-face.png",
+    "gl": "synthetic-selected-face-gl.png",
+    "metal": "synthetic-selected-face-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 116399
+  },
+  {
+    "case": "hover-edge",
+    "path": "hover-edge.png",
+    "gl": "synthetic-hover-edge-gl.png",
+    "metal": "synthetic-hover-edge-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 108892
+  },
+  {
+    "case": "selected-group",
+    "path": "selected-group.png",
+    "gl": "synthetic-selected-group-gl.png",
+    "metal": "synthetic-selected-group-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 112905
+  },
+  {
+    "case": "box-window",
+    "path": "box-window.png",
+    "gl": "synthetic-box-window-gl.png",
+    "metal": "synthetic-box-window-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 108873
+  },
+  {
+    "case": "box-crossing",
+    "path": "box-crossing.png",
+    "gl": "synthetic-box-crossing-gl.png",
+    "metal": "synthetic-box-crossing-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 111050
+  },
+  {
+    "case": "section-tool",
+    "path": "section-tool.png",
+    "gl": "synthetic-section-tool-gl.png",
+    "metal": "synthetic-section-tool-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 134013
+  },
+  {
+    "case": "export-overlays",
+    "path": "export-overlays.png",
+    "gl": "synthetic-export-overlays-gl.png",
+    "metal": "synthetic-export-overlays-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 108071
+  }
+]

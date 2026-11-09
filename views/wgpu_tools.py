@@ -5,8 +5,6 @@ once, by the same commands used by MoveTool, after the user commits.
 """
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QVector3D
-from core.group import Group, iter_placements
 from core.history import MoveGroupCommand, CompoundCommand
 from tools.base import ToolContext
 from tools.tape import TapeMeasureTool
@@ -15,6 +13,7 @@ from views.wgpu_overlay import Primitive
 TOOL_DISPATCH = {'SelectTool': 'select',
  'TapeMeasureTool': 'tape',
  'MoveTool': 'move',
+ 'SectionPlaneTool': 'mesh',
  'LineTool': 'mesh',
  'RectangleTool': 'mesh',
  'PushPullTool': 'mesh',
@@ -73,6 +72,18 @@ class NativeTools(MeshToolAccess):
         self.groups = []
         self.value_buffer = ""
 
+    @property
+    def scene(self):
+        return getattr(self.view, 'scene', None) or self.view.source_viewport.scene
+
+    @property
+    def last_snap(self):
+        return getattr(self.view, 'last_snap', None)
+
+    @property
+    def active_tool(self):
+        return self.tool
+
     def sync(self):
         source = self.view.source_viewport
         tool = getattr(source, 'active_tool', None)
@@ -89,9 +100,8 @@ class NativeTools(MeshToolAccess):
         self.tool = tool
         self.mode = TOOL_DISPATCH.get(type(tool).__name__, 'select' if tool is None else 'inert')
         if self.mode == 'move':
-            selection = self.view.scene.selection
-            if not selection or not all(isinstance(g, Group) for g in selection):
-                self.mode = 'mesh'
+            # Share MoveTool's copy toggle, numeric values and array window.
+            self.mode = 'mesh'
         if self.mode == 'tape':
             self.tool.on_cancel(self)
         if hasattr(tool, '_viewport'):
@@ -121,6 +131,10 @@ class NativeTools(MeshToolAccess):
         if ctx is None:
             return
         if mode == 'mesh':
+            if (type(self.tool).__name__ == 'MoveTool'
+                    and self.tool.start_point is None
+                    and ctx.modifiers & Qt.ControlModifier and not self.tool._copy):
+                self.tool._toggle_copy(self, say=False)
             self.tool.on_hover(ctx)
             self.tool.on_click(ctx)
             self.start_point = getattr(self.tool, 'start_point', None)
@@ -131,36 +145,6 @@ class NativeTools(MeshToolAccess):
             self.tool.on_click(ctx)
             self.start_point = getattr(self.tool, 'start_point', None)
             self.measurements()
-        elif mode == 'move':
-            if self.start_point is None:
-                self.groups = [g for g in self.view.scene.selection if isinstance(g, Group)]
-                # A selected parent carries descendants; never move them twice.
-                children = {id(child) for g in self.groups for child, _ in list(iter_placements(g))[1:]}
-                self.groups = [g for g in self.groups if id(g) not in children]
-                if not self.groups:
-                    self.flash_status('Select whole placements to move')
-                    return
-                selected = {g.uid for root in self.groups for g, _ in iter_placements(root)}
-                self.ids = np.asarray([row for uid in selected for row in self.view.uid_rows.get(uid, ())], np.int64)
-                billboards = getattr(self.view, '_billboards', None)
-                if billboards is not None:
-                    billboards.restore()
-                    billboards.key = None
-                self.original = self.view.packed.instances[self.ids].copy()
-                self.start_point = QVector3D(ctx.world)
-                self.tool.start_point = QVector3D(ctx.world)
-                self.preview_delta = (0., 0., 0.)
-                self.hover(event)
-            else:
-                delta = ctx.world - self.start_point
-                self.restore()
-                if delta.lengthSquared() > 1e-18:
-                    self.view.source_viewport.history.execute(move_command(self.groups, delta))
-                    self.view.source_viewport.notify_scene_changed()
-                    self.view.set_scene(self.view.scene)
-                self.start_point = None
-                self.tool.start_point = None
-                self.original = None
         self.view.update()
 
     def hover(self, event):
@@ -179,17 +163,6 @@ class NativeTools(MeshToolAccess):
             self.measurements()
             lines = self.tool.rubber_band_lines()
             label = self.tool.value_label()
-        elif mode == 'move' and self.start_point is not None:
-            delta = (ctx.world-self.start_point).toTuple()
-            if delta != self.preview_delta:
-                rows = self.original.copy()
-                rows['world'][:, 3, :3] += np.asarray(delta, np.float32)
-                self.write_rows(rows)
-                self.preview_delta = delta
-            lines = [(self.start_point, ctx.world)]
-            from core.units import fmt_len
-            label = (fmt_len((ctx.world-self.start_point).length()), (ctx.world+self.start_point)*.5)
-            self.view.source_viewport.measurementChanged.emit(label[0])
         else:
             return
         for a, b in lines:
@@ -214,31 +187,6 @@ class NativeTools(MeshToolAccess):
                 self.mesh_feedback()
                 return True
             return self.tool.on_key(self, event.key(), event.modifiers())
-        if self.mode != 'move' or self.start_point is None:
-            return False
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            from views.viewport import Viewport
-            value = Viewport._parse_value_buffer(self.value_buffer)
-            if isinstance(value, (int, float)) and self.hover_point is not None:
-                delta = self.hover_point - self.start_point
-                if delta.lengthSquared() > 1e-18:
-                    self.restore()
-                    self.view.source_viewport.history.execute(move_command(self.groups, delta.normalized()*value))
-                    self.original = None
-                    self.start_point = None
-                    self.tool.start_point = None
-                    self.view.source_viewport.notify_scene_changed()
-                    self.view.set_scene(self.view.scene)
-            self.value_buffer = ''
-            return True
-        text = event.text()
-        if text and not (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)) and (text[0].isdigit() or text in '.-+,'):
-            self.value_buffer += text
-            self.view.source_viewport.measurementChanged.emit(self.value_buffer)
-            return True
-        if event.key() == Qt.Key_Backspace:
-            self.value_buffer = self.value_buffer[:-1]
-            return True
         return False
 
     def _current_token_tail(self):
@@ -330,7 +278,8 @@ class NativeTools(MeshToolAccess):
             self._notified_revision = revision
         self.view.update()
 
-    # R2b measures points, not guide creation from GL edge picking.
+    # TODO(P6): expose pick_edge_any/pick_guide/pick_axis(access, x, y)
+    # from wgpu_inference; these facade hooks must not borrow GL pick caches.
     def pick_edge_any(self, x, y):
         return None
 

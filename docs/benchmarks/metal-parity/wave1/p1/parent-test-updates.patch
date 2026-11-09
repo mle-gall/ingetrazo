@@ -1,0 +1,42 @@
+--- a/tests/test_wgpu_interaction.py
++++ b/tests/test_wgpu_interaction.py
+@@ -75,12 +75,14 @@
+     view.select_rows([0])
+     assert view.scene.selection == {group}
+     view.select_rows([0], Qt.ShiftModifier)
++    assert not view.scene.selection
++    view.select_rows([0], Qt.ControlModifier)
+     assert view.scene.selection == {group}
+-    view.select_rows([0], Qt.ControlModifier)
++    view.select_rows([0], Qt.ControlModifier | Qt.ShiftModifier)
+     assert not view.scene.selection
+     view.scene.select([group])
+     view.sync_selection()
+-    assert calls[-1][0] == [0]
++    assert calls[-1][0] == []  # group edges are drawn by the selection overlay
+ 
+ 
+ def test_rectangle_maps_to_selection(view):
+--- a/tests/test_wgpu_tool_coverage.py
++++ b/tests/test_wgpu_tool_coverage.py
+@@ -8,8 +8,7 @@
+     root = Path(__file__).resolve().parents[1]
+     registered = registry(root)
+     assert set(TOOL_DISPATCH) <= set(registered.values())
+-    assert {key for key, cls in registered.items() if cls not in TOOL_DISPATCH} == {
+-        'section'}
++    assert {key for key, cls in registered.items() if cls not in TOOL_DISPATCH} == set()
+     rendered = table(root)
+     for key in registered:
+         assert f'| {key} |' in rendered
+--- a/docs/performance-plan.md
++++ b/docs/performance-plan.md
+@@ -2943,7 +2943,7 @@
+ | protractor | ProtractorTool | native | rubber_band_lines |
+ | text | TextTool | native | pick_edge, pick_face_any, rubber_band_lines |
+ | geopath | GeoPathTool | native | _world_to_pixel, rubber_band_lines |
+-| section | SectionPlaneTool | inert with note — after the crate work | rubber_band_lines |
++| section | SectionPlaneTool | native — after the crate work | rubber_band_lines |
+ | position_camera | PositionCameraTool | native | rubber_band_lines |
+ | walk | WalkTool | native | rubber_band_lines |
+ | look_around | LookAroundTool | native | rubber_band_lines |
