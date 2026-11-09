@@ -236,3 +236,35 @@ def test_a_links_untagged_pieces_take_their_owners_tag_colour():
     assert effective_attrs({"layer": "Site / Untagged"}, paint)["color"] == (1.0, 0.0, 0.0)
     assert effective_attrs({"layer": "Site / Steel"}, paint)["color"] == (1.0, 0.0, 0.0)
     assert effective_attrs({}, paint)["color"] == (1.0, 0.0, 0.0)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_reload_prunes_obsolete_mirror_folders(tmp_path, legacy):
+    src = _source(tmp_path / "Site.igz")
+    source = Scene()
+    igz.load_into(source, src)
+    source.layer_folders += ["X", "Still occupied"]
+    source.folder_parents = {"Structure": "X"}
+    source.layers.append(Layer("Stone", folder="Still occupied"))
+    igz.save_scene(source, src)
+    host, _ = _host_with_link(tmp_path, src)
+    if legacy:
+        links.registry(host)[str(src)].pop("folder_uids")
+    host.layer_folders += ["Host", "Host child", "Site / Personal"]
+    host.folder_parents.update({"Host child": "Site / Still occupied",
+                                "Site / Personal": "Site"})
+    host.layers.append(Layer("Personal", folder="Host child"))
+    source.layer_folders = ["Y"]
+    source.folder_parents.clear()
+    source.layer("Wood").folder = source.layer("Stone").folder = "Y"
+    igz.save_scene(source, src)
+
+    links.reload(host, src)
+    assert host.layer("Site / Wood").folder == "Site / Y"
+    assert {"Site / Y", "Host", "Site / Personal", "Site / Still occupied",
+            "Host child"} <= set(host.layer_folders)
+    assert host.folder_parents["Host child"] == "Site / Still occupied"
+    for removed in ("Site / X", "Site / Structure"):
+        assert removed not in host.layer_folders
+        assert removed not in host.folder_parents
+        assert removed not in host.layer_folder_uids

@@ -328,8 +328,9 @@ def _apply_tags(scene, path, tags) -> None:
     folder of the file inside «Linked files», the source's folders below
     it, each tag as the source shows it unless overridden here. Tags of
     this file the source no longer has are dropped when nothing uses
-    them."""
-    from core.layers import Layer, folders_of, move_folder
+    them. The ride-model agent (2026-11-09) also found empty mirror
+    folders left behind when the source reorganised its tags."""
+    from core.layers import Layer, folders_of, move_folder, remove_folder
     entry = _entry(scene, path)
     overrides = entry["overrides"]
     # What the source said last time: a tag the host now shows otherwise
@@ -345,12 +346,31 @@ def _apply_tags(scene, path, tags) -> None:
 
     top = folder(LINKED_FOLDER, None)
     own = folder(stem(path), top)
-    src_folders = {}
-    for f in tags.get("folders") or ():
-        src_folders[f] = stem(path) + SEP + f
-    for f in tags.get("folders") or ():
+    existing = set(folders_of(scene))
+    # Older hosts recorded only mirrored tags. Recover their namespaced
+    # folder paths before those tags move, without claiming unrelated folders.
+    if "folder_uids" in entry:
+        owned = set(entry["folder_uids"])
+    else:
+        owned = set()
+        old_tags = set(entry.get("tags", ()))
+        for ly in scene.layers:
+            f = ly.folder if ly.name in old_tags else None
+            chain = set()
+            while f in existing and f.startswith(own + SEP) and f not in chain:
+                chain.add(f)
+                f = scene.folder_parents.get(f)
+            if f == own:
+                owned.update(scene.layer_folder_uids[name] for name in chain)
+    src_folders = {f: own + SEP + f for f in tags.get("folders") or ()}
+    added = [name for name in src_folders.values() if name not in existing]
+    if added:
+        scene.layer_folders = folders_of(scene) + added
+        folders_of(scene)  # assign identities before placing children
+        owned.update(scene.layer_folder_uids[name] for name in added)
+    for f, name in src_folders.items():
         parent = tags.get("parents", {}).get(f)
-        folder(src_folders[f], src_folders.get(parent, own))
+        move_folder(scene, name, src_folders.get(parent, own))
 
     wanted = []
     for raw in tags.get("layers") or ():
@@ -380,6 +400,21 @@ def _apply_tags(scene, path, tags) -> None:
         for name in old:
             overrides.pop(name, None)
             last.pop(name, None)
+
+    # Remove obsolete leaves first so a live layer or host subfolder
+    # protects every ancestor. Only folders this link created qualify.
+    current = set(src_folders.values())
+    candidates = {f for f in folders_of(scene) if f not in current
+                  and f.startswith(own + SEP) and scene.layer_folder_uids[f] in owned}
+    occupied = {ly.folder for ly in scene.layers}
+    while candidates:
+        leaves = candidates - occupied - set(scene.folder_parents.values())
+        if not leaves:
+            break
+        for f in leaves:
+            remove_folder(scene, f)
+        candidates -= leaves
+    entry["folder_uids"] = sorted(owned.intersection(scene.layer_folder_uids.values()))
 
 
 def _used_tags(scene) -> set:
