@@ -375,14 +375,15 @@ selection, hidden-geometry visibility, hidden-object visibility.
 - `material_opacity=False`: opt into the wave-1 alpha ABI. Byte zero means
   unpainted; 1–255 means painted with effective opacity alpha/255. This changes
   the old provenance threshold only when enabled. Byte 254 is no longer a
-  two-sided paint marker in this mode. `views.wgpu_style.style_payload` leaves
-  this disabled until `scene.wgpu_material_opacity=True` (TODO(P3): enable after
-  the new bake). Opaque fragments write depth; partial alpha goes through
+  two-sided paint marker in this mode. `views.wgpu_style.style_payload` enables
+  it for P3 packs. Opaque fragments write depth; partial alpha goes through
   weighted blended OIT against opaque depth with no depth writes, after opaque
   AO. Partial regular texture alpha multiplies material alpha; face-me flag 8
   keeps the hard 0.5 texture cut. Picking retains nonzero-alpha fragments.
-  This implementation replays face commands for OIT when enabled, even for an
-  all-opaque pack. Disable it for the legacy/performance baseline.
+  `PackedScene.upload` classifies material/back/texture alpha and calls
+  `set_material_transparency(bool)`. Opaque packs skip OIT and its depth resolve
+  while retaining the new alpha ABI. Geometry edits conservatively enable OIT
+  when introducing transparency; a full repack recomputes classification.
 - `group_selection_edges=False`: native default preserves the old marks;
   Python style payload enables it. Group selection/hover retains edge highlights
   and removes face dots. P1 supplies loose-face dots separately with
@@ -394,9 +395,9 @@ selection, hidden-geometry visibility, hidden-object visibility.
   depth map, bilinear 3×3 PCF, sun-facing illumination, and a z=-0.005 ground
   catcher. Matrix is GL/Qt column-major light VP; Rust converts depth to 0..1.
   `sun_payload` computes GL's geography/date/north and light fit. Invalid dates,
-  night, the kill switch, and technical sheet styles disable it. TODO(P1):
-  explicitly disable the catcher when map/terrain/photo geometry supplies ground,
-  and suppress shadows for any additional composer-only styles.
+  night, the kill switch, and technical sheet styles disable it. The catcher
+  follows the document map/terrain/photo visibility predicates. Reference
+  geometry itself still requires P5.
 
 The shadow map includes off-camera casters, ignores hidden/edit-hidden rows,
 clips at the section plane, rejects material opacity below 0.7, and reuses the
@@ -414,25 +415,28 @@ Tool/pack integration APIs (all empty/inactive initially):
   28-byte vertices; triangle count divisible by 3, edge count by 2. RGB/material
   shading, alpha blending and scene depth testing; opaque preview triangles
   write depth. Pass empty arrays to clear. No texture table is supplied for this
-  transient API. TODO(P1): replace projected QPainter feedback and refresh during
-  Push/Pull / Follow Me, clearing on commit/cancel.
+  transient API. Mesh tools upload their preview faces and edges during pointer
+  motion and clear them on commit/cancel. Select uses the edge stream for loose
+  selected/hovered edges.
 - `set_face_marks(triangles)`: same world-space vertex layout; caller supplies
-  highlight RGB. Depth-tested 2×2/6px stipple, no depth writes. TODO(P1): resolve
-  selected loose faces to these triangles (and choose their contrast color).
+  highlight RGB. Depth-tested 2×2/6px stipple, no depth writes. The view resolves
+  editable selected faces through cached prototype triangle ranges and the GL
+  contrast-color chooser. Group flags highlight edges only.
 - `set_suppressed_faces([(prototype, first_triangle, triangle_count), ...])`:
   indices are local to that prototype's FACE command, not face IDs or source
   vertex offsets. Validates all ranges before writing; makes the triangles
   degenerate in the resident index buffer, affecting color, depth/IDs, AO and
   shadows. `[]` restores the original indices. No scene bake is required.
-  TODO(P1/P3): retain face-to-triangle ranges. Suppression applies to every
-  placement of a shared prototype; duplicate before a placement-local edit.
+  The active editable mesh supplies cached face-to-triangle ranges. Suppression
+  applies to every placement of a shared prototype; group editing uses the
+  scene's existing isolated world copy before a placement-local edit.
   Resend after prototype replacement. New scenes clear transient meshes.
 - `set_profile_exclusions([(prototype, xyzxyz_flat_list), ...])`: source soft
   endpoint pairs in prototype space. Converts matching hard records to
   silhouette-only candidates and moves them outside the hard-only indirect
   range, preserving boundary outlines with profiles on. `[]` restores the
-  uploaded edge policy. TODO(P3): supply the soft/smooth metadata; geometry
-  alone cannot recover it. Resend after repacking/replacement. Endpoint matching
+  uploaded edge policy. The pack retains source soft/hidden endpoint pairs;
+  soft prototypes weld repeated source coordinates for corner-normal fans. Resend after repacking/replacement. Endpoint matching
   is exact float32, consistent with the packed positions.
 - `set_hidden_geometry(vertices, indices, hidden_commands,
   hidden_edge_commands, object_rows=[])`: separate original hidden streams,
@@ -440,8 +444,10 @@ Tool/pack integration APIs (all empty/inactive initially):
   uint8 views. Hidden faces become a 1px/4px grid; hidden edges use 3px dashes.
   `object_rows` names hidden placement IDs without allocating a new instance
   flag bit; those rows also reveal their ordinary resident faces/edges.
-  TODO(P3): provide the two hidden ranges. TODO(P1): derive `object_rows` from
-  hidden-object metadata and refresh after transforms/visibility changes.
+  The pack supplies both hidden ranges. Object rows require bit 4 and exclude
+  bit 5 / edit-hidden bit 7. The view refreshes after transform/visibility and
+  edit-context changes. Neither reveal toggle enabled means no ghost expansion
+  or upload; changing the document toggles invalidates the pack.
   The ghost upload expands placement transforms on the CPU, off the ordinary
   frame path. It currently uses vertex colors, not material textures.
 
@@ -460,3 +466,21 @@ contains a synthetic alpha-byte pack and can wrap the established audit script
 to inject pending P3 alpha/soft metadata without modifying production packing.
 Native tests use an **unshown Cocoa NSView**; ordinary Qt-offscreen test runs
 skip them. There are no live application launches in this package.
+
+### P7 production integration
+
+Material header word 3 bit 0 now means “matching back uses front vertex RGBA”.
+It avoids allocating 32-byte per-corner records for an entirely matching-back,
+untextured prototype, without sacrificing opacity. Other header bits remain
+reserved. Incremental edits expand only the changed prototype when using the
+legacy corner-record update API. Core and renderer extensions must be rebuilt
+together. This reduces the ride's material stream from 815,977,536 to 255,552
+bytes; peak-process RSS is measured separately in the P7 report.
+
+`wgpu_parity.py` owns pack handoffs and editable triangle-range resolution.
+`wgpu_annotations.py` is now scheduled in production (including guides-only and
+tool-only documents); exports use its output-aspect layout and omit interactive
+feedback. Tape/guide/axis/reference and nearby-edge facade paths use resident
+inference or shared projection-only GL helpers; no GL pick cache is consulted.
+See `docs/benchmarks/metal-parity/wave1/p7/REPORT.md` for actual capture limits,
+performance samples, and remaining partial findings.

@@ -17,7 +17,7 @@ HAS_RENDERER = importlib.util.find_spec("ingetrazo_render") is not None
 def test_payload_defaults_and_hidden_controls():
     scene = Scene()
     p = style_payload(scene)
-    assert p['material_opacity'] is False
+    assert p['material_opacity'] is True
     assert p['shadows'] is False
     assert p['group_selection_edges'] is True
     assert not p['show_hidden_geometry'] and not p['show_hidden_objects']

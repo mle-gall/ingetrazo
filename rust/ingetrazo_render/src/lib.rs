@@ -73,6 +73,7 @@ struct Scene {
 struct Renderer {
     textures: textures::Textures,
     textures_enabled: bool,
+    material_transparency: bool,
     texture_groups: Vec<wgpu::BindGroup>,
     ao: ao::AmbientOcclusion,
     antialias: bool,
@@ -473,7 +474,7 @@ impl Renderer {
         let mut transparency = xray::Xray::new(&device, format, w, h);
         transparency.bind_textures(&device, &textures);
         Ok(Self {
-            textures, texture_groups, textures_enabled: true,
+            textures, texture_groups, textures_enabled: true, material_transparency: true,
             ao: ao::AmbientOcclusion::new(&device, format),
             antialias: true,
             ids_dirty: true,
@@ -692,6 +693,7 @@ impl Renderer {
             (v.len() + expanded_v.len() + ix.len() + p.len() + cmd.len() * 3 + instances.len() + n * 20 + 112 + 416)
                 as u64 + self.textures.bytes + self.textures.materials.size();
         self.ids_dirty = true;
+        self.material_transparency = true; // unclassified raw scenes use conservative OIT
         self.scene = Some(Scene {
             edge_data: expanded_v,
             edge_records,
@@ -1038,15 +1040,17 @@ impl Renderer {
         if let Some(enabled) = edges { self.edges = enabled; }
         Ok(())
     }
-    /// TODO(P1): world-space triangle/edge feedback replaces QPainter polygons.
+    /// Pack classification avoids OIT and depth resolves for opaque scenes.
+    fn set_material_transparency(&mut self, enabled: bool) { self.material_transparency = enabled; }
+    /// World-space tool feedback, cleared on commit/cancel.
     fn set_preview_mesh(&mut self, triangles: PyReadonlyArray1<'_, u8>, edges: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
         self.preview.upload(&self.device, triangles.as_slice()?, edges.as_slice()?).map_err(PyValueError::new_err)
     }
-    /// TODO(P1): loose-face marks only; groups use group_selection_edges.
+    /// Loose-face marks only; groups use group_selection_edges.
     fn set_face_marks(&mut self, triangles: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
         self.face_marks.upload(&self.device, triangles.as_slice()?, &[]).map_err(PyValueError::new_err)
     }
-    /// TODO(P1/P3): resolve face IDs to (prototype, local triangle index, count).
+    /// Editable face IDs resolve to (prototype, local triangle index, count).
     /// Shared prototypes affect every placement: duplicate before a local edit.
     fn set_suppressed_faces(&mut self, ranges: Vec<(usize, u32, u32)>) -> PyResult<()> {
         self.sun.invalidate();
@@ -1057,7 +1061,7 @@ impl Renderer {
         self.ids_dirty = true;
         Ok(())
     }
-    /// TODO(P3): provide soft/hidden endpoint pairs, in prototype coordinates.
+    /// Soft/hidden endpoint pairs in prototype coordinates.
     /// Geometry-only reconstruction cannot distinguish a hidden edge from a seam.
     fn set_profile_exclusions(&mut self, pairs: Vec<(usize, Vec<f32>)>) -> PyResult<()> {
         let s = self.scene.as_ref().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
@@ -1094,8 +1098,8 @@ impl Renderer {
         self.queue.write_buffer(&s.hard_template,0,&hard);
         Ok(())
     }
-    /// TODO(P3): separate per-prototype hidden COMMAND rows and original vertex/index streams.
-    /// TODO(P1): refresh after world/visibility edits; object_rows are placement IDs,
+    /// Per-prototype hidden COMMAND rows and original vertex/index streams.
+    /// Refresh after world/visibility edits; object_rows are placement IDs,
     /// deliberately separate from the frozen instance flag ABI.
     #[pyo3(signature = (vertices, indices, hidden_commands, hidden_edge_commands, object_rows=Vec::new()))]
     fn set_hidden_geometry(&mut self, vertices: PyReadonlyArray1<'_, u8>, indices: PyReadonlyArray1<'_, u8>,
@@ -1521,7 +1525,7 @@ impl Renderer {
             drop(pass);
             }
             if msaa && !self.pick_pending {
-                self.aa.draw(&mut e, &color, s, self.style, self.edges, self.look.data[6][0] > 0., self.multi, self.queries.as_ref(), Some(edge_only), self.sections.count > 0 || self.preview.active() || self.face_marks.active() || self.ghost_geometry.active() || self.ghost_objects.active() || self.look.data[9][0] > 0., &self.axes);
+                self.aa.draw(&mut e, &color, s, self.style, self.edges, self.look.data[6][0] > 0., self.multi, self.queries.as_ref(), Some(edge_only), self.sections.count > 0 || self.preview.active() || self.face_marks.active() || self.ghost_geometry.active() || self.ghost_objects.active() || (self.look.data[9][0] > 0. && self.material_transparency), &self.axes);
             }
             if !edge_only && self.sun.enabled && self.style != 1 && self.style != 4 {
                 if msaa { self.aa.resolve_depth(&self.device, &mut e, &depth, None); }
@@ -1566,7 +1570,7 @@ impl Renderer {
         }
         // Material OIT reads opaque depth and never writes it. AO has already
         // completed on opaque geometry; glass cannot generate contact darkness.
-        if self.look.data[9][0] > 0. && self.style != 1 && self.style != 4 {
+        if self.look.data[9][0] > 0. && self.material_transparency && self.style != 1 && self.style != 4 {
             if msaa { self.aa.resolve_depth(&self.device, &mut e, &depth, None); }
             self.transparency.draw(&mut e, &color, Some(&depth), s, self.multi, tq);
         }

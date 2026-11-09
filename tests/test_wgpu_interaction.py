@@ -82,7 +82,7 @@ def test_selection_modifiers_and_external_change(view):
     assert not view.scene.selection
     view.scene.select([group])
     view.sync_selection()
-    assert calls[-1][0] == []  # group edges are drawn by the selection overlay
+    assert calls[-1][0] == [0]  # native edge-only group selection
 
 
 def test_rectangle_maps_to_selection(view):

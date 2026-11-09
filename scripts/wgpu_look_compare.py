@@ -220,7 +220,9 @@ if args.capture_only:
         metal.overlay_primitives = [p4_overlay.snap_glyph((0, 0), 'axis')]
     for name, view in [('gl', gl), ('wgpu', metal)]:
         start = time.perf_counter()
-        if args.live_frame and name == 'gl':
+        if args.audit_case == 'export-overlays':
+            result = view.render_image(1000, 700, overlays=True)
+        elif args.live_frame and name == 'gl':
             import views.viewport as viewport_module
             overlay = gl._draw_overlay
             gl._draw_overlay = lambda: None

@@ -189,6 +189,8 @@ def test_annotations_rasterize_without_gl(monkeypatch):
                                       QVector3D(0, 20, 0)))
     scene.text_labels.append(TextLabel(QVector3D(10, 10, 0), QVector3D(30, 40, 0), 'Label'))
     native._is_occluded = lambda p: False
+    native.camera.target = QVector3D(40, 30, 0)
+    native.camera.distance = 140
     image = rasterize([], 100, 100, 1., native.draw_annotations)
     assert pixels(image).reshape(-1, 4)[:, 3].any()
 

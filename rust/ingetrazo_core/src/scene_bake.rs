@@ -288,11 +288,8 @@ pub fn bake_scene<'py>(
     if maps.shape() != [f.len(), 16] || paints.shape() != [f.len(), 3] {
         return Err(invalid());
     }
-    let maps: Vec<[f32; 16]> = maps
-        .rows()
-        .into_iter()
-        .map(|r| std::array::from_fn(|k| r[k]))
-        .collect();
+    // Borrow the read-only mapping view throughout the synchronous detached
+    // bake; copying 16 floats per source face costs hundreds of MB on imports.
     let mut paints: Vec<[u32; 3]> = paints
         .rows()
         .into_iter()
@@ -392,6 +389,16 @@ pub fn bake_scene<'py>(
             if !special {
                 continue;
             }
+            // Matching backs need no 32-byte record per corner. Header bit 0
+            // reuses the front vertex RGBA, retaining the full opacity byte.
+            let matching = retain_hidden && mesh.triangles.iter().zip(&mesh.faces).all(|((_, _, color), face)| {
+                let paint = paints[first_face + face];
+                paint[1..] == [0, 0] && paint[0] == u32::from_le_bytes(*color)
+            });
+            if matching {
+                materials[i * 16 + 12..i * 16 + 16].copy_from_slice(&1u32.to_le_bytes());
+                continue;
+            }
             let length = mesh.triangles.len() * 3
                 + if mesh.triangles.len() > mesh.visible_triangles {
                     mesh.visible_edges * 2
@@ -416,10 +423,11 @@ pub fn bake_scene<'py>(
                     materials.resize(materials.len() + mesh.visible_edges * 2 * 32, 0);
                 }
                 let f = first_face + face;
+                let mapping: [f32; 16] = std::array::from_fn(|k| maps[[f, k]]);
                 for v in t {
                     materials.extend_from_slice(&material_vertex(
                         points[*v as usize],
-                        &maps[f],
+                        &mapping,
                         paints[f],
                     ));
                 }

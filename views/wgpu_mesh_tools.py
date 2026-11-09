@@ -201,9 +201,10 @@ class MeshToolAccess:
         if {id(f) for f in faces} == {id(f) for f in getattr(self.view, 'suppressed_faces', ())}:
             return
         self.view.suppressed_faces = faces
-        # The existing packer accepts per-face paint overrides. Hide only the
-        # preview's base faces without mutating the document or its history.
-        self.view.set_scene(self.scene)
+        renderer = getattr(self.view, 'renderer', None)
+        if renderer is not None and hasattr(renderer, 'set_suppressed_faces'):
+            from views.wgpu_parity import face_ranges
+            renderer.set_suppressed_faces(face_ranges(self.view, faces))
         self.view.update()
 
     def mesh_feedback(self):
@@ -211,17 +212,12 @@ class MeshToolAccess:
         lines.extend(self.tool.guide_preview_lines())
         faces = list(getattr(self.tool, 'preview_faces', lambda: [])())
         self.view.preview_faces = faces
-        # TODO(P2): set_preview_faces accepts world-space triangle float3s;
-        # an empty (0,3,3) array clears the depth-tested transient pass.
-        transient = getattr(getattr(self.view, 'renderer', None), 'set_preview_faces', None)
-        if transient is not None:
-            triangles = [tuple(p.toTuple() for p in tri)
-                         for face in faces for tri in face.triangulate()]
-            transient(np.asarray(triangles, np.float32).reshape(-1, 3, 3))
-        # Until P2 lands, show the outline, never an unoccluded face fill.
-        for face in faces:
-            points = list(getattr(face, 'vertices', face))
-            lines.extend(zip(points, points[1:] + points[:1]))
+        renderer = getattr(self.view, 'renderer', None)
+        if renderer is not None and hasattr(renderer, 'set_preview_mesh'):
+            from views.wgpu_parity import preview_mesh
+            edges = [(a, b) for face in faces
+                     for a, b in zip(face.vertices, face.vertices[1:] + face.vertices[:1])]
+            renderer.set_preview_mesh(*preview_mesh(faces, edges))
 
         state = getattr(self.tool, 'scale_box_state', lambda: None)()
         if state:
@@ -259,39 +255,21 @@ class MeshToolAccess:
             self.measurementChanged.emit(text)
 
     def draw_annotations(self, painter):
-        from views.viewport import Viewport
+        from views.wgpu_annotations import draw_annotations, draw_tool_overlays
+        from views.wgpu_overlay import draw_snap_indicator
         self._hover_entity = getattr(self, '_mesh_hover', None)
         marks = getattr(self.view, '_draw_selection_marks', None)
         if marks is not None:
             marks(painter)
-        Viewport._draw_dimensions(self, painter)
-        Viewport._draw_text_labels(self, painter)
-        Viewport._draw_geo_paths(self, painter)
-        Viewport._draw_guides(self, painter)
-        from views.viewport import shown_guides
-        from PySide6.QtCore import Qt, QPointF
-        from PySide6.QtGui import QPen
-        painter.setPen(QPen(QColor('#465a78'), 1, Qt.DashLine))
-        for guide in shown_guides(self.scene):
-            if guide.is_line:
-                segment = Viewport._guide_snap_segment(self, guide)
-                if segment is not None:
-                    pixels = self._segment_to_pixels(*segment)
-                    if pixels is not None:
-                        painter.drawLine(QPointF(*pixels[0]), QPointF(*pixels[1]))
-        if getattr(self, 'reference_mode', None) is not None:
-            Viewport._draw_reference_label(self, painter)
-        elif getattr(self, 'axis_lock', None) is not None:
-            Viewport._draw_axis_lock_label(self, painter)
-        elif getattr(self.tool, 'plane_lock', None) is not None:
-            Viewport._draw_plane_lock_label(self, painter)
-        elif self.last_snap is not None:
-            Viewport._draw_inference_label(self, painter)
-        if getattr(self, 'linear_inference_mode', 'all') != 'all':
-            Viewport._draw_linear_mode_label(self, painter)
-        hook = getattr(self.tool, 'draw_overlay', None)
-        if hook is not None:
-            hook(self, painter)
+        layout = draw_annotations(painter, self.scene, self.camera,
+            (painter.device().width()/painter.device().devicePixelRatioF(),
+             painter.device().height()/painter.device().devicePixelRatioF()), occluded=self._is_occluded,
+            hover=self._hover_entity)
+        draw_tool_overlays(painter, self)
+        snap = self.last_snap
+        if snap is not None and getattr(snap, 'kind', None) and hasattr(snap, 'color'):
+            draw_snap_indicator(painter, snap, layout._world_to_pixel,
+                                layout._clip_pixel_line, labels=False)
 
     def _draw_occluded_segment(self, painter, a, b):
         from views.viewport import Viewport
@@ -366,7 +344,17 @@ class MeshToolAccess:
 
     image_plane_at = _unsupported_pick
 
-    def _nearby_loose_edges(self, *args, **kwargs):
-        return []
+    def _resident_nearby_edges(self, px, py, radius_px=48., cap=48):
+        from views.wgpu_inference import nearby_edges
+        v = self.view
+        if v.inference_index is None:
+            return []
+        return nearby_edges(v.inference_index, v.packed, v.camera, v.width(),
+                            v.height(), px, py, radius_px=radius_px, cap=cap,
+                            edit_group=self.scene.edit_group)
 
-    _nearby_group_edges = _nearby_loose_edges
+    def _nearby_loose_edges(self, px, py, radius_px=64., cap=400):
+        return [e for e in self._resident_nearby_edges(px, py, radius_px, cap) if not e.in_group]
+
+    def _nearby_group_edges(self, px, py, radius_px=48., cap=48):
+        return [e for e in self._resident_nearby_edges(px, py, radius_px, cap) if e.in_group]

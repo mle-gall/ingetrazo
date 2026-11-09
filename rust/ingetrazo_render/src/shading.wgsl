@@ -37,6 +37,7 @@ struct Out { @location(9) opacity: f32, @location(8) section_distance: f32, @bui
   let mat = materials[at+1u];
   o.back = unpack4x8unorm(mat.x); o.textures = mat.yz;
  }
+ if (header.w & 1u) != 0u { o.back = color; }
  if style.raster.x == 0. && u32(round(color.a*255.)) == 254u { o.back = vec4f(color.rgb,1.); }
  // Unpainted faces inherit container paint on both sides.
  if unpainted && tint.a > 0.5 && o.back.a < 0.5 { o.back = tint; }
@@ -48,6 +49,7 @@ fn face_pixel(i: Out, facing: bool) -> Pixel {
  let front = facing != ((i.decorated & 16u) != 0u);
  var c = i.color;
  var opacity = i.opacity;
+ if !front && style.raster.x > 0. && i.back.a > 0. { opacity = i.back.a; }
  if !front && camera.size.z != 2 && (i.decorated & 8u) == 0u { c = select(style.back.rgb, i.back.rgb, i.back.a > select(0.5,0.,style.raster.x > 0.) && camera.size.z != 3) * select(i.shade,1.,camera.size.z == 3); }
  // GL X-ray keeps a painted face's colour through its back; averaging the
  // default blue-grey back into every closed coloured box washed out the tint.
