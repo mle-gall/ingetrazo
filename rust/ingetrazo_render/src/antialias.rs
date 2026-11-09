@@ -132,6 +132,7 @@ impl Antialias {
         self.color = target(d, w, h, self.format);
         self.depth = target(d, w, h, wgpu::TextureFormat::Depth32Float);
     }
+    pub fn color_view(&self) -> wgpu::TextureView { self.color.create_view(&Default::default()) }
     pub fn draw(
         &self,
         e: &mut wgpu::CommandEncoder,
@@ -141,10 +142,11 @@ impl Antialias {
         edges: bool,
         multi: bool,
         queries: Option<&wgpu::QuerySet>,
+        edge_only: Option<bool>,
     ) {
         let color = self.color.create_view(&Default::default());
         let depth = self.depth.create_view(&Default::default());
-        self.background.draw(e, &color);
+        if edge_only != Some(true) { self.background.draw(e, &color); }
         let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("4x MSAA color resolve"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -152,18 +154,18 @@ impl Antialias {
                 resolve_target: Some(resolve),
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Discard,
+                    store: if edge_only == Some(false) { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &depth,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.),
-                    store: wgpu::StoreOp::Discard,
+                    load: if edge_only == Some(true) { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(1.) },
+                    store: if edge_only == Some(false) { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
                 }),
                 stencil_ops: None,
             }),
-            timestamp_writes: queries.map(|q| wgpu::RenderPassTimestampWrites {
+            timestamp_writes: queries.filter(|_| edge_only != Some(false)).map(|q| wgpu::RenderPassTimestampWrites {
                 query_set: q,
                 beginning_of_pass_write_index: None,
                 end_of_pass_write_index: Some(3),
@@ -172,7 +174,11 @@ impl Antialias {
         });
         pass.set_vertex_buffer(0, scene.vertex.slice(..));
         pass.set_index_buffer(scene.index.slice(..), wgpu::IndexFormat::Uint32);
-        for edge in [false, true] {
+        for &edge in match edge_only {
+            Some(false) => &[false][..],
+            Some(true) => &[true][..],
+            None => &[false, true][..],
+        } {
             if (!edge && mode == 4) || (edge && !edges && mode != 4) {
                 continue;
             }
