@@ -1,0 +1,62 @@
+[
+  {
+    "model": "/Users/legallmaxence/code/ingetrazo-bench/marquee.igz",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "/Users/legallmaxence/code/ingetrazo-bench/marquee.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw"
+    ],
+    "returncode": 0,
+    "wall_seconds": 1.6978010840248317,
+    "timeout": 180,
+    "warmup": true
+  },
+  {
+    "model": "/Users/legallmaxence/code/ingetrazo-bench/pusher_car_rust.igz",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "/Users/legallmaxence/code/ingetrazo-bench/pusher_car_rust.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw"
+    ],
+    "returncode": 0,
+    "wall_seconds": 6.5684298750711605,
+    "timeout": 240,
+    "warmup": true
+  },
+  {
+    "model": "/Users/legallmaxence/Desktop/space_exact/space_asbuilt_stairs.igz",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "/Users/legallmaxence/Desktop/space_exact/space_asbuilt_stairs.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw"
+    ],
+    "returncode": 0,
+    "wall_seconds": 9.968843832961284,
+    "timeout": 240,
+    "warmup": true
+  },
+  {
+    "model": "/Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "/Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw"
+    ],
+    "returncode": 0,
+    "wall_seconds": 99.53461737500038,
+    "timeout": 300,
+    "warmup": true
+  }
+]

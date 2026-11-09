@@ -1,0 +1,542 @@
+[
+  {
+    "pair": "alpha.png",
+    "gl": "raw/alpha-gl.png",
+    "metal": "raw/alpha-wgpu.png",
+    "crop_xywh": [
+      220,
+      20,
+      600,
+      650
+    ],
+    "bytes": 144619
+  },
+  {
+    "pair": "glyphs.png",
+    "gl": "raw/glyphs-gl.png",
+    "metal": "raw/glyphs-wgpu.png",
+    "crop_xywh": [
+      0,
+      0,
+      700,
+      600
+    ],
+    "bytes": 32427
+  },
+  {
+    "pair": "marquee.png",
+    "gl": "raw/marquee-gl.png",
+    "metal": "raw/marquee-wgpu.png",
+    "crop_xywh": [
+      200,
+      80,
+      650,
+      580
+    ],
+    "bytes": 237440
+  },
+  {
+    "pair": "marquee-latency.png",
+    "gl": "raw/marquee-latency-gl.png",
+    "metal": "raw/marquee-latency-wgpu.png",
+    "crop_xywh": [
+      200,
+      80,
+      650,
+      580
+    ],
+    "bytes": 237440
+  },
+  {
+    "pair": "mesh-figure-live.png",
+    "gl": "raw/mesh-figure-live-gl.png",
+    "metal": "raw/mesh-figure-live-wgpu.png",
+    "crop_xywh": [
+      220,
+      20,
+      600,
+      650
+    ],
+    "bytes": 92604
+  },
+  {
+    "pair": "new-document-live.png",
+    "gl": "raw/new-document-live-gl.png",
+    "metal": "raw/new-document-live-wgpu.png",
+    "crop_xywh": [
+      220,
+      20,
+      600,
+      650
+    ],
+    "bytes": 86190
+  },
+  {
+    "pair": "pusher_car_rust.png",
+    "gl": "raw/pusher_car_rust-gl.png",
+    "metal": "raw/pusher_car_rust-wgpu.png",
+    "crop_xywh": [
+      200,
+      80,
+      650,
+      580
+    ],
+    "bytes": 153689
+  },
+  {
+    "pair": "pusher_car_rust-latency.png",
+    "gl": "raw/pusher_car_rust-latency-gl.png",
+    "metal": "raw/pusher_car_rust-latency-wgpu.png",
+    "crop_xywh": [
+      200,
+      80,
+      650,
+      580
+    ],
+    "bytes": 153689
+  },
+  {
+    "pair": "smooth.png",
+    "gl": "raw/smooth-gl.png",
+    "metal": "raw/smooth-wgpu.png",
+    "crop_xywh": [
+      220,
+      20,
+      600,
+      650
+    ],
+    "bytes": 116933
+  },
+  {
+    "pair": "smooth-profiles-off.png",
+    "gl": "raw/smooth-profiles-off-gl.png",
+    "metal": "raw/smooth-profiles-off-wgpu.png",
+    "crop_xywh": [
+      220,
+      20,
+      600,
+      650
+    ],
+    "bytes": 109592
+  },
+  {
+    "pair": "space_asbuilt_ride.png",
+    "gl": "raw/space_asbuilt_ride-gl.png",
+    "metal": "raw/space_asbuilt_ride-wgpu.png",
+    "crop_xywh": [
+      200,
+      80,
+      650,
+      580
+    ],
+    "bytes": 204609
+  },
+  {
+    "pair": "space_asbuilt_stairs.png",
+    "gl": "raw/space_asbuilt_stairs-gl.png",
+    "metal": "raw/space_asbuilt_stairs-wgpu.png",
+    "crop_xywh": [
+      200,
+      80,
+      650,
+      580
+    ],
+    "bytes": 191578
+  },
+  {
+    "pair": "synthetic-ao.png",
+    "gl": "raw/synthetic-ao-gl.png",
+    "metal": "raw/synthetic-ao-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 240239
+  },
+  {
+    "pair": "synthetic-back-edges-back-edges.png",
+    "gl": "raw/synthetic-back-edges-back-edges-gl.png",
+    "metal": "raw/synthetic-back-edges-back-edges-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 135635
+  },
+  {
+    "pair": "synthetic-box-crossing.png",
+    "gl": "raw/synthetic-box-crossing-gl.png",
+    "metal": "raw/synthetic-box-crossing-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 188220
+  },
+  {
+    "pair": "synthetic-box-window.png",
+    "gl": "raw/synthetic-box-window-gl.png",
+    "metal": "raw/synthetic-box-window-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 183121
+  },
+  {
+    "pair": "synthetic-by-tag.png",
+    "gl": "raw/synthetic-by-tag-gl.png",
+    "metal": "raw/synthetic-by-tag-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 183361
+  },
+  {
+    "pair": "synthetic-colors.png",
+    "gl": "raw/synthetic-colors-gl.png",
+    "metal": "raw/synthetic-colors-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 177140
+  },
+  {
+    "pair": "synthetic-edges-off-edges-off.png",
+    "gl": "raw/synthetic-edges-off-edges-off-gl.png",
+    "metal": "raw/synthetic-edges-off-edges-off-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 105661
+  },
+  {
+    "pair": "synthetic-edit.png",
+    "gl": "raw/synthetic-edit-gl.png",
+    "metal": "raw/synthetic-edit-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 174584
+  },
+  {
+    "pair": "synthetic-export-overlays.png",
+    "gl": "raw/synthetic-export-overlays-gl.png",
+    "metal": "raw/synthetic-export-overlays-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 156676
+  },
+  {
+    "pair": "synthetic-flat.png",
+    "gl": "raw/synthetic-flat-gl.png",
+    "metal": "raw/synthetic-flat-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 184513
+  },
+  {
+    "pair": "synthetic.png",
+    "gl": "raw/synthetic-gl.png",
+    "metal": "raw/synthetic-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 182914
+  },
+  {
+    "pair": "synthetic-guides-only.png",
+    "gl": "raw/synthetic-guides-only-gl.png",
+    "metal": "raw/synthetic-guides-only-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 163034
+  },
+  {
+    "pair": "synthetic-hidden.png",
+    "gl": "raw/synthetic-hidden-gl.png",
+    "metal": "raw/synthetic-hidden-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 189035
+  },
+  {
+    "pair": "synthetic-hidden_line-hidden_line.png",
+    "gl": "raw/synthetic-hidden_line-hidden_line-gl.png",
+    "metal": "raw/synthetic-hidden_line-hidden_line-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 129632
+  },
+  {
+    "pair": "synthetic-hover-edge.png",
+    "gl": "raw/synthetic-hover-edge-gl.png",
+    "metal": "raw/synthetic-hover-edge-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 182836
+  },
+  {
+    "pair": "synthetic-hover-group.png",
+    "gl": "raw/synthetic-hover-group-gl.png",
+    "metal": "raw/synthetic-hover-group-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 188314
+  },
+  {
+    "pair": "synthetic-monochrome-monochrome.png",
+    "gl": "raw/synthetic-monochrome-monochrome-gl.png",
+    "metal": "raw/synthetic-monochrome-monochrome-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 129632
+  },
+  {
+    "pair": "synthetic-parallel.png",
+    "gl": "raw/synthetic-parallel-gl.png",
+    "metal": "raw/synthetic-parallel-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 147059
+  },
+  {
+    "pair": "synthetic-pitch5.0.png",
+    "gl": "raw/synthetic-pitch5.0-gl.png",
+    "metal": "raw/synthetic-pitch5.0-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 85165
+  },
+  {
+    "pair": "synthetic-profiles-off-profiles-off.png",
+    "gl": "raw/synthetic-profiles-off-profiles-off-gl.png",
+    "metal": "raw/synthetic-profiles-off-profiles-off-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 134167
+  },
+  {
+    "pair": "synthetic-section.png",
+    "gl": "raw/synthetic-section-gl.png",
+    "metal": "raw/synthetic-section-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 219571
+  },
+  {
+    "pair": "synthetic-section-parallel.png",
+    "gl": "raw/synthetic-section-parallel-gl.png",
+    "metal": "raw/synthetic-section-parallel-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 175923
+  },
+  {
+    "pair": "synthetic-section-tool.png",
+    "gl": "raw/synthetic-section-tool-gl.png",
+    "metal": "raw/synthetic-section-tool-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 224218
+  },
+  {
+    "pair": "synthetic-selected-edge.png",
+    "gl": "raw/synthetic-selected-edge-gl.png",
+    "metal": "raw/synthetic-selected-edge-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 182914
+  },
+  {
+    "pair": "synthetic-selected-face.png",
+    "gl": "raw/synthetic-selected-face-gl.png",
+    "metal": "raw/synthetic-selected-face-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 182914
+  },
+  {
+    "pair": "synthetic-selected-group.png",
+    "gl": "raw/synthetic-selected-group-gl.png",
+    "metal": "raw/synthetic-selected-group-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 188220
+  },
+  {
+    "pair": "synthetic-shaded-shaded.png",
+    "gl": "raw/synthetic-shaded-shaded-gl.png",
+    "metal": "raw/synthetic-shaded-shaded-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 134288
+  },
+  {
+    "pair": "synthetic-shadows.png",
+    "gl": "raw/synthetic-shadows-gl.png",
+    "metal": "raw/synthetic-shadows-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 185698
+  },
+  {
+    "pair": "synthetic-two-point.png",
+    "gl": "raw/synthetic-two-point-gl.png",
+    "metal": "raw/synthetic-two-point-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 173131
+  },
+  {
+    "pair": "synthetic-width4.0.png",
+    "gl": "raw/synthetic-width4.0-gl.png",
+    "metal": "raw/synthetic-width4.0-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 160258
+  },
+  {
+    "pair": "synthetic-wireframe-wireframe.png",
+    "gl": "raw/synthetic-wireframe-wireframe-gl.png",
+    "metal": "raw/synthetic-wireframe-wireframe-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 157593
+  },
+  {
+    "pair": "synthetic-xray-xray.png",
+    "gl": "raw/synthetic-xray-xray-gl.png",
+    "metal": "raw/synthetic-xray-xray-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 141597
+  },
+  {
+    "pair": "synthetic-zoom-window.png",
+    "gl": "raw/synthetic-zoom-window-gl.png",
+    "metal": "raw/synthetic-zoom-window-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 188492
+  }
+]
