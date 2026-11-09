@@ -14,8 +14,17 @@ class InstanceUpdates:
         self.scene = scene
         self.packed = packed
         self.meshes = {}
+        # The same mesh may have ordinary and face-me prototypes. The legacy
+        # incremental bake indexes by mesh alone; repack scene edits in that
+        # uncommon case, never camera updates.
+        self.billboard_modes = {}
+        self.shared_variants = False
         for row, group in enumerate(packed.groups):
             mesh = group.mesh if group is not None else scene.loose_mesh
+            mode = getattr(group, 'billboard', False)
+            if id(mesh) in self.billboard_modes and self.billboard_modes[id(mesh)] != mode:
+                self.shared_variants = True
+            self.billboard_modes[id(mesh)] = mode
             self.meshes[id(mesh)] = (mesh, mesh._mut_serial,
                                     int(packed.instances['info'][row, 0]))
         # Empty containers have no GPU row, but still need a serial sentinel.
@@ -46,7 +55,7 @@ class InstanceUpdates:
         wc = np.einsum('nij,nj->ni', matrix[:, :3, :3], center)+matrix[:, :3, 3]
         we = np.einsum('nij,nj->ni', abs(matrix[:, :3, :3]), extent)
         boxes = np.stack((wc-we, wc+we), axis=1)
-        hidden = rows['info'][:, 2] != 0
+        hidden = (rows['info'][:, 2] & 1) != 0
         boxes[hidden, 0] = np.inf
         boxes[hidden, 1] = -np.inf
         return boxes
@@ -113,7 +122,7 @@ class InstanceUpdates:
 
     def diff(self, scene):
         """Return changed resident rows, retaining prototype and placement IDs."""
-        if scene is not self.scene:
+        if scene is not self.scene or self.shared_variants:
             return None
         local = self.unsubscribe is not None and self.journal_valid and scene.content_version == self.version
         placements = [] if local else [(None, None, False)]
@@ -134,6 +143,9 @@ class InstanceUpdates:
         additions = []
         for group, matrix, hidden in placements:
             mesh = group.mesh if group is not None else scene.loose_mesh
+            if id(mesh) in self.billboard_modes and self.billboard_modes[id(mesh)] != getattr(group, 'billboard', False):
+                return None
+            self.billboard_modes[id(mesh)] = getattr(group, 'billboard', False)
             old = self.meshes.get(id(mesh))
             uid = getattr(group, 'uid', 'loose')
             if old is not None and old[2] == -1:
@@ -160,7 +172,7 @@ class InstanceUpdates:
             value['world'] = (np.eye(4, dtype=np.float32) if matrix is None
                               else np.asarray(matrix.data(), np.float32).reshape(4, 4))
             visible, paint = state(group)
-            value['info'][:3] = (old[2], paint, hidden or not visible)
+            value['info'][:3] = (old[2], paint, int(hidden or not visible) | (8 if getattr(group, 'billboard', False) else 0))
             if row < len(self.packed.instances):
                 value['info'][3] = self.packed.instances['info'][row, 3]
             if row >= len(self.packed.instances) or value.tobytes() != self.packed.instances[row].tobytes():
@@ -193,7 +205,12 @@ class InstanceUpdates:
     def apply(self, ids, rows, renderer=None):
         if self.changed:
             # A single native bake for the changed set, including shared meshes.
-            baked = pack_scene(Scene(groups=[Group(mesh, name="Resident prototype") for mesh, _, _ in self.changed]))
+            prototypes = []
+            for mesh, _, _ in self.changed:
+                prototype = Group(mesh, name="Resident prototype")
+                prototype.billboard = self.billboard_modes.get(id(mesh), False)
+                prototypes.append(prototype)
+            baked = pack_scene(Scene(groups=prototypes))
             paths = list(self.packed.texture_paths)
             for path in baked.texture_paths:
                 if path not in paths:

@@ -1,6 +1,7 @@
 //! A resident Metal scene: compute compaction precedes native indirect draws.
 mod timing;
 mod overlay;
+mod axes;
 mod sections;
 mod textures;
 // R-look: isolated style and background passes.
@@ -85,6 +86,7 @@ struct Renderer {
     capture_next: bool,
     captured: Option<Vec<u8>>,
     overlay: overlay::Overlay,
+    axes: axes::Axes,
     sections: sections::Sections,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -139,7 +141,7 @@ fn grown_capacity(current: usize, needed: usize) -> usize {
 }
 
 fn merge_instance_flags(old: u32, incoming: u32) -> u32 {
-    (old & 6) | (incoming & 1)
+    (old & 6) | (incoming & 9)
 }
 
 fn texture(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
@@ -472,6 +474,7 @@ impl Renderer {
             capture_next: false,
             captured: None,
             overlay: overlay::Overlay::new(&device, format),
+            axes: axes::Axes::new(&device, format, &camera),
             sections: sections::Sections::new(&device, format, &camera),
             depth: texture(&device, w, h, wgpu::TextureFormat::Depth32Float),
             offscreen: texture(&device, w, h, format),
@@ -792,6 +795,31 @@ impl Renderer {
         Ok(())
     }
 
+    /// Change only matrices: preserve paint, highlights, visibility and pick IDs.
+    fn set_instance_world(&mut self, ids: Vec<usize>, matrices: PyReadonlyArray1<'_, f32>) -> PyResult<()> {
+        let matrices = matrices.as_slice()?;
+        let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+        if matrices.len() != ids.len()*16 || ids.iter().any(|&id| id >= s.n as usize)
+            || matrices.iter().any(|x| !x.is_finite()) {
+            return Err(PyValueError::new_err("invalid instance matrices"));
+        }
+        for (&id, matrix) in ids.iter().zip(matrices.chunks_exact(16)) {
+            let data = bytemuck::cast_slice(matrix);
+            s.rows[id*80..id*80+64].copy_from_slice(data);
+            self.queue.write_buffer(&s.inst, (id*80) as u64, data);
+        }
+        if !ids.is_empty() { self.ids_dirty = true; self.stable_frames = 0; }
+        Ok(())
+    }
+
+    fn set_axes(&mut self, frame: Vec<f32>, spacing: f32, visible: bool) -> PyResult<()> {
+        if frame.len() != 16 || frame.iter().any(|x| !x.is_finite()) || !spacing.is_finite() {
+            return Err(PyValueError::new_err("invalid axes frame"));
+        }
+        self.axes.set(&self.queue, &frame, spacing.max(1e-4), visible);
+        Ok(())
+    }
+
     /// Update existing resident rows without replacing geometry or pick IDs.
     fn update_instances(&mut self, ids: Vec<usize>, rows: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
         self.ids_dirty = true;
@@ -906,7 +934,7 @@ impl Renderer {
             }
             let selected: std::collections::HashSet<_> = selected_ids.into_iter().collect();
             for (i, flag) in s.flags.iter_mut().enumerate() {
-                let next = (*flag & 1)
+                let next = (*flag & 9)
                     | if selected.contains(&i) { 2 } else { 0 }
                     | if hovered_id == Some(i) { 4 } else { 0 };
                 if next != *flag {
@@ -1254,7 +1282,10 @@ impl Renderer {
 
         let ao_active = plan.ao;
         for edge_only in [false, true] {
-            if edge_only && !(self.edges || self.style == 4 || ao_active) { break; }
+            if edge_only && (!msaa || self.pick_pending) {
+                self.axes.draw(&mut e, &color, &depth, None);
+            }
+            if edge_only && !(self.edges || self.style == 4 || ao_active || self.axes.visible) { break; }
             if !msaa || self.pick_pending {
             let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
@@ -1353,7 +1384,7 @@ impl Renderer {
             drop(pass);
             }
             if msaa && !self.pick_pending {
-                self.aa.draw(&mut e, &color, s, self.style, self.edges, self.look.data[6][0] > 0., self.multi, self.queries.as_ref(), Some(edge_only), self.sections.count > 0);
+                self.aa.draw(&mut e, &color, s, self.style, self.edges, self.look.data[6][0] > 0., self.multi, self.queries.as_ref(), Some(edge_only), self.sections.count > 0, &self.axes);
             }
             if !edge_only && ao_active {
                 // Caps must contribute depth before AO reconstructs its normals.
@@ -1901,6 +1932,8 @@ mod update_tests {
         assert_eq!(merge_instance_flags(6, 1), 7);
         assert_eq!(merge_instance_flags(7, 0), 6);
         assert_eq!(merge_instance_flags(0, 6), 0);
+        assert_eq!(merge_instance_flags(6, 9), 15);
+        assert_eq!(merge_instance_flags(15, 8), 14);
     }
 }
 
