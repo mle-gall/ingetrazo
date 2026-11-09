@@ -267,3 +267,15 @@ def test_front_tint_remains_style_not_material():
     scene.groups[0].mesh.faces[0].attrs['color'] = (0.3, 0.7, 0.9)
     painted = pack_scene(scene)
     assert np.all(painted.vertices['color'][:3, 3] == 255)
+
+
+def test_nested_default_faces_inherit_gl_proxy_owner_paint():
+    child = Group(triangle())
+    root = Group(Mesh())
+    root.material = {'color': (0.0, 0.6, 0.5)}
+    root.children = [child]
+    packed = pack_scene(Scene(groups=[root]))
+    np.testing.assert_array_equal(packed.vertices['color'][:3], [[0,153,127,255]]*3)
+    backs = packed.materials.reshape(-1,32)[:3,16:20]
+    np.testing.assert_array_equal(backs, [[0,153,127,255]]*3)
+    assert getattr(child, 'owner', None) is None

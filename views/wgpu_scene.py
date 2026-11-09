@@ -166,7 +166,7 @@ def pack_scene(scene, view_tint=None):
         resource = None
     begin = perf_counter()
     state = _placement_state(scene)
-    from views.viewport import _paint_of
+    from views.viewport import _paint_of, Viewport
     vp = SimpleNamespace(scene=scene)
     texture_ids = {}
     meshes, lookup, rows, uids, paints = [], {}, [], [], []
@@ -183,15 +183,21 @@ def pack_scene(scene, view_tint=None):
             parent_of[id(child)] = group
             map_parents(child)
     hidden_of = {}
+    paint_groups = {}
     for root in scene.groups:
         map_parents(root)
-        for g, matrix in iter_placements(root):
+        # GL proxies carry the top-level paint owner and inherited layer.
+        # Keep source groups for editing; use proxies only to resolve paint.
+        proxies = Viewport._expand_placements(vp, root)
+        for (g, matrix), proxy in zip(iter_placements(root), proxies):
+            paint_groups[id(g)] = proxy
             parent = parent_of.get(id(g))
             inherited = hidden_of.get(id(parent), False) if parent is not None else False
-            hidden_of[id(g)] = inherited or not state(g)[0]
+            hidden_of[id(g)] = inherited or not state(proxy)[0]
             placements.append((g, matrix, g.mesh, hidden_of[id(g)]))
     for group, matrix, mesh, hidden in placements:
-        paint_attrs = _paint_of(vp, group)
+        paint_group = paint_groups.get(id(group), group)
+        paint_attrs = _paint_of(vp, paint_group)
         if paint_attrs and paint_attrs.get('front_only'):
             paint_attrs = None  # style tint stays dynamic
         # Include the entire paint: material_sig omits imported affine UVs.
@@ -204,7 +210,7 @@ def pack_scene(scene, view_tint=None):
         code = lookup[key]
         if code < 0:
             continue
-        visible, paint = state(group)
+        visible, paint = state(paint_group)
         world = np.eye(4, dtype=np.float32) if matrix is None else np.array(matrix.data(), np.float32).reshape(4, 4)
         rows.append((code, world, hidden or not visible))
         uids.append(getattr(group, 'uid', 'loose'))
