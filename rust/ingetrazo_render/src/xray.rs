@@ -88,7 +88,7 @@ impl Xray {
                     array_stride: 52,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &attrs,
-                }, crate::textures::layout()],
+                }],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,

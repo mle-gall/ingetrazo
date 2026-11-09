@@ -200,10 +200,12 @@ def pack_scene(scene, view_tint=None):
         paint_attrs = _paint_of(vp, paint_group)
         if paint_attrs and paint_attrs.get('front_only'):
             paint_attrs = None  # style tint stays dynamic
-        # Include the entire paint: material_sig omits imported affine UVs.
-        key = (id(mesh), repr(paint_attrs))
+        # Only inherited texture mapping changes baked corner UVs. Plain
+        # container colors already live in the instance's packed RGBA word.
+        baked_paint = paint_attrs if paint_attrs and (paint_attrs.get('texture') or paint_attrs.get('by_layer') or paint_attrs.get('layer_fx')) else None
+        key = (id(mesh), repr(baked_paint))
         if key not in lookup:
-            arrays = _source_arrays(mesh, paint_attrs, texture_ids)
+            arrays = _source_arrays(mesh, baked_paint, texture_ids)
             lookup[key] = len(meshes) if len(arrays[0]) else -1
             if len(arrays[0]):
                 meshes.append(arrays)

@@ -50,11 +50,11 @@ impl Antialias {
                         module: &shader,
                         entry_point: Some(if edge { "edge_vs" } else { "vs" }),
                         compilation_options: Default::default(),
-                        buffers: &{ let mut layouts = vec![wgpu::VertexBufferLayout {
+                        buffers: &{ let layouts = vec![wgpu::VertexBufferLayout {
                             array_stride: 52,
                             step_mode: wgpu::VertexStepMode::Vertex,
                             attributes: if edge { &attrs } else { &face_attrs },
-                        }]; if !edge { layouts.push(crate::textures::layout()); } layouts },
+                        }]; layouts },
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
@@ -171,12 +171,11 @@ impl Antialias {
             }),
             timestamp_writes: queries.map(|q| wgpu::RenderPassTimestampWrites {
                 query_set: q,
-                beginning_of_pass_write_index: None,
+                beginning_of_pass_write_index: Some(2),
                 end_of_pass_write_index: Some(3),
             }),
             occlusion_query_set: None,
         });
-        pass.set_vertex_buffer(1, scene.materials.slice(..));
         pass.set_vertex_buffer(0, scene.vertex.slice(..));
         pass.set_index_buffer(scene.index.slice(..), wgpu::IndexFormat::Uint32);
         for edge in [false, true] {

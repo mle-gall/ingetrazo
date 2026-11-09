@@ -117,7 +117,7 @@ def test_upload_borrows_contiguous_arrays():
             assert len(arrays[3]) == 40
         def set_materials(self, materials):
             assert materials.dtype == np.uint8 and materials.flags.c_contiguous
-            assert len(materials) == len(packed.vertices)*32
+            assert len(materials) == len(packed.bounds)*16
         def set_textures(self, width, height, layers, levels):
             assert (width, height, layers) == (1,1,1)
             assert levels == [bytes([255])*4]
@@ -275,7 +275,20 @@ def test_nested_default_faces_inherit_gl_proxy_owner_paint():
     root.material = {'color': (0.0, 0.6, 0.5)}
     root.children = [child]
     packed = pack_scene(Scene(groups=[root]))
-    np.testing.assert_array_equal(packed.vertices['color'][:3], [[0,153,127,255]]*3)
-    backs = packed.materials.reshape(-1,32)[:3,16:20]
-    np.testing.assert_array_equal(backs, [[0,153,127,255]]*3)
+    assert np.all(packed.vertices['color'][:3, 3] == 0)
+    assert int(packed.instances['info'][0, 1]) == 0xff7f9900
+    assert len(packed.materials) == 16
     assert getattr(child, 'owner', None) is None
+
+
+def test_container_colors_share_geometry_without_material_vertices():
+    mesh = triangle()
+    a, b = Group(mesh), Group(mesh)
+    a.material = {'color': (1, 0, 0)}
+    b.material = {'color': (0, 1, 0)}
+    packed = pack_scene(Scene(groups=[a, b]))
+    assert len(packed.bounds) == 1
+    assert len(packed.vertices) == 9
+    assert packed.instances['info'][:, 1].tolist() == [0xff0000ff, 0xff00ff00]
+    assert len(packed.materials) == 16
+    assert not packed.materials.any()

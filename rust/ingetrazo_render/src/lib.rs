@@ -29,7 +29,6 @@ struct TimingSlot {
     pending: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
 }
 struct Scene {
-    materials: wgpu::Buffer,
     inst: wgpu::Buffer,
     flags: Vec<u32>,
     vertex: wgpu::Buffer,
@@ -51,6 +50,9 @@ struct Renderer {
     textures_enabled: bool,
     texture_groups: Vec<wgpu::BindGroup>,
     antialias: bool,
+    ids_dirty: bool,
+    camera_data: Vec<f32>,
+    pick_pending: bool,
     aa: antialias::Antialias,
     transparency: xray::Xray,
     look: style::Style,
@@ -235,11 +237,11 @@ impl Renderer {
                     module: &vs,
                     entry_point: Some(if fragment == "edge_fs" || fragment == "hidden_edge_fs" || fragment == "profile_fs" { "edge_vs" } else { "vs" }),
                     compilation_options: Default::default(),
-                    buffers: &{ let mut layouts = vec![wgpu::VertexBufferLayout {
+                    buffers: &{ let layouts = vec![wgpu::VertexBufferLayout {
                         array_stride: 52,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: if fragment == "edge_fs" || fragment == "hidden_edge_fs" || fragment == "profile_fs" { &attrs } else { &face_attrs },
-                    }]; if fragment != "edge_fs" && fragment != "hidden_edge_fs" && fragment != "profile_fs" { layouts.push(textures::layout()); } layouts },
+                    }]; layouts },
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &vs,
@@ -346,6 +348,9 @@ impl Renderer {
         Ok(Self {
             textures, texture_groups, textures_enabled: true,
             antialias: true,
+            ids_dirty: true,
+            camera_data: Vec::new(),
+            pick_pending: false,
             aa,
             look, background, look_groups,
             transparency,
@@ -511,9 +516,9 @@ impl Renderer {
         self.aa.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer);
         self.gpu_memory =
             (v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 416)
-                as u64 + (expanded_v.len()/28*32) as u64 + self.textures.bytes;
+                as u64 + self.textures.bytes;
+        self.ids_dirty = true;
         self.scene = Some(Scene {
-            materials: buffer(&self.device, &vec![0; expanded_v.len()/28*32], wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST),
             inst,
             flags: instances
                 .chunks_exact(80)
@@ -593,6 +598,7 @@ impl Renderer {
         Ok(self.captured.take().unwrap_or_default())
     }
     fn set_edges(&mut self, enabled: bool) {
+        self.ids_dirty |= self.edges != enabled;
         self.edges = enabled;
     }
     fn set_camera(&mut self, view: Vec<f32>, proj: Vec<f32>) -> PyResult<()> {
@@ -613,8 +619,11 @@ impl Renderer {
             self.style as f32,
             if self.textures_enabled { 0. } else { 1. },
         ]);
-        self.queue
-            .write_buffer(&self.camera, 0, bytemuck::cast_slice(&data));
+        if self.camera_data != data {
+            self.ids_dirty = true;
+            self.queue.write_buffer(&self.camera, 0, bytemuck::cast_slice(&data));
+            self.camera_data = data;
+        }
         Ok(())
     }
     /// Kept for the R2a measurement script: anti-aliasing now lives in the
@@ -622,10 +631,16 @@ impl Renderer {
     fn set_materials(&mut self, data: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
         let data = data.as_slice()?;
         let scene = self.scene.as_ref().ok_or_else(|| PyValueError::new_err("no scene"))?;
-        if data.len() % 32 != 0 || data.len() as u64 > scene.materials.size() {
-            return Err(PyValueError::new_err("invalid material stream"));
+        if data.len() % 16 != 0 || data.len() < scene.p as usize * 16
+            || data.len() as u64 > self.device.limits().max_storage_buffer_binding_size as u64 {
+            return Err(PyValueError::new_err("invalid sparse material stream"));
         }
-        if !data.is_empty() { self.queue.write_buffer(&scene.materials, 0, data); }
+        self.gpu_memory = self.gpu_memory.saturating_sub(self.textures.materials.size());
+        self.textures.materials = buffer(&self.device, data, wgpu::BufferUsages::STORAGE);
+        self.gpu_memory += self.textures.materials.size();
+        self.texture_groups = [&self.draw, &self.xray].iter().map(|p| self.textures.bind(&self.device,p)).collect();
+        self.aa.bind_textures(&self.device, &self.textures);
+        self.transparency.bind_textures(&self.device, &self.textures);
         Ok(())
     }
     fn set_textures(&mut self, width: u32, height: u32, layers: u32, levels: Vec<Vec<u8>>) -> PyResult<()> {
@@ -637,7 +652,9 @@ impl Renderer {
             return Err(PyValueError::new_err("invalid texture array dimensions or mip data"));
         }
         self.gpu_memory = self.gpu_memory.saturating_sub(self.textures.bytes);
-        self.textures = textures::Textures::new(&self.device, &self.queue, width, height, layers, &levels);
+        let mut textures = textures::Textures::new(&self.device, &self.queue, width, height, layers, &levels);
+        std::mem::swap(&mut textures.materials, &mut self.textures.materials);
+        self.textures = textures;
         self.gpu_memory += self.textures.bytes;
         self.texture_groups = [&self.draw, &self.xray].iter().map(|p| self.textures.bind(&self.device,p)).collect();
         self.aa.bind_textures(&self.device, &self.textures);
@@ -650,6 +667,7 @@ impl Renderer {
         self.antialias = enabled;
     }
     fn resize(&mut self, w: u32, h: u32, scale: f64) {
+        self.ids_dirty = true;
         self.config.width = ((w as f64 * scale) as u32).max(1);
         self.config.height = ((h as f64 * scale) as u32).max(1);
         self.surface.configure(&self.device, &self.config);
@@ -725,8 +743,10 @@ impl Renderer {
             pass.set_bind_group(0, &s.compute, &[]);
             pass.dispatch_workgroups(s.n.div_ceil(64), 1, 1);
         }
+        let msaa = self.antialias && self.style != 1 && self.look.data[6][2] == 0.;
+        let draw_ids = needs_id_pass(msaa, self.pick_pending);
         if self.style == 1 { self.transparency.draw(&mut e, &color, s, self.multi); }
-        {
+        if draw_ids {
             let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[
@@ -761,7 +781,7 @@ impl Renderer {
                     .map(|q| wgpu::RenderPassTimestampWrites {
                         query_set: q,
                         beginning_of_pass_write_index: Some(2),
-                        end_of_pass_write_index: if self.antialias && self.style != 1 && self.look.data[6][2] == 0. { None } else { Some(3) },
+                        end_of_pass_write_index: if self.antialias && !self.pick_pending && self.style != 1 && self.look.data[6][2] == 0. { None } else { Some(3) },
                     }),
                 occlusion_query_set: None,
             });
@@ -781,7 +801,6 @@ impl Renderer {
             );
             pass.set_bind_group(1, &self.look_groups[if self.style == 1 { 1 } else { 0 }], &[]);
             pass.set_bind_group(2, &self.texture_groups[usize::from(self.style == 1)], &[]);
-            pass.set_vertex_buffer(1, s.materials.slice(..));
             pass.set_vertex_buffer(0, s.vertex.slice(..));
             pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
             if self.style != 4 {
@@ -814,7 +833,8 @@ impl Renderer {
                 }
             }
         }
-        if self.antialias && self.style != 1 && self.look.data[6][2] == 0. {
+        if draw_ids { self.ids_dirty = false; }
+        if msaa && !self.pick_pending {
             self.aa.draw(&mut e, &color, s, self.style, self.edges, self.multi, self.queries.as_ref());
         }
         self.overlay
@@ -935,8 +955,17 @@ impl Renderer {
     fn last_timings(&self) -> (f64, Option<f64>, f64) {
         (self.last_cpu, self.last_gpu, self.last_acquire)
     }
+    fn ensure_ids(&mut self) -> PyResult<()> {
+        if self.ids_dirty {
+            self.pick_pending = true;
+            let result = self.render(false);
+            self.pick_pending = false;
+            result?;
+        }
+        Ok(())
+    }
     /// Visible IDs in a physical-pixel, half-open rectangle; explicit picking may wait.
-    fn pick_rect(&self, x0: u32, y0: u32, x1: u32, y1: u32) -> PyResult<Vec<u32>> {
+    fn pick_rect(&mut self, x0: u32, y0: u32, x1: u32, y1: u32) -> PyResult<Vec<u32>> {
         let x = x0.min(x1).min(self.config.width);
         let y = y0.min(y1).min(self.config.height);
         let w = x0.max(x1).min(self.config.width) - x;
@@ -944,6 +973,7 @@ impl Renderer {
         if w == 0 || h == 0 {
             return Ok(vec![]);
         }
+        self.ensure_ids()?;
         let stride = (w * 4).div_ceil(256) * 256;
         let read = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("rectangle pick"),
@@ -996,10 +1026,11 @@ impl Renderer {
         read.unmap();
         Ok(ids.into_iter().collect())
     }
-    fn pick(&self, x: u32, y: u32) -> PyResult<i64> {
+    fn pick(&mut self, x: u32, y: u32) -> PyResult<i64> {
         if x >= self.config.width || y >= self.config.height {
             return Ok(-1);
         }
+        self.ensure_ids()?;
         let mut e = self.device.create_command_encoder(&Default::default());
         e.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
@@ -1175,5 +1206,22 @@ mod reference_tests {
         // Reset between frames; no stale counts may survive the template copy.
         counts.fill(0);
         assert_eq!(counts, [0, 0, 0]);
+    }
+}
+
+// The single-sample path supplies color and IDs together. MSAA only needs
+// the extra single-sample pass when an explicit pick requests fresh IDs.
+fn needs_id_pass(msaa: bool, pick_pending: bool) -> bool {
+    !msaa || pick_pending
+}
+
+#[cfg(test)]
+mod id_schedule_tests {
+    #[test]
+    fn multisample_color_does_not_replay_geometry_for_idle_picking() {
+        assert!(!super::needs_id_pass(true, false));
+        assert!(super::needs_id_pass(true, true));
+        assert!(super::needs_id_pass(false, false));
+        assert!(super::needs_id_pass(false, true));
     }
 }

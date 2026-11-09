@@ -3,6 +3,7 @@ pub struct Textures {
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
     pub bytes: u64,
+    pub materials: wgpu::Buffer,
 }
 impl Textures {
     pub fn new(
@@ -51,6 +52,7 @@ impl Textures {
             );
         }
         Self {
+            materials: crate::buffer(d, &[0;16], wgpu::BufferUsages::STORAGE),
             view: texture.create_view(&wgpu::TextureViewDescriptor {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()
@@ -71,6 +73,7 @@ impl Textures {
             label: Some("material textures"),
             layout: &p.get_bind_group_layout(2),
             entries: &[
+                wgpu::BindGroupEntry { binding: 2, resource: self.materials.as_entire_binding() },
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(&self.view),
@@ -81,14 +84,5 @@ impl Textures {
                 },
             ],
         })
-    }
-}
-pub const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-    wgpu::vertex_attr_array![3=>Float32x4,4=>Unorm8x4,5=>Uint32,6=>Uint32];
-pub fn layout() -> wgpu::VertexBufferLayout<'static> {
-    wgpu::VertexBufferLayout {
-        array_stride: 32,
-        step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &ATTRIBUTES,
     }
 }

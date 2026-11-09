@@ -1,5 +1,6 @@
 @group(2) @binding(0) var material_images: texture_2d_array<f32>;
 @group(2) @binding(1) var material_sampler: sampler;
+@group(2) @binding(2) var<storage, read> materials: array<vec4u>;
 // GL uses display-referred colors; explicitly decode for the sRGB surface.
 struct Style { front: vec4f, back: vec4f, edge: vec4f, background: vec4f, sky: vec4f, ground: vec4f, profiles: vec4f }
 @group(1) @binding(0) var<uniform> style: Style;
@@ -10,7 +11,7 @@ struct Camera { vp: mat4x4f, size: vec4f }
 @group(0) @binding(1) var<storage, read> inst: array<Instance>;
 @group(0) @binding(2) var<storage, read> survivors: array<u32>;
 struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f, @location(1) @interpolate(flat) id: u32, @location(2) shade: f32, @location(3) @interpolate(flat) decorated: u32, @location(7) @interpolate(linear) distance: f32, @location(4) uv: vec4f, @location(5) @interpolate(flat) back: vec4f, @location(6) @interpolate(flat) textures: vec2u }
-@vertex fn vs(@location(0) pos: vec3f, @location(1) normal: vec3f, @location(2) color: vec4f, @location(3) uv: vec4f, @location(4) back: vec4f, @location(5) front_tex: u32, @location(6) back_tex: u32, @builtin(instance_index) index: u32) -> Out {
+@vertex fn vs(@location(0) pos: vec3f, @location(1) normal: vec3f, @location(2) color: vec4f, @builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32) -> Out {
  let id = survivors[index]; let i = inst[id];
  let a=i.world[0].xyz; let b=i.world[1].xyz; let c=i.world[2].xyz;
  let n = normalize(mat3x3f(cross(b,c),cross(c,a),cross(a,b))*normal);
@@ -24,7 +25,15 @@ struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f, @loc
  if (i.info.w >> 24u) != 0u { o.color = unpack4x8unorm(i.info.w).rgb; }
 
  o.decorated = select(0u,16u,dot(a,cross(b,c)) < 0.) | (i.info.z & 6u) | select(0u,8u,(i.info.w >> 24u) != 0u);
- o.uv = uv; o.back = back; o.textures = vec2u(front_tex,back_tex);
+ let header = materials[i.info.x];
+ if header.z > 0u {
+  let at = header.y + (vertex-header.x)*2u;
+  o.uv = bitcast<vec4f>(materials[at]);
+  let mat = materials[at+1u];
+  o.back = unpack4x8unorm(mat.x); o.textures = mat.yz;
+ }
+ // Unpainted faces inherit container paint on both sides.
+ if color.a < 0.5 && tint.a > 0.5 && o.back.a < 0.5 { o.back = tint; }
  o.distance = 0.; o.id = id+1u; return o;
 }
 struct Pixel { @location(0) color: vec4f, @location(1) id: u32 }

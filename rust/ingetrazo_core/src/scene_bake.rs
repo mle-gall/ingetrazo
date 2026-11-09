@@ -311,16 +311,20 @@ pub fn bake_scene<'py>(
         }
         jobs.into_par_iter()
             .for_each(|(i, p, dst, idx)| fill(&pts[offsets[i][0]..offsets[i + 1][0]], p, dst, idx));
-        let mut materials = Vec::with_capacity(total * 32);
+        let mut materials = vec![0u8; prepared.len() * 16];
         for (i, mesh) in prepared.iter().enumerate() {
+            let first_face = offsets[i][3];
+            let special = mesh.faces.iter().any(|f| paints[first_face + f] != [0; 3]);
+            if !special { continue; }
+            let header = [table[i*3], (materials.len()/16) as u32, table[i*3+1], 0];
+            materials[i*16..i*16+16].copy_from_slice(&header.into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>());
             let points = &pts[offsets[i][0]..offsets[i+1][0]];
             for ((t, _, _), face) in mesh.triangles.iter().zip(&mesh.faces) {
-                let f = offsets[i][3] + face;
+                let f = first_face + face;
                 for v in t {
                     materials.extend_from_slice(&material_vertex(points[*v as usize], &maps[f], paints[f]));
                 }
             }
-            materials.resize(materials.len() + mesh.edges.len() * 2 * 32, 0);
         }
         (bytes, indices, bounds, table, materials)
     });
