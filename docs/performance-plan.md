@@ -1154,4 +1154,5 @@ Validation: 5 core Rust, 6 renderer Rust and 24 focused Python tests passed.
 The once-invoked full suite stopped at a 12-minute overall bound: four
 completed batches, 1,267 passed / 18 failed / 48 skipped / 1 deselected;
 all observed failures match the baseline, but the remainder is unverified.
-Ride default and edges-off captures timed out; its width-4 diagnostic succeeded.
+Ride default timed out without an image; edges-off wrote its image before
+a shutdown timeout. Its width-4 diagnostic exited normally.

@@ -80,10 +80,11 @@ worktree-local. No new dependencies were added.
 
 ## Capture outcome and bounded-suite result
 
-Seven comparisons completed: pusher and marquee default, edges off and
-width 4; ride width 4. Ride default and edges-off each timed out at the
-external 240-second bound, without producing a current comparison or timing
-sample. The ride width diagnostic completed and was visually inspected; it
+Eight comparison images were produced: pusher and marquee default, edges
+off and width 4; ride edges off and width 4. Seven processes exited normally.
+Ride default timed out without an image; ride edges-off wrote its images and
+JSON before timing out during shutdown. Both were terminated at the external
+240-second bound. No current ride timing sample was obtained. The ride width diagnostic completed and was visually inspected; it
 is intentionally much heavier than the GL reference. There is no curated
 ride-section capture or per-item three-model acceptance set.
 
