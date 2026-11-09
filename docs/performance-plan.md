@@ -2950,7 +2950,7 @@ Native denotes routed, not exhaustive parity acceptance.
 | first_person | FirstPersonTool | native | rubber_band_lines |
 | change_axes | ChangeAxesTool | native | rubber_band_lines |
 | scale_manager | ScaleManagerTool | native | shared viewport / tool base |
-| paste | PasteTool | inert with note | rubber_band_lines, set_groups_preview_offset |
+| paste | PasteTool | native | rubber_band_lines, set_groups_preview_offset |
 | place_group | PlaceGroupTool | native | pick_face_any, rubber_band_lines |
 | outer_shell | OuterShellTool | native | pick_group |
 | solid_union | UnionTool | native | pick_group |
