@@ -1,0 +1,16 @@
+🐍 Found CPython 3.13 at /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-857623d2/.venv-work/bin/python
+🔗 Found pyo3 bindings with abi3-py3.10 support
+   Compiling ingetrazo_render v0.1.0 (/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-857623d2/rust/ingetrazo_render)
+warning: function `multisampled` is never used
+   --> src/lib.rs:170:4
+    |
+170 | fn multisampled(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
+    |    ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: `ingetrazo_render` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 3.52s
+📦 Built wheel for abi3 Python ≥ 3.10 to /var/folders/zy/1s11p6w53_jctswhjtc0w6zh0000gn/T/.tmpMPmw02/ingetrazo_render-0.1.0-cp310-abi3-macosx_11_0_arm64.whl
+✏️ Setting installed package as editable
+🛠 Installed ingetrazo_render-0.1.0

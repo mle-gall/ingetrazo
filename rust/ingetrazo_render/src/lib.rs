@@ -3,6 +3,8 @@ mod timing;
 mod overlay;
 mod axes;
 mod sections;
+mod preview;
+mod sun;
 mod textures;
 // R-look: isolated style and background passes.
 mod style;
@@ -88,6 +90,11 @@ struct Renderer {
     overlay: overlay::Overlay,
     axes: axes::Axes,
     sections: sections::Sections,
+    preview: preview::Preview,
+    face_marks: preview::Preview,
+    sun: sun::Sun,
+    ghost_geometry: preview::Preview,
+    ghost_objects: preview::Preview,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -437,7 +444,12 @@ impl Renderer {
             &[0; 256],
             wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         );
+        let sun = sun::Sun::new(&device, format);
         let look = style::Style::new(&device);
+        let preview = preview::Preview::new(&device, format, &camera, &look.buffer, 0);
+        let face_marks = preview::Preview::new(&device, format, &camera, &look.buffer, 1);
+        let ghost_geometry = preview::Preview::new(&device, format, &camera, &look.buffer, 2);
+        let ghost_objects = preview::Preview::new(&device, format, &camera, &look.buffer, 2);
         let background = background::Background::new(&device, format, &look.buffer, 1);
         let look_groups = [&draw, &xray, &edge, &xray_edge, &profile_top].iter().map(|p|
             bind(&device, &p.get_bind_group_layout(1), &[&look.buffer])).collect();
@@ -471,6 +483,11 @@ impl Renderer {
             aa,
             look, background, look_groups,
             transparency,
+            preview,
+            face_marks,
+            ghost_geometry,
+            ghost_objects,
+            sun,
             capture_next: false,
             captured: None,
             overlay: overlay::Overlay::new(&device, format),
@@ -540,6 +557,7 @@ impl Renderer {
         ),
         instances: PyReadonlyArray1<'_, u8>,
     ) -> PyResult<()> {
+        self.sun.invalidate();
         let (v, ix, p, cmd) = (&prototypes.0, &prototypes.1, &prototypes.2, &prototypes.3);
         let (v, ix, p, cmd) = (
             v.as_slice()?,
@@ -709,12 +727,17 @@ impl Renderer {
             n: n as u32,
             p: count as u32,
         });
+        self.preview.upload(&self.device,&[],&[]).map_err(PyValueError::new_err)?;
+        self.face_marks.upload(&self.device,&[],&[]).map_err(PyValueError::new_err)?;
+        self.ghost_geometry.upload(&self.device,&[],&[]).map_err(PyValueError::new_err)?;
+        self.ghost_objects.upload(&self.device,&[],&[]).map_err(PyValueError::new_err)?;
         self.device.poll(wgpu::Maintain::Wait);
         Ok(())
     }
     /// Append compact replacement ranges while preserving placement identities.
     fn replace_prototype(&mut self, id: usize, vertices: PyReadonlyArray1<'_, u8>,
         indices: PyReadonlyArray1<'_, u8>, bounds: PyReadonlyArray1<'_, u8>, faces: u32) -> PyResult<()> {
+        self.sun.invalidate();
         let (v, ix, bounds) = (vertices.as_slice()?, indices.as_slice()?, bounds.as_slice()?);
         let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
         if id > s.p as usize || v.len()%28 != 0 || ix.len()%4 != 0 || bounds.len()!=32 || faces as usize > ix.len()/4 {
@@ -797,6 +820,7 @@ impl Renderer {
 
     /// Change only matrices: preserve paint, highlights, visibility and pick IDs.
     fn set_instance_world(&mut self, ids: Vec<usize>, matrices: PyReadonlyArray1<'_, f32>) -> PyResult<()> {
+        self.sun.invalidate();
         let matrices = matrices.as_slice()?;
         let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
         if matrices.len() != ids.len()*16 || ids.iter().any(|&id| id >= s.n as usize)
@@ -822,6 +846,7 @@ impl Renderer {
 
     /// Update existing resident rows without replacing geometry or pick IDs.
     fn update_instances(&mut self, ids: Vec<usize>, rows: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
+        self.sun.invalidate();
         self.ids_dirty = true;
         self.stable_frames = 0;
         let rows = rows.as_slice()?;
@@ -905,6 +930,7 @@ impl Renderer {
 
     /// Tombstones retain row identities so stale picks cannot select a neighbour.
     fn remove_instances(&mut self, ids: Vec<usize>) -> PyResult<()> {
+        self.sun.invalidate();
         self.ids_dirty = true;
         let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
         if ids.iter().any(|&id| id >= s.n as usize) {
@@ -952,6 +978,7 @@ impl Renderer {
     }
     /// Edit context bits are independent of visibility, selection and tint.
     fn set_rest(&mut self, rows: Vec<usize>, mode: &str) -> PyResult<()> {
+        self.sun.invalidate();
         let bits = match mode {
             "fade" => 64, "hide" => 64 | 128, "none" | "normal" => 0,
             _ => return Err(PyValueError::new_err("unknown edit rest mode")),
@@ -997,14 +1024,88 @@ impl Renderer {
     // R-look: retain string compatibility for existing diagnostic scripts.
     fn set_style(&mut self, style: &Bound<'_, PyAny>) -> PyResult<()> {
         self.ids_dirty = true;
+        let old_section = self.look.data[7];
+        let old_opacity = self.look.data[9][0];
         let (mode, edges) = self.look.update(style, &self.queue)?;
+        if old_section != self.look.data[7] || old_opacity != self.look.data[9][0] { self.sun.invalidate(); }
         self.ao.update(style)?;
+        self.sun.update(style)?;
         self.style = mode;
         let name = if let Ok(d) = style.cast::<pyo3::types::PyDict>() {
             d.get_item("face_mode")?.map(|v| v.extract::<String>()).transpose()?.unwrap_or_default()
         } else { style.extract::<String>()? };
         self.textures_enabled = name != "shaded";
         if let Some(enabled) = edges { self.edges = enabled; }
+        Ok(())
+    }
+    /// TODO(P1): world-space triangle/edge feedback replaces QPainter polygons.
+    fn set_preview_mesh(&mut self, triangles: PyReadonlyArray1<'_, u8>, edges: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
+        self.preview.upload(&self.device, triangles.as_slice()?, edges.as_slice()?).map_err(PyValueError::new_err)
+    }
+    /// TODO(P1): loose-face marks only; groups use group_selection_edges.
+    fn set_face_marks(&mut self, triangles: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
+        self.face_marks.upload(&self.device, triangles.as_slice()?, &[]).map_err(PyValueError::new_err)
+    }
+    /// TODO(P1/P3): resolve face IDs to (prototype, local triangle index, count).
+    /// Shared prototypes affect every placement: duplicate before a local edit.
+    fn set_suppressed_faces(&mut self, ranges: Vec<(usize, u32, u32)>) -> PyResult<()> {
+        self.sun.invalidate();
+        let s = self.scene.as_ref().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+        let data = suppressed_indices(&s.index_data, &s.template_data, s.p as usize, &ranges)
+            .map_err(PyValueError::new_err)?;
+        self.queue.write_buffer(&s.index, 0, &data);
+        self.ids_dirty = true;
+        Ok(())
+    }
+    /// TODO(P3): provide soft/hidden endpoint pairs, in prototype coordinates.
+    /// Geometry-only reconstruction cannot distinguish a hidden edge from a seam.
+    fn set_profile_exclusions(&mut self, pairs: Vec<(usize, Vec<f32>)>) -> PyResult<()> {
+        let s = self.scene.as_ref().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+        let mut data = s.edge_data.clone();
+        let mut template = s.template_data.clone();
+        for (prototype, endpoints) in pairs {
+            if prototype >= s.p as usize || endpoints.len()%6 != 0 || endpoints.iter().any(|v| !v.is_finite()) {
+                return Err(PyValueError::new_err("profile exclusions need a valid prototype and finite endpoint pairs"));
+            }
+            let keys: std::collections::HashSet<_> = endpoints.chunks_exact(6).map(|p| edges::key(bytemuck::cast_slice(&p[..3]), bytemuck::cast_slice(&p[3..]))).collect();
+            let offset = (s.p as usize+prototype)*20;
+            let command: [u32;5] = bytemuck::pod_read_unaligned(&s.template_data[offset..offset+20]);
+            let range = (command[2]/6) as usize*48..((command[2]+command[0])/6) as usize*48;
+            let mut hard = Vec::new(); let mut soft = Vec::new();
+            for record in data[range.clone()].chunks_exact(48) {
+                let mut edge = record.to_vec();
+                let n = glam::Vec3::from_array(bytemuck::pod_read_unaligned::<[f32;3]>(&edge[24..36]));
+                let candidate = n.length_squared()>2. || keys.contains(&edges::key(&edge[..12],&edge[12..24]));
+                if candidate {
+                    if n.length_squared()<=2. { edge[24..36].copy_from_slice(bytemuck::cast_slice(&(n*2.).to_array())); }
+                    soft.extend(edge);
+                } else { hard.extend(edge); }
+            }
+            let count = (hard.len()/48*6) as u32;
+            hard.extend(soft); data[range].copy_from_slice(&hard);
+            template[offset+16..offset+20].copy_from_slice(&count.to_le_bytes());
+        }
+        let mut hard = template.clone();
+        for row in hard.chunks_exact_mut(20).skip(s.p as usize) {
+            let count = row[16..20].to_vec(); row[..4].copy_from_slice(&count);
+        }
+        self.queue.write_buffer(&s.edge_records,0,&data);
+        self.queue.write_buffer(&s.template,0,&template);
+        self.queue.write_buffer(&s.hard_template,0,&hard);
+        Ok(())
+    }
+    /// TODO(P3): separate per-prototype hidden COMMAND rows and original vertex/index streams.
+    /// TODO(P1): refresh after world/visibility edits; object_rows are placement IDs,
+    /// deliberately separate from the frozen instance flag ABI.
+    #[pyo3(signature = (vertices, indices, hidden_commands, hidden_edge_commands, object_rows=Vec::new()))]
+    fn set_hidden_geometry(&mut self, vertices: PyReadonlyArray1<'_, u8>, indices: PyReadonlyArray1<'_, u8>,
+        hidden_commands: PyReadonlyArray1<'_, u8>, hidden_edge_commands: PyReadonlyArray1<'_, u8>, object_rows: Vec<usize>) -> PyResult<()> {
+        let s = self.scene.as_ref().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+        let (vertices,indices,faces,edges)=(vertices.as_slice()?,indices.as_slice()?,hidden_commands.as_slice()?,hidden_edge_commands.as_slice()?);
+        let (triangles,lines)=ghost_mesh(s,vertices,indices,faces,edges,&object_rows,false).map_err(PyValueError::new_err)?;
+        let (objects,object_edges)=ghost_mesh(s,vertices,indices,faces,edges,&object_rows,true).map_err(PyValueError::new_err)?;
+        self.ghost_geometry.upload(&self.device,&triangles,&lines).map_err(PyValueError::new_err)?;
+        self.ghost_objects.upload(&self.device,&objects,&object_edges).map_err(PyValueError::new_err)?;
         Ok(())
     }
     fn set_antialias(&mut self, enabled: bool) { self.antialias = enabled; }
@@ -1054,6 +1155,7 @@ impl Renderer {
         // Keep the original resources alive until the transaction has completed.
         let old_aa = std::mem::replace(&mut self.aa, aa);
         let old_transparency = std::mem::replace(&mut self.transparency, transparency);
+        let old_sun = std::mem::replace(&mut self.sun, sun::Sun::new(&self.device, format));
         let old_ao = std::mem::replace(&mut self.ao, ao::AmbientOcclusion::new(&self.device, format));
         let old_overlay = std::mem::replace(&mut self.overlay, overlay::Overlay::new(&self.device, format));
         let old_color = std::mem::replace(&mut self.offscreen, texture(&self.device, width, height, format));
@@ -1079,6 +1181,7 @@ impl Renderer {
         self.aa = old_aa;
         self.transparency = old_transparency;
         self.ao = old_ao;
+        self.sun = old_sun;
         self.overlay = old_overlay;
         self.offscreen = old_color;
         self.depth = old_depth;
@@ -1132,6 +1235,7 @@ impl Renderer {
     /// Kept for the R2a measurement script: anti-aliasing now lives in the
     /// antialias module, so this is the same switch as ``set_antialias``.
     fn update_prototype_materials(&mut self, id: usize, data: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
+        self.sun.invalidate();
         let data = data.as_slice()?;
         let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("no scene"))?;
         if id >= s.p as usize || data.len()%32 != 0 { return Err(PyValueError::new_err("invalid material rows")); }
@@ -1150,6 +1254,7 @@ impl Renderer {
         Ok(())
     }
     fn set_materials(&mut self, data: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
+        self.sun.invalidate();
         self.ids_dirty = true;
         let data = data.as_slice()?;
         let scene = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("no scene"))?;
@@ -1174,6 +1279,7 @@ impl Renderer {
         Ok(())
     }
     fn set_textures(&mut self, width: u32, height: u32, layers: u32, levels: Vec<Vec<u8>>) -> PyResult<()> {
+        self.sun.invalidate();
         self.ids_dirty = true;
         let limits = self.device.limits();
         if width == 0 || height == 0 || layers == 0 || width > limits.max_texture_dimension_2d
@@ -1283,6 +1389,7 @@ impl Renderer {
         let ids = self.ids.create_view(&Default::default());
         let mut e = self.device.create_command_encoder(&Default::default());
         let tq = self.queries.as_ref().filter(|_| self.detailed_timestamps);
+        self.sun.prepare(&self.device, &self.queue, &mut e, s, &self.textures, &self.look.buffer);
         self.background.draw(&mut e, &color, tq);
         e.clear_buffer(&s.counters, 0, None);
         e.copy_buffer_to_buffer(if self.look.data[6][0] > 0. { &s.template } else { &s.hard_template }, 0, &s.commands, 0, s.p as u64 * 40);
@@ -1308,7 +1415,7 @@ impl Renderer {
         let color_only = !msaa && !self.edges && self.style != 4 && !plan.ao && !plan.xray;
         let draw_ids = if color_only { needs_settled_ids(self.pick_pending, self.ids_dirty, self.stable_frames) }
             else { needs_id_pass(msaa, self.pick_pending, self.ids_dirty, self.stable_frames) };
-        if plan.xray { self.transparency.draw(&mut e, &color, s, self.multi, tq); }
+        if plan.xray { self.transparency.draw(&mut e, &color, None, s, self.multi, tq); }
 
         let ao_active = plan.ao;
         for edge_only in [false, true] {
@@ -1414,7 +1521,12 @@ impl Renderer {
             drop(pass);
             }
             if msaa && !self.pick_pending {
-                self.aa.draw(&mut e, &color, s, self.style, self.edges, self.look.data[6][0] > 0., self.multi, self.queries.as_ref(), Some(edge_only), self.sections.count > 0, &self.axes);
+                self.aa.draw(&mut e, &color, s, self.style, self.edges, self.look.data[6][0] > 0., self.multi, self.queries.as_ref(), Some(edge_only), self.sections.count > 0 || self.preview.active() || self.face_marks.active() || self.ghost_geometry.active() || self.ghost_objects.active() || self.look.data[9][0] > 0., &self.axes);
+            }
+            if !edge_only && self.sun.enabled && self.style != 1 && self.style != 4 {
+                if msaa { self.aa.resolve_depth(&self.device, &mut e, &depth, None); }
+                let output = if msaa { self.aa.color_view() } else { target.create_view(&Default::default()) };
+                self.sun.draw(&self.device, &self.queue, &mut e, &output, &depth, msaa, &self.camera_data);
             }
             if !edge_only && ao_active {
                 // Caps must contribute depth before AO reconstructs its normals.
@@ -1438,6 +1550,25 @@ impl Renderer {
             } else {
                 self.sections.draw(&mut e, &color, &depth, None, tq, &self.camera_data);
             }
+        }
+        if msaa {
+            self.preview.draw(&mut e, &self.aa.color_view(), &self.aa.depth_view(), Some(&color));
+            self.face_marks.draw(&mut e, &self.aa.color_view(), &self.aa.depth_view(), Some(&color));
+        } else {
+            self.preview.draw(&mut e, &color, &depth, None);
+            self.face_marks.draw(&mut e, &color, &depth, None);
+        }
+        for (enabled,ghost) in [(self.look.data[9][2]>0.,&self.ghost_geometry),(self.look.data[9][3]>0.,&self.ghost_objects)] {
+            if enabled {
+                if msaa { ghost.draw(&mut e,&self.aa.color_view(),&self.aa.depth_view(),Some(&color)); }
+                else { ghost.draw(&mut e,&color,&depth,None); }
+            }
+        }
+        // Material OIT reads opaque depth and never writes it. AO has already
+        // completed on opaque geometry; glass cannot generate contact darkness.
+        if self.look.data[9][0] > 0. && self.style != 1 && self.style != 4 {
+            if msaa { self.aa.resolve_depth(&self.device, &mut e, &depth, None); }
+            self.transparency.draw(&mut e, &color, Some(&depth), s, self.multi, tq);
         }
         self.overlay
             .draw(&mut e, &color, self.config.width, self.config.height, tq);
@@ -2064,4 +2195,69 @@ mod pick_bounds_tests {
         }
         assert!(b[0] < 0. && b[1] < 0. && b[2] > 0. && b[3] > 0.);
     }
+}
+
+fn suppressed_indices(source: &[u8], commands: &[u8], prototypes: usize, ranges: &[(usize,u32,u32)]) -> Result<Vec<u8>, &'static str> {
+    let mut result = source.to_vec();
+    for &(prototype, first, count) in ranges {
+        if prototype >= prototypes { return Err("suppression prototype out of range"); }
+        let c: Command = bytemuck::pod_read_unaligned(&commands[prototype*20..prototype*20+20]);
+        if u64::from(first)+u64::from(count) > u64::from(c.count)/3 { return Err("suppression triangle range out of bounds"); }
+        for triangle in first..first+count {
+            let at = (c.first as usize+triangle as usize*3)*4;
+            let index = result[at..at+4].to_vec();
+            result[at+4..at+8].copy_from_slice(&index); result[at+8..at+12].copy_from_slice(&index);
+        }
+    }
+    Ok(result)
+}
+#[cfg(test)] mod suppression_tests {
+    #[test] fn suppress_and_restore_only_requested_triangles() {
+        let source = bytemuck::cast_slice(&[0u32,1,2,3,4,5]);
+        let cmd = bytemuck::bytes_of(&Command { count:6,instances:0,first:0,base:0,start:0 }).to_vec();
+        let result = super::suppressed_indices(source,&cmd,1,&[(0,1,1)]).unwrap();
+        assert_eq!(bytemuck::cast_slice::<u8,u32>(&result), &[0,1,2,3,3,3]);
+        assert_eq!(super::suppressed_indices(source,&cmd,1,&[]).unwrap(),source);
+        assert!(super::suppressed_indices(source,&cmd,1,&[(0,1,2)]).is_err());
+    }
+    use super::Command;
+}
+
+fn ghost_mesh(s:&Scene, vertices:&[u8], indices:&[u8], faces:&[u8], edges:&[u8], objects:&[usize], object_pass:bool) -> Result<(Vec<u8>,Vec<u8>), &'static str> {
+    if vertices.len()%28!=0 || indices.len()%4!=0 || faces.len()!=s.p as usize*20 || edges.len()!=faces.len() || objects.iter().any(|&i|i>=s.n as usize) {return Err("invalid hidden geometry layout");}
+    let objects:std::collections::HashSet<_>=objects.iter().copied().collect();
+    let mut triangles=Vec::new();let mut lines=Vec::new();
+    for (row_id,row) in s.rows.chunks_exact(80).enumerate() {
+        let flags=u32::from_le_bytes(row[72..76].try_into().unwrap());
+        if (flags&128)!=0 || objects.contains(&row_id)!=object_pass || (!object_pass && flags&1!=0) {continue;}
+        let prototype=u32::from_le_bytes(row[64..68].try_into().unwrap()) as usize;
+        let world=glam::Mat4::from_cols_array(&bytemuck::pod_read_unaligned::<[f32;16]>(&row[..64]));
+        let normal=glam::Mat3::from_mat4(world).inverse().transpose();
+        let emit=|v:&[u8],ix:&[u8],commands:&[u8],out:&mut Vec<u8>,arity:u32| -> Result<(), &'static str> {
+            let c:Command=bytemuck::pod_read_unaligned(&commands[prototype*20..prototype*20+20]);
+            if c.count%arity!=0 || (u64::from(c.first)+u64::from(c.count))*4>ix.len() as u64 {return Err("invalid hidden command range");}
+            for i in ix[c.first as usize*4..(c.first+c.count) as usize*4].chunks_exact(4) {
+                let index=i64::from(u32::from_le_bytes(i.try_into().unwrap()))+i64::from(c.base);
+                if index<0 || index as usize>=v.len()/28 {return Err("hidden vertex out of range");}
+                let source=&v[index as usize*28..index as usize*28+28];
+                let pos=world.transform_point3(glam::Vec3::from_array(bytemuck::pod_read_unaligned(&source[..12])));
+                let n=(normal*glam::Vec3::from_array(bytemuck::pod_read_unaligned(&source[12..24]))).normalize_or_zero();
+                out.extend_from_slice(bytemuck::cast_slice(&pos.to_array()));out.extend_from_slice(bytemuck::cast_slice(&n.to_array()));out.extend_from_slice(&source[24..28]);
+            } Ok(())
+        };
+        emit(vertices,indices,faces,&mut triangles,3)?;emit(vertices,indices,edges,&mut lines,2)?;
+        if object_pass {
+            emit(&s.vertex_data,&s.index_data,&s.template_data,&mut triangles,3)?;
+            let c:[u32;5]=bytemuck::pod_read_unaligned(&s.template_data[(s.p as usize+prototype)*20..(s.p as usize+prototype+1)*20]);
+            for edge in s.edge_data[(c[2]/6) as usize*48..((c[2]+c[0])/6) as usize*48].chunks_exact(48) {
+                for endpoint in [&edge[..12],&edge[12..24]] {
+                    let point=world.transform_point3(glam::Vec3::from_array(bytemuck::pod_read_unaligned(endpoint)));
+                    lines.extend_from_slice(bytemuck::cast_slice(&point.to_array()));
+                    lines.extend_from_slice(bytemuck::cast_slice(&[0f32,0.,1.]));
+                    lines.extend_from_slice(&[33,43,59,255]);
+                }
+            }
+        }
+    }
+    Ok((triangles,lines))
 }

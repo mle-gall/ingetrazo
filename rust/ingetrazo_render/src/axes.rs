@@ -26,8 +26,8 @@ impl Axes {
                 targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })] }),
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
             depth_stencil: Some(wgpu::DepthStencilState { format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: false, depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: Default::default(), bias: Default::default() }),
+                depth_write_enabled: false, depth_compare: wgpu::CompareFunction::Less,
+                stencil: Default::default(), bias: wgpu::DepthBiasState { constant: 2, slope_scale: 1., clamp: 0. } }),
             multisample: wgpu::MultisampleState { count, ..Default::default() }, multiview: None, cache: None,
         })).collect::<Vec<_>>();
         let uniform = d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("axes frame"),

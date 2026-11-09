@@ -66,7 +66,12 @@ struct EdgePlacement { eye: vec4f, transform: mat4x4f }
  let normal = vec2f(-direction.y,direction.x)/max(length(direction),1e-6);
  let width = select(style.edge.w,max(style.edge.w,style.profiles.y),profile && style.profiles.x > 0.);
  let side = (corner.r*2.-1.)*(1.-2.*corner.g);
- a = vec4f(a.xy + normal*side*width/camera.size.xy*a.w,a.zw);
+ // Half-pixel square caps overlap adjacent segments at a rim; the old
+ // butt caps left uncovered MSAA samples at each independently expanded join.
+ // Do not inflate subpixel machinery into a pixel-long dash: the ride
+ // contains millions of those segments. Only visible (>4 px) joins need caps.
+ let cap = direction/length(direction)/camera.size.xy*a.w*select(0.,1.,length(direction)>8.);
+ a = vec4f(a.xy + normal*side*width/camera.size.xy*a.w - cap,a.zw);
  var o: Out;
  o.section_distance = dot(inst[id].world * vec4f(pos,1.), style.section_plane);
  o.distance = corner.g * length(direction) * 0.5;

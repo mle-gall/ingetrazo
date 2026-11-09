@@ -1,9 +1,12 @@
 //! Order independent translucent faces; a separate face depth pass classifies edges.
 pub struct Xray {
     pipeline: wgpu::RenderPipeline,
+    material_pipeline: wgpu::RenderPipeline,
     texture_group: Option<wgpu::BindGroup>,
     composite: wgpu::RenderPipeline,
     groups: Option<(wgpu::BindGroup, wgpu::BindGroup)>,
+    material_groups: Option<(wgpu::BindGroup, wgpu::BindGroup)>,
+    material_texture_group: Option<wgpu::BindGroup>,
     targets: [wgpu::Texture; 2],
     composite_group: wgpu::BindGroup,
 }
@@ -77,7 +80,7 @@ impl Xray {
             operation: wgpu::BlendOperation::Add,
         };
         let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
-        let pipeline = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let make_pipeline = |material| d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("X-ray accumulation"),
             layout: None,
             vertex: wgpu::VertexState {
@@ -114,11 +117,16 @@ impl Xray {
                 ],
             }),
             primitive: Default::default(),
-            depth_stencil: None,
+            depth_stencil: if material { Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float, depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual, stencil: Default::default(), bias: Default::default(),
+            }) } else { None },
             multisample: Default::default(),
             multiview: None,
             cache: None,
         });
+        let pipeline = make_pipeline(false);
+        let material_pipeline = make_pipeline(true);
         let shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("X-ray composite"),
             source: wgpu::ShaderSource::Wgsl(include_str!("xray_composite.wgsl").into()),
@@ -151,7 +159,7 @@ impl Xray {
         let targets = Self::targets(d, w, h);
         let composite_group = Self::composite_group(d, &composite, &targets);
         Self {
-            texture_group: None,            pipeline,
+            texture_group: None, pipeline, material_pipeline, material_groups: None, material_texture_group: None,
             composite,
             targets,
             composite_group,
@@ -164,6 +172,7 @@ impl Xray {
     }
     pub fn bind_textures(&mut self, d: &wgpu::Device, textures: &crate::textures::Textures) {
         self.texture_group = Some(textures.bind(d, &self.pipeline));
+        self.material_texture_group = Some(textures.bind(d, &self.material_pipeline));
     }
     pub fn bind_scene(
         &mut self,
@@ -173,6 +182,8 @@ impl Xray {
         survivors: &wgpu::Buffer,
         style: &wgpu::Buffer,
     ) {
+        self.material_groups = Some((crate::bind(d, &self.material_pipeline.get_bind_group_layout(0), &[camera, inst, survivors]),
+            crate::bind(d, &self.material_pipeline.get_bind_group_layout(1), &[style])));
         self.groups = Some((
             crate::bind(
                 d,
@@ -186,6 +197,7 @@ impl Xray {
         &self,
         e: &mut wgpu::CommandEncoder,
         color: &wgpu::TextureView,
+        depth: Option<&wgpu::TextureView>,
         s: &crate::Scene,
         multi: bool,
         queries: Option<&wgpu::QuerySet>,
@@ -212,15 +224,16 @@ impl Xray {
             let mut p = e.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("X-ray accumulation"),
                 color_attachments: &attachments,
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: depth.map(|view| wgpu::RenderPassDepthStencilAttachment {
+                    view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }), stencil_ops: None }),
                 timestamp_writes: crate::timing::writes(queries, "xray_accumulation"),
                 occlusion_query_set: None,
             });
-            let groups = self.groups.as_ref().unwrap();
-            p.set_pipeline(&self.pipeline);
+            let groups = if depth.is_some() { &self.material_groups } else { &self.groups }.as_ref().unwrap();
+            p.set_pipeline(if depth.is_some() { &self.material_pipeline } else { &self.pipeline });
             p.set_bind_group(0, &groups.0, &[]);
             p.set_bind_group(1, &groups.1, &[]);
-            p.set_bind_group(2, self.texture_group.as_ref().unwrap(), &[]);
+            p.set_bind_group(2, if depth.is_some() { &self.material_texture_group } else { &self.texture_group }.as_ref().unwrap(), &[]);
             p.set_vertex_buffer(0, s.vertex.slice(..));
             p.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
             if multi {

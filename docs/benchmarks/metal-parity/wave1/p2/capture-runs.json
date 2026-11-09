@@ -1,0 +1,156 @@
+[
+  {
+    "argv": [
+      ".venv-work/bin/python",
+      "tests/test_metal_parity_raster.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "guides-only",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p2"
+    ],
+    "timeout": 90,
+    "returncode": 0
+  },
+  {
+    "argv": [
+      ".venv-work/bin/python",
+      "tests/test_metal_parity_raster.py",
+      "docs/benchmarks/metal-parity/alpha.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "baseline",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p2"
+    ],
+    "timeout": 90,
+    "returncode": 0
+  },
+  {
+    "argv": [
+      ".venv-work/bin/python",
+      "tests/test_metal_parity_raster.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "shadows",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p2"
+    ],
+    "timeout": 90,
+    "returncode": 0
+  },
+  {
+    "argv": [
+      ".venv-work/bin/python",
+      "tests/test_metal_parity_raster.py",
+      "docs/benchmarks/metal-parity/smooth.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "baseline",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p2"
+    ],
+    "timeout": 90,
+    "returncode": 0
+  },
+  {
+    "argv": [
+      ".venv-work/bin/python",
+      "tests/test_metal_parity_raster.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "selected-group",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p2"
+    ],
+    "timeout": 90,
+    "returncode": 0
+  },
+  {
+    "argv": [
+      ".venv-work/bin/python",
+      "tests/test_metal_parity_raster.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "xray",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p2",
+      "--mode",
+      "xray"
+    ],
+    "timeout": 90,
+    "returncode": 0
+  },
+  {
+    "argv": [
+      ".venv-work/bin/python",
+      "tests/test_metal_parity_raster.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "ao",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p2"
+    ],
+    "timeout": 90,
+    "returncode": 0
+  },
+  {
+    "argv": [
+      ".venv-work/bin/python",
+      "tests/test_metal_parity_raster.py",
+      "docs/benchmarks/metal-parity/new-document.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "baseline",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p2"
+    ],
+    "timeout": 90,
+    "returncode": 0
+  },
+  {
+    "argv": [
+      ".venv-work/bin/python",
+      "tests/test_metal_parity_raster.py",
+      "/Users/legallmaxence/code/ingetrazo-bench/pusher_car_rust.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "baseline",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p2"
+    ],
+    "timeout": 180,
+    "returncode": 0
+  },
+  {
+    "argv": [
+      ".venv-work/bin/python",
+      "tests/test_metal_parity_raster.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "xray",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p2",
+      "--mode",
+      "xray"
+    ],
+    "timeout": 180,
+    "returncode": 0
+  }
+]

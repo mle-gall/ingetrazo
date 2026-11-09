@@ -3,7 +3,7 @@ override TEXTURED: bool = true;
 @group(2) @binding(1) var material_sampler: sampler;
 @group(2) @binding(2) var<storage, read> materials: array<vec4u>;
 // GL uses display-referred colors; explicitly decode for the sRGB surface.
-struct Style { front: vec4f, back: vec4f, edge: vec4f, background: vec4f, sky: vec4f, ground: vec4f, profiles: vec4f, section_plane: vec4f, fade: vec4f }
+struct Style { front: vec4f, back: vec4f, edge: vec4f, background: vec4f, sky: vec4f, ground: vec4f, profiles: vec4f, section_plane: vec4f, fade: vec4f, raster: vec4f }
 @group(1) @binding(0) var<uniform> style: Style;
 fn linear(c: vec3f) -> vec3f { return select(c/12.92,pow((c+0.055)/1.055,vec3f(2.4)),c>vec3f(0.04045)); }
 struct Instance { world: mat4x4f, info: vec4u }
@@ -11,7 +11,7 @@ struct Camera { vp: mat4x4f, size: vec4f }
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var<storage, read> inst: array<Instance>;
 @group(0) @binding(2) var<storage, read> survivors: array<u32>;
-struct Out { @location(8) section_distance: f32, @builtin(position) position: vec4f, @location(0) color: vec3f, @location(1) @interpolate(flat) id: u32, @location(2) shade: f32, @location(3) @interpolate(flat) decorated: u32, @location(7) @interpolate(linear) distance: f32, @location(4) uv: vec4f, @location(5) @interpolate(flat) back: vec4f, @location(6) @interpolate(flat) textures: vec2u }
+struct Out { @location(9) opacity: f32, @location(8) section_distance: f32, @builtin(position) position: vec4f, @location(0) color: vec3f, @location(1) @interpolate(flat) id: u32, @location(2) shade: f32, @location(3) @interpolate(flat) decorated: u32, @location(7) @interpolate(linear) distance: f32, @location(4) uv: vec4f, @location(5) @interpolate(flat) back: vec4f, @location(6) @interpolate(flat) textures: vec2u }
 @vertex fn vs(@location(0) pos: vec3f, @location(1) normal: vec3f, @location(2) color: vec4f, @builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32) -> Out {
  let id = survivors[index]; let i = inst[id];
  let a=i.world[0].xyz; let b=i.world[1].xyz; let c=i.world[2].xyz;
@@ -20,8 +20,11 @@ struct Out { @location(8) section_distance: f32, @builtin(position) position: ve
  o.section_distance = dot(i.world * vec4f(pos,1.), style.section_plane);
  o.shade = select(0.62+0.38*abs(dot(n,normalize(vec3f(0.35,0.25,1.)))), 1., (i.info.z & 8u) != 0u);
  let tint = unpack4x8unorm(i.info.y);
- var base = select(color.rgb, tint.rgb, color.a < 0.5);
- if color.a < 0.5 && tint.a < 0.5 { base = vec3f(0.96,0.95,0.925)*style.front.rgb; }
+ // In the new ABI only byte zero is unpainted; legacy keeps its provenance test.
+ let unpainted = select(color.a < 0.5, color.a == 0., style.raster.x > 0.);
+ o.opacity = select(1., color.a, style.raster.x > 0. && !unpainted);
+ var base = select(color.rgb, tint.rgb, unpainted);
+ if unpainted && tint.a < 0.5 { base = vec3f(0.96,0.95,0.925)*style.front.rgb; }
  o.color = base * o.shade;
  if camera.size.z == 2 || camera.size.z == 3 { o.color = style.front.rgb; }
  if (i.info.w >> 24u) != 0u { o.color = unpack4x8unorm(i.info.w).rgb; }
@@ -34,9 +37,9 @@ struct Out { @location(8) section_distance: f32, @builtin(position) position: ve
   let mat = materials[at+1u];
   o.back = unpack4x8unorm(mat.x); o.textures = mat.yz;
  }
- if u32(round(color.a*255.)) == 254u { o.back = vec4f(color.rgb,1.); }
+ if style.raster.x == 0. && u32(round(color.a*255.)) == 254u { o.back = vec4f(color.rgb,1.); }
  // Unpainted faces inherit container paint on both sides.
- if color.a < 0.5 && tint.a > 0.5 && o.back.a < 0.5 { o.back = tint; }
+ if unpainted && tint.a > 0.5 && o.back.a < 0.5 { o.back = tint; }
  o.distance = 0.; o.id = id+1u; return o;
 }
 struct Pixel { @location(0) color: vec4f, @location(1) id: u32 }
@@ -44,7 +47,11 @@ fn face_pixel(i: Out, facing: bool) -> Pixel {
  if i.section_distance < 0. { discard; }
  let front = facing != ((i.decorated & 16u) != 0u);
  var c = i.color;
- if !front && camera.size.z != 2 && (i.decorated & 8u) == 0u { c = select(style.back.rgb, i.back.rgb, i.back.a > 0.5 && camera.size.z != 3) * select(i.shade,1.,camera.size.z == 3); }
+ var opacity = i.opacity;
+ if !front && camera.size.z != 2 && (i.decorated & 8u) == 0u { c = select(style.back.rgb, i.back.rgb, i.back.a > select(0.5,0.,style.raster.x > 0.) && camera.size.z != 3) * select(i.shade,1.,camera.size.z == 3); }
+ // GL X-ray keeps a painted face's colour through its back; averaging the
+ // default blue-grey back into every closed coloured box washed out the tint.
+ if camera.size.z == 1. && i.back.a == 0. { c = i.color; }
  let tex = select(i.textures.y,i.textures.x,front);
  let uv = select(i.uv.zw,i.uv.xy,front);
  let uv_dx = dpdx(uv); let uv_dy = dpdy(uv);
@@ -53,10 +60,13 @@ fn face_pixel(i: Out, facing: bool) -> Pixel {
   if camera.size.w > 0.5 {
    sampled = textureSampleLevel(material_images,material_sampler,vec2f(0.5),i32(tex),f32(textureNumLevels(material_images)-1u));
   }
-  if sampled.a < 0.5 { discard; }
+  if (i.decorated & 32u) != 0u || style.raster.x == 0. {
+   if sampled.a < 0.5 { discard; }
+  } else { opacity *= sampled.a; }
+  if opacity <= 0. { discard; }
   if (i.decorated & 8u) == 0u { c = sampled.rgb * i.shade; }
  }
- if (i.decorated & 6u) != 0u && all((i.position.xy % vec2f(6.)) < vec2f(2.)) {
+ if (i.decorated & 6u) != 0u && style.raster.y == 0. && all((i.position.xy % vec2f(6.)) < vec2f(2.)) {
   let surface = c / max(i.shade, 0.001);
   let high = max(surface.r,max(surface.g,surface.b));
   let low = min(surface.r,min(surface.g,surface.b));
@@ -72,17 +82,19 @@ fn face_pixel(i: Out, facing: bool) -> Pixel {
              delta/max(high,0.001) >= 0.35 && high >= 0.35 && (hue <= 0.14 || hue >= 0.96));
  }
  if (i.decorated & 64u) != 0u { c = mix(c, style.fade.rgb, style.fade.a); }
- var p: Pixel; p.color=vec4f(linear(c),select(1.,0.6,camera.size.z == 1)); p.id=i.id; return p;
+ var p: Pixel; p.color=vec4f(linear(c),select(opacity,0.6,camera.size.z == 1)); p.id=i.id; return p;
 }
 
 fn edge_pixel(i: Out) -> Pixel { if i.section_distance < 0. { discard; } var p: Pixel; var c = style.edge.rgb; if (i.decorated & 2u) != 0u { c = vec3f(0.95,0.45,0.16); } else if (i.decorated & 4u) != 0u { c = vec3f(0.30,0.55,0.95); } if (i.decorated & 64u) != 0u { c = mix(c, style.fade.rgb, style.fade.a); } p.color=vec4f(linear(c),1); p.id=i.id; return p; }
 
 @fragment fn color_fs(i: Out, @builtin(front_facing) front: bool) -> @location(0) vec4f {
- return face_pixel(i,front).color;
+ let p = face_pixel(i,front);
+ if style.raster.x > 0. && camera.size.z != 1. && p.color.a < 1. { discard; }
+ return p.color;
 }
 @fragment fn color_edge_fs(i: Out) -> @location(0) vec4f { return edge_pixel(i).color; }
 
-@fragment fn fs(i: Out, @builtin(front_facing) front: bool) -> Pixel { return face_pixel(i,front); }
+@fragment fn fs(i: Out, @builtin(front_facing) front: bool) -> Pixel { let p = face_pixel(i,front); if style.raster.x > 0. && camera.size.z != 1. && p.color.a < 1. { discard; } return p; }
 @fragment fn edge_fs(i: Out) -> Pixel { return edge_pixel(i); }
 
 // IDs require alpha rejection, never lighting, color conversion or selection dots.
@@ -95,7 +107,7 @@ fn edge_pixel(i: Out) -> Pixel { if i.section_distance < 0. { discard; } var p: 
  if TEXTURED && tex != 0u && camera.size.z < 2 && ((i.decorated & 8u) == 0u || (i.decorated & 32u) != 0u) {
   var alpha = textureSampleGrad(material_images,material_sampler,uv,i32(tex),dx,dy).a;
   if camera.size.w > 0.5 { alpha = textureSampleLevel(material_images,material_sampler,vec2f(0.5),i32(tex),f32(textureNumLevels(material_images)-1u)).a; }
-  if alpha < 0.5 { discard; }
+  if alpha < select(0.5,0.001,style.raster.x > 0. && (i.decorated & 32u) == 0u) { discard; }
  }
  var p: Pixel; p.id = i.id; return p;
 }

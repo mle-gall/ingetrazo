@@ -90,7 +90,10 @@ impl Antialias {
                                 clamp: 0.,
                             }
                         } else {
-                            Default::default()
+                            // Match GL's polygon-offset fill: bias by the FACE
+                            // slope, not only the edge-quad's along-line slope.
+                            // Otherwise curved rims fail samples on the far side.
+                            wgpu::DepthBiasState { constant: 1, slope_scale: 1., clamp: 0. }
                         },
                     }),
                     multisample: wgpu::MultisampleState {

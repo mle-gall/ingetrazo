@@ -98,7 +98,7 @@ mod tests {
 }
 
 // Position keys join duplicated triangle vertices without changing the upload ABI.
-fn key(a: &[u8], b: &[u8]) -> [u8; 24] {
+pub(crate) fn key(a: &[u8], b: &[u8]) -> [u8; 24] {
     let mut k = [0; 24];
     let (a, b) = if a < b { (a, b) } else { (b, a) };
     k[..12].copy_from_slice(a);
