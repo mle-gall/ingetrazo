@@ -3,7 +3,12 @@
 The ABI is little endian: 28-byte vertices, 32-byte prototype bounds,
 80-byte instances and 20-byte indexed indirect commands. Alpha zero marks
 unpainted faces so container tint never overwrites explicit face colour.
-Alpha 254 marks a matching front/back paint; 255 marks front-only paint.
+Alpha 1..255 is rounded effective opacity (clamped to at least 1).
+Both-side paint lives in the existing material corner records, never alpha.
+Instance info[2]: bit 0 suppresses ordinary drawing; bit 3 is billboard;
+bit 4 marks an object hidden by Hide (including descendants). Reveal bit 4
+only when bit 5 is clear: bit 5 means tag/navigator/edit filtering also hides
+it. Hidden commands use the same vertex/index buffers and COMMAND dtype.
 Materials use 16-byte prototype headers followed by 32-byte corner records
 only for prototypes with textures or backs that differ from their fronts.
 """
@@ -18,6 +23,9 @@ from views.array_bake import _attrs_table
 
 VERTEX = np.dtype([('pos', '<f4', 3), ('normal', '<f4', 3), ('color', 'u1', 4)])
 INSTANCE = np.dtype([('world', '<f4', (4, 4)), ('info', '<u4', 4)])
+OBJECT_HIDDEN = 1 << 4
+VISIBILITY_FILTERED = 1 << 5
+
 COMMAND = np.dtype([('count', '<u4'), ('instances', '<u4'), ('first', '<u4'),
                     ('base', '<i4'), ('start', '<u4')])
 
@@ -37,6 +45,8 @@ class PackedScene:
     materials: np.ndarray | None = None
     textures: tuple | None = None
     texture_paths: tuple = ()
+    hidden_commands: np.ndarray | None = None
+    hidden_edge_commands: np.ndarray | None = None
 
     def upload(self, renderer):
         renderer.set_scene(tuple(a.view(np.uint8).reshape(-1) for a in
@@ -81,6 +91,21 @@ def bake_mesh(mesh):
 
 
 
+def _alpha(attrs):
+    return max(1, min(255, round(float(attrs.get('opacity', 1.0))*255)))
+
+
+def _baked_paint(paint):
+    # Opaque plain container RGB remains an instance tint (shared geometry).
+    # All nontrivial resolution must retain the entire GL wrapper, especially
+    # base/fx_self; dropping those used to lose inherited tag fade/opacity.
+    if not paint or paint.get('front_only'):
+        return None
+    if any(k in paint for k in ('texture', 'by_layer', 'layer_fx', 'opacity')):
+        return paint
+    return None
+
+
 def _source_arrays(mesh, paint=None, texture_ids=None, face_overrides=None, billboard=False):
     """Use source topology directly; the resident renderer needs no welded Plan."""
     if face_overrides:
@@ -123,7 +148,11 @@ def _source_arrays(mesh, paint=None, texture_ids=None, face_overrides=None, bill
         ids, rgb = zip(*painted)
         ids = np.asarray(ids, np.int64)
         palette[ids, :3] = np.clip(np.asarray(rgb)*255, 0, 255)
-        palette[ids, 3] = 255
+        palette[ids, 3] = [_alpha(table[k]) for k in ids]
+    # Texture-only and opacity-only faces also need a nonzero opacity byte.
+    for k, own in enumerate(table):
+        if own.get('texture') or 'opacity' in own:
+            palette[k, 3] = _alpha(own)
     maps, paints = _material_columns(pos, corners, sizes, counts, table, attr+1,
                                      texture_ids if texture_ids is not None else {})
     if billboard is True:
@@ -163,8 +192,10 @@ def _placement_state(scene):
             # A style-generated Front tint is not material paint. Keep that
             # distinction resident so changing style needs no geometry rebuild.
             unpainted = not paint or (not material and paint.get('front_only'))
-            rgb = paint.get('color') or (210/255,)*3
-            alpha = 0 if unpainted else 255
+            from core.materials import effective_attrs
+            resolved = effective_attrs({}, paint) or {}
+            rgb = resolved.get('color') or (210/255,)*3
+            alpha = 0 if unpainted else _alpha(resolved)
             paints[key] = np.array([*np.clip(np.array(rgb[:3])*255, 0, 255), alpha], np.uint8).view('<u4')[0]
         return visible, paints[key]
     return state
@@ -196,6 +227,8 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
             parent_of[id(child)] = group
             map_parents(child)
     hidden_of = {}
+    object_hidden_of = {}
+    filtered_of = {}
     paint_groups = {}
     for root in scene.groups:
         map_parents(root)
@@ -207,16 +240,20 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
             parent = parent_of.get(id(g))
             inherited = hidden_of.get(id(parent), False) if parent is not None else False
             hidden_of[id(g)] = inherited or not state(proxy)[0]
+            object_hidden_of[id(g)] = bool(getattr(g, 'hidden', False)) or object_hidden_of.get(id(parent), False)
+            allowed = getattr(scene, '_navigator_allowed', None)
+            filtered_of[id(g)] = (filtered_of.get(id(parent), False)
+                or not scene._layer_state(proxy)[0] or scene.similar_hidden(proxy)
+                or (allowed is not None and g.uid not in allowed))
             placements.append((g, matrix, g.mesh, hidden_of[id(g)]))
     for group, matrix, mesh, hidden in placements:
         paint_group = paint_groups.get(id(group), group)
         paint_attrs = _paint_of(vp, paint_group)
         if paint_attrs and paint_attrs.get('front_only'):
             paint_attrs = None  # style tint stays dynamic
-        # Only inherited texture mapping changes baked corner UVs. Plain
-        # container colors already live in the instance's packed RGBA word.
-        baked_paint = ({k: paint_attrs[k] for k in ('texture', 'by_layer', 'layer_fx')
-                        if k in paint_attrs} if paint_attrs else None) or None
+        # Texture mapping, opacity and tag effects create paint variants.
+        # Opaque plain container RGB stays in the instance packed RGBA word.
+        baked_paint = _baked_paint(paint_attrs)
         billboard = getattr(group, "billboard", False)
         key = (id(mesh), repr(baked_paint), billboard)
         if key not in lookup:
@@ -231,7 +268,9 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
             billboard_codes.add(code)
         visible, paint = state(paint_group)
         world = np.eye(4, dtype=np.float32) if matrix is None else np.array(matrix.data(), np.float32).reshape(4, 4)
-        rows.append((code, world, int(hidden or not visible) | (8 if billboard else 0)))
+        rows.append((code, world, int(hidden or not visible) | (8 if billboard else 0)
+                     | (OBJECT_HIDDEN if object_hidden_of.get(id(group), False) else 0)
+                     | (VISIBILITY_FILTERED if filtered_of.get(id(group), False) else 0)))
         uids.append(getattr(group, 'uid', 'loose'))
         groups.append(group)
         paints.append(paint)
@@ -251,14 +290,16 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
     raw, indices, bounds, table, materials = _native.available().bake_scene(
         *arrays[:4], arrays[6], arrays[7], arrays[4], arrays[5], offsets, attributes, _native.qt_hypot(),
         np.concatenate([m[9] for m in meshes]) if meshes else np.empty((0,16), np.float32),
-        np.concatenate([m[10] for m in meshes]) if meshes else np.empty((0,3), np.uint32))
+        np.concatenate([m[10] for m in meshes]) if meshes else np.empty((0,3), np.uint32), True)
     textures = _texture_array(texture_ids) if texture_images else None
     baked = perf_counter()
     vertices = raw.view(VERTEX)
     bounds = bounds.reshape(-1, 2, 4)
-    table = table.reshape(-1, 3)
+    table = table.reshape(-1, 5)
     commands = np.zeros(len(meshes), COMMAND)
     edge_commands = np.zeros(len(meshes), COMMAND)
+    hidden_commands = np.zeros(len(meshes), COMMAND)
+    hidden_edge_commands = np.zeros(len(meshes), COMMAND)
     instances = np.zeros(len(rows), INSTANCE)
     if rows:
         instances['world'] = [r[1] for r in rows]
@@ -277,18 +318,24 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
     commands['first'] = commands['base'] = edge_commands['base'] = table[:, 0]
     edge_commands['first'] = table[:, 0]+table[:, 1]
     commands['start'] = edge_commands['start'] = np.cumsum(counts)-counts
+    hidden_commands['count'] = table[:, 3]
+    hidden_edge_commands['count'] = table[:, 4]
+    hidden_commands['base'] = hidden_edge_commands['base'] = table[:, 0]
+    hidden_commands['first'] = table[:, 0]+table[:, 1]+table[:, 2]
+    hidden_edge_commands['first'] = hidden_commands['first']+table[:, 3]
+    hidden_commands['start'] = hidden_edge_commands['start'] = commands['start']
     world_bounds = np.zeros((2, 3))
     if len(rows):
         shown = instances[(instances['info'][:, 2] & 1) == 0]
         if not len(shown):
-            return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures, tuple(texture_ids))
+            return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures, tuple(texture_ids), hidden_commands, hidden_edge_commands)
         b = bounds[shown['info'][:, 0], :, :3]
         center, extent = (b[:, 0]+b[:, 1])/2, (b[:, 1]-b[:, 0])/2
         mat = shown['world'].transpose(0, 2, 1)
         wc = np.einsum('nij,nj->ni', mat[:, :3, :3], center)+mat[:, :3, 3]
         we = np.einsum('nij,nj->ni', abs(mat[:, :3, :3]), extent)
         world_bounds = np.array([(wc-we).min(axis=0), (wc+we).max(axis=0)])
-    return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures, tuple(texture_ids))
+    return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures, tuple(texture_ids), hidden_commands, hidden_edge_commands)
 
 
 def _material_columns(pos, corners, sizes, counts, table, attributes, texture_ids):
@@ -305,8 +352,10 @@ def _material_columns(pos, corners, sizes, counts, table, attributes, texture_id
         if not isinstance(back, dict):
             back = {} if back_is_default(own) else own
         color = back.get('color')
+        if color is None and (back.get('texture') or 'opacity' in back):
+            color = (210/255,)*3
         if color is not None:
-            palette[k, 0] = np.array([*np.clip(np.array(color[:3])*255,0,255),255], np.uint8).view('<u4')[0]
+            palette[k, 0] = np.array([*np.clip(np.array(color[:3])*255,0,255),_alpha(back)], np.uint8).view('<u4')[0]
         sides = []
         for side, attrs in enumerate((own, back)):
             tex = attrs.get('texture')
@@ -340,13 +389,31 @@ def _material_columns(pos, corners, sizes, counts, table, attributes, texture_id
     return maps, paints
 
 
-def _texture_array(paths):
-    """Bottom-up RGBA layers with a complete trilinear mip chain."""
+def _texture_array(paths, *, device_limit=8192, memory_budget=256*1024*1024):
+    """Bottom-up RGBA8 array, complete mips, stable 1-based texture IDs.
+
+    Common layer dimensions retain source resolution up to device_limit (8192
+    conservative default; caller may pass the adapter's actual 2D limit).
+    Halve both dimensions until *all* layers including white layer zero and
+    every mip fit the 256 MiB GPU budget. CPU source decoding is not budgeted.
+    Array textures require equal layer sizes; changing that needs a new ABI.
+    """
     from PySide6.QtGui import QImage
     from PySide6.QtCore import Qt
     images = [QImage(path).mirrored() for path in paths]
-    width = min(1024, max([1] + [im.width() for im in images]))
-    height = min(1024, max([1] + [im.height() for im in images]))
+    width = min(device_limit, max([1] + [im.width() for im in images]))
+    height = min(device_limit, max([1] + [im.height() for im in images]))
+    if device_limit < 1 or memory_budget < (len(images)+1)*4:
+        raise ValueError('texture budget cannot hold one texel per layer')
+    def mip_bytes(w, h):
+        total = 0
+        while True:
+            total += w*h*4*(len(images)+1)
+            if w == h == 1:
+                return total
+            w, h = max(1, w//2), max(1, h//2)
+    while mip_bytes(width, height) > memory_budget:
+        width, height = max(1, width//2), max(1, height//2)
     levels = []
     w, h = width, height
     while True:

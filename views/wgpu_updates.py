@@ -6,7 +6,8 @@ of mutated prototypes uses one R1b bake; transform previews only write rows.
 import numpy as np
 from core.group import Group, iter_placements
 from core.scene import Scene
-from views.wgpu_scene import _placement_state, pack_scene, INSTANCE, COMMAND
+from views.wgpu_scene import (_placement_state, _baked_paint, pack_scene, INSTANCE, COMMAND,
+                              OBJECT_HIDDEN, VISIBILITY_FILTERED)
 
 
 class InstanceUpdates:
@@ -19,6 +20,17 @@ class InstanceUpdates:
         # uncommon case, never camera updates.
         self.billboard_modes = {}
         self.shared_variants = False
+        # The replacement API currently accepts visible faces/edges only.
+        # Repack hidden streams and inherited paint variants atomically until
+        # the renderer supports replacing all four ranges together.
+        self.hidden_streams = bool(np.any(packed.hidden_commands['count'])
+                                   or np.any(packed.hidden_edge_commands['count']))
+        from types import SimpleNamespace
+        from views.viewport import _paint_of
+        vp = SimpleNamespace(scene=scene)
+        self.parity_repack = any(_baked_paint(_paint_of(vp, g)) is not None
+                                  or bool(getattr(g, 'children', None))
+                                  for g in [None, *scene.groups])
         for row, group in enumerate(packed.groups):
             mesh = group.mesh if group is not None else scene.loose_mesh
             mode = getattr(group, 'billboard', False)
@@ -122,7 +134,7 @@ class InstanceUpdates:
 
     def diff(self, scene):
         """Return changed resident rows, retaining prototype and placement IDs."""
-        if scene is not self.scene or self.shared_variants:
+        if scene is not self.scene or self.shared_variants or self.parity_repack:
             return None
         local = self.unsubscribe is not None and self.journal_valid and scene.content_version == self.version
         placements = [] if local else [(None, None, False)]
@@ -159,6 +171,8 @@ class InstanceUpdates:
                 self.packed.bounds = np.concatenate((self.packed.bounds, np.zeros((1, 2, 4), np.float32)))
                 self.packed.commands = np.concatenate((self.packed.commands, np.zeros(1, COMMAND)))
                 self.packed.edge_commands = np.concatenate((self.packed.edge_commands, np.zeros(1, COMMAND)))
+                self.packed.hidden_commands = np.concatenate((self.packed.hidden_commands, np.zeros(1, COMMAND)))
+                self.packed.hidden_edge_commands = np.concatenate((self.packed.hidden_edge_commands, np.zeros(1, COMMAND)))
             if old[1] != mesh._mut_serial:
                 changed[id(mesh)] = old
             row = self.rows.get(uid)
@@ -172,7 +186,11 @@ class InstanceUpdates:
             value['world'] = (np.eye(4, dtype=np.float32) if matrix is None
                               else np.asarray(matrix.data(), np.float32).reshape(4, 4))
             visible, paint = state(group)
-            value['info'][:3] = (old[2], paint, int(hidden or not visible) | (8 if getattr(group, 'billboard', False) else 0))
+            value['info'][:3] = (old[2], paint, int(hidden or not visible) | (8 if getattr(group, 'billboard', False) else 0)
+                | (OBJECT_HIDDEN if getattr(group, 'hidden', False) else 0)
+                | (VISIBILITY_FILTERED if group is not None and (not scene._layer_state(group)[0]
+                    or scene.similar_hidden(group) or (getattr(scene, '_navigator_allowed', None) is not None
+                    and group.uid not in scene._navigator_allowed)) else 0))
             if row < len(self.packed.instances):
                 value['info'][3] = self.packed.instances['info'][row, 3]
             if row >= len(self.packed.instances) or value.tobytes() != self.packed.instances[row].tobytes():
@@ -191,6 +209,19 @@ class InstanceUpdates:
         self.version = scene.content_version
         self.journal_valid = True
         self.roots = set(scene.groups) if not local else self.roots
+        if changed and self.hidden_streams:
+            return None
+        for mesh, _, _ in changed.values():
+            src = mesh.__dict__.get('_deferred_source')
+            if src is not None:
+                from views.array_bake import _attrs_table
+                hidden_geometry = (any(a.get('hidden') for a in _attrs_table(src))
+                                   or (src['flags'] is not None and np.any(src['flags'] & 2)))
+            else:
+                hidden_geometry = (any(f.attrs.get('hidden') for f in mesh.faces)
+                                   or any(e.hidden for e in mesh.edges))
+            if hidden_geometry:
+                return None
         self.changed = list(changed.values())
         self.removed = removed if local else [self.rows[uid] for uid in self.active - seen]
         self.active = seen
@@ -272,6 +303,7 @@ class InstanceUpdates:
         if len(self.packed.instances) != old_count or self.changed:
             counts = np.bincount(self.packed.instances['info'][:, 0], minlength=len(self.packed.commands))
             self.packed.commands['start'] = self.packed.edge_commands['start'] = np.cumsum(counts)-counts
+            self.packed.hidden_commands['start'] = self.packed.hidden_edge_commands['start'] = np.cumsum(counts)-counts
             extra = np.empty((len(self.packed.instances)-old_count, 2, 3), np.float32)
             extra[:, 0] = np.inf
             extra[:, 1] = -np.inf
