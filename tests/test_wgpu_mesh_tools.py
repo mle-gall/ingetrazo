@@ -107,3 +107,28 @@ def test_pushpull_numeric_commit_and_cancel(inside):
     native.cancel()
     assert not native.tool.dragging
     assert not native.view.overlay_primitives
+
+from tools.eraser import EraserTool
+
+
+@pytest.mark.parametrize('inside', [False, True])
+def test_erase_stroke_commits_on_release(inside):
+    scene, history, native, updates = harness(EraserTool(), inside)
+    edge = scene.mesh.add_edge(QVector3D(), QVector3D(1, 0, 0))
+    native.pick_visible_edge = lambda *a: edge
+    native.update()
+    click(native, (0, 0, 0))
+    assert not history.undo_stack
+    native.tool.on_release(native)
+    assert len(history.undo_stack) == 1
+    assert not scene.mesh.edges
+    assert len(updates.changed) == 1
+    history.undo()
+    native.update()
+    assert edge in scene.mesh.edges
+    assert len(updates.changed) == 1
+    click(native, (0, 0, 0))
+    native.cancel()
+    native.tool.on_release(native)
+    assert edge in scene.mesh.edges
+    assert not native.view.overlay_primitives

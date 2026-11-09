@@ -133,7 +133,7 @@ def test_new_prototype_preserves_resident_ids():
 
 
 def test_dispatch_is_explicit():
-    assert TOOL_DISPATCH == {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh'}
+    assert TOOL_DISPATCH == {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh', 'EraserTool': 'mesh'}
     assert TOOL_DISPATCH.get('RotateTool', 'inert') == 'inert'
 
 
