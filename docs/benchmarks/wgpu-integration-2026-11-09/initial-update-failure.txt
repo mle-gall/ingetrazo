@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-c5490b1b/scripts/wgpu_r2b_measure.py", line 122, in <module>
+    view.draw_frame()
+    ~~~~~~~~~~~~~~~^^
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-c5490b1b/views/wgpu_view.py", line 209, in draw_frame
+    self.source_viewport.scene, style,
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'scene'

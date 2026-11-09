@@ -1,0 +1,25 @@
+   Compiling ingetrazo_render v0.1.0 (/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-e2ec2144/rust/ingetrazo_render)
+warning: function `multisampled` is never used
+   --> src/lib.rs:100:4
+    |
+100 | fn multisampled(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
+    |    ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: `ingetrazo_render` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.57s
+     Running unittests src/lib.rs (rust/ingetrazo_render/target/debug/deps/ingetrazo_render-048af6c22df2a363)
+
+running 8 tests
+test tests::indirect_layout ... ok
+test reference_tests::mirrored_and_sheared_boxes_remain_visible ... ok
+test reference_tests::clip_planes_and_pixel_size ... ok
+test reference_tests::compact_into_disjoint_capacity_ranges ... ok
+test edges::tests::expands_endpoint_pairs_without_changing_face_commands ... ok
+test antialias::tests::metal_validates_background_and_multisample_pipelines ... ok
+test ao::tests::metal_validates_ao ... ok
+test ao::tests::synthetic_depth_plane_and_corner ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.26s
+

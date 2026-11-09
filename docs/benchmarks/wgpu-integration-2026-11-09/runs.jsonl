@@ -1,0 +1,11 @@
+{"name": "smoke", "code": 0, "command": ["scripts/wgpu_r2b_smoke.py"]}
+{"name": "ride-updates", "code": 1, "command": ["scripts/wgpu_r2b_measure.py", "/Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz"]}
+{"name": "ride-memory-pick", "code": 0, "command": ["scripts/wgpu_compact_measure.py", "/Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz", "docs/benchmarks/wgpu-integration-2026-11-09"]}
+{"name": "marquee-matrix", "code": 0, "command": ["scripts/wgpu_ao_compare.py", "/Users/legallmaxence/code/ingetrazo-bench/marquee.igz", "--matrix", "--output", "docs/benchmarks/wgpu-integration-2026-11-09"]}
+{"name": "pusher_car_rust-matrix", "code": 0, "command": ["scripts/wgpu_ao_compare.py", "/Users/legallmaxence/code/ingetrazo-bench/pusher_car_rust.igz", "--matrix", "--output", "docs/benchmarks/wgpu-integration-2026-11-09"]}
+{"name": "track-matrix", "code": 0, "command": ["scripts/wgpu_ao_compare.py", "/Users/legallmaxence/code/ingetrazo-bench/track.igz", "--metal-only", "--matrix", "--output", "docs/benchmarks/wgpu-integration-2026-11-09"]}
+{"name": "ride-section", "code": 0, "command": ["scripts/wgpu_ao_compare.py", "/Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz", "--root-start", "1", "--root-limit", "1", "--capture-only", "--output", "docs/benchmarks/wgpu-integration-2026-11-09"]}
+{"name": "marquee-look", "code": 0, "command": ["scripts/wgpu_look_compare.py", "/Users/legallmaxence/code/ingetrazo-bench/marquee.igz", "--capture-only", "--output", "docs/benchmarks/wgpu-integration-2026-11-09"]}
+{"name": "pusher_car_rust-look", "code": 0, "command": ["scripts/wgpu_look_compare.py", "/Users/legallmaxence/code/ingetrazo-bench/pusher_car_rust.igz", "--capture-only", "--output", "docs/benchmarks/wgpu-integration-2026-11-09"]}
+{"name": "marquee-lookxray", "code": 0, "command": ["scripts/wgpu_look_compare.py", "/Users/legallmaxence/code/ingetrazo-bench/marquee.igz", "--capture-only", "--output", "docs/benchmarks/wgpu-integration-2026-11-09", "--mode", "xray"]}
+{"name": "ride-updates-final-msaa-off", "code": 0, "command": ["scripts/wgpu_r2b_measure.py", "/Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz"]}

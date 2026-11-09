@@ -1775,6 +1775,80 @@ Both crates were built in this worktree with Python 3.13 and isolated Cargo
 storage. No push or PR was made. Source documents were read-only. No debug
 build directories existed before capture; builds and Rust tests use release.
 
+
+## R2b — 2026-11-09: resident updates and first native tools
+
+Tape, placement Move and explicit tool dispatch are implemented on the native
+view. Move/tag/insertion gates pass in the recorded ride run. The strict drag
+gate remains **unresolved**: the final sample reached 35.12 ms,
+above 33 ms, despite earlier sampled runs passing. This is not full R2b
+acceptance.
+
+**R2c integration checkpoint:** this worktree's `MainWindow._activate_tool`
+still disables tool activation when `INGETRAZO_WGPU=1`. R2c owns that file;
+it was not edited here. Its integration must remove that legacy guard and
+avoid the GL-only Tape `start_from_hover` pickup on the native path. Native
+activation observes the source viewport's existing measurement signal and
+queues status refresh after the main-window action completes.
+
+### Resident update contract
+
+`InstanceUpdates` retains mesh identity/serial and uid-to-row tables. Mutated
+prototypes use one R1b bake for the changed set. Replacements retain prototype
+IDs; removed placements become hidden tombstones. Empty containers have serial
+sentinels instead of GPU rows. New group objects carrying an existing uid
+refresh row resolution without changing the row ID.
+
+The native APIs are `update_instances(ids, rows)`, `remove_instances(ids)` and
+`replace_prototype(id, vertices, indices, bounds, face_count)`. Native instance,
+geometry, prototype and indirect allocations grow by doubling. Prototype
+bindings expose their logical length so spare capacity does not change the
+shader's edge-command offset. Adjacent updated rows share queue writes;
+unchanged color overrides submit no writes. Highlight and override state
+survives row updates and allocation growth.
+
+History's existing listeners identify root Move, Insert/Delete and
+record/registry commands, including compound commands and undo/redo. Known
+record edits do not scan placements or submit GPU work. Untracked edits use a
+conservative full placement scan, without rebaking unchanged prototypes.
+Bounds update locally, with a full bounds reduction when an edited row held a
+scene extremum. Host array append/storage and command-range bookkeeping still
+have costs proportional to table size for structural changes.
+
+Initial exact inference still waits for background preparation. Once ready,
+`ResidentInference` retains the initial acceleration and unchanged prototype
+BVHs. Edited rows get small placement sets on their next query; only mutated
+prototype BVHs rebuild. A placement edit no longer destroys a document-sized
+index during input. Replacement geometry is append-only, and the initial
+inference acceleration retains its original geometry until scene release.
+Reclamation remains necessary for sustained mesh editing.
+
+### Tools and document semantics
+
+The adapter invokes the existing Tape tool with snapped world points; its
+rubber line and length label use the overlay, alongside the R2a inference
+lines. Completed measurements remain in the measurement field. The supported
+R2b workflow is two-point measurement; parallel-guide acquisition through GL
+edge picking is not invoked by this adapter.
+
+Move previews update resident instance matrices without mutating the document.
+Commit first restores the preview, then executes `MoveGroupCommand`, or the
+same `CompoundCommand` wrapper used by GL. Esc restores the preview; typed
+numeric input accepts Enter. Pickup presents its zero-distance feedback;
+unchanged preview matrices are not rewritten. Hiding the native view cancels
+an uncommitted preview. The source tool receives the native anchor for keyboard
+inference. Select and navigation retain their existing native paths. Other
+tools show "not yet available on the Metal renderer" and remain inert.
+
+The GL viewport implementation is unchanged. Full application shortcut and
+renderer-switch GUI acceptance still depends on the R2c integration above.
+R2a's documented limitations for cross-placement and reference inference
+remain; these tests do not establish exhaustive inference parity.
+
+### Builds and tests
+
+Private Python 3.13 environment and Cargo cache:
+
 ```sh
 python3.13 -m venv .venv-work
 .venv-work/bin/pip install -r requirements.txt maturin
@@ -1942,3 +2016,195 @@ is reported separately in the handover):
 - `e034bc91` Benchmark faces-only configurations retain their requested edge state
 - `ede478e5` Profile classification reuses one local camera vector per visible placement
 - `d3705514` Renderer comparisons restore and record the same fitted camera
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2b-tmp .venv-work/bin/python -m pytest -q tests/test_wgpu_updates.py tests/test_wgpu_interaction.py tests/test_wgpu_scene.py tests/test_wgpu_overlay.py
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_core/Cargo.toml
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2b-tmp .venv-work/bin/python scripts/pytest_batches.py -m 'not slow' --batches 60
+.venv-work/bin/python scripts/wgpu_r2b_smoke.py
+.venv-work/bin/python scripts/wgpu_r2b_measure.py /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz
+```
+
+Both release builds passed. Focused Python: **50 passed**. Rust: **4 core,
+7 renderer passed**. Coverage includes shared and new prototypes, stable row
+IDs, insertion/deletion/undo/redo, record-only no-ops, Tape versus direct GL
+tool measurement, native Move preview/commit, Esc/Enter dispatch, immediate
+unsupported-tool status, local inference hits and unchanged-prototype reuse.
+Rust checks include growth, flag preservation and contiguous write ranges.
+The native-window smoke, bounded externally to 120 seconds, exercised instance
+and prototype growth (including spare capacity), replacement and removal
+without a wgpu validation error.
+
+The broad suite ran once. Batches 1–59 completed; the runner hit **ENOSPC while
+reporting batch 60**. Only this worktree's temporary/debug outputs were removed.
+The final 12 files were then rerun in four groups of three: **197 passed,
+4 skipped**. No batch exceeded 30 minutes; the longest completed batch was
+600.87 seconds. Aggregate across the 59 completed batches and recovery:
+**7,133 passed, 19 failed, 138 skipped, 2 xfailed, 805 deselected, 56 warnings**.
+
+This is not an exact match to the supplied 19-failure baseline: **18 baseline
+failures reproduced** (14 translations including Arabic, cursor pick, extension
+wrapping, hidden panels and toolbar bold). The swatch-tooltip failure did not
+reproduce in recovery. One additional extension-catalog test exceeded its
+15-second worker wait; its isolated rerun passed (**1 passed, 2.10 s**).
+Final inference, allocation and dispatch refinements followed the broad run;
+the focused Python, Rust, native smoke and ride checks were rerun afterward.
+The broad suite was not run a second time.
+
+[Validation, failure names and implementation commits](benchmarks/wgpu-r2b-2026-11-09/validation.json)
+and [batch/recovery summaries](benchmarks/wgpu-r2b-2026-11-09/suite-summary.txt)
+retain the exact hand-over evidence.
+
+### Ride measurements
+
+Read-only input: 76,029 resident placements, 1000×700 logical pixels at 2×,
+MSAA disabled. Each native diagnostic was externally bounded to 290 seconds.
+The model and initial inference settle before editing; the pickup frame is
+presented before measuring drag. The final run follows this agent's suite;
+other machine workloads are not controlled. GPU timestamp samples are
+asynchronous and may repeat. OS compositor presentation is not measured.
+
+| Operation | Final measurement | Gate |
+| --- | --- | --- |
+| One leaf placement, History through row submission | 1.94 ms; one row | Local update |
+| Same move through render and synchronous ID readback | 22.24 ms | Under 50 ms |
+| Tag 1,000 placements through the bridge's History command | 19.92 ms; zero renderer calls | No GPU work |
+| Insert shared component through History | 4.21 ms; one instance row | No geometry bake/upload |
+| 1,000-placement dispatched drag, 30 frames | mean 26.84, p95 34.64, max 35.12 ms | **33 ms gate not consistently met** |
+
+The tag diagnostic exercises the same record command used by the bridge;
+bridge transport itself is excluded. During dispatched drag, preview submission
+max was 0.61 ms, hover max 30.25 ms and GPU sample max
+35.90 ms. Earlier settled samples passed the drag gate, but the final
+sample above is retained rather than selecting the fastest run. Readback and
+renderer timing under the shared workload need further work with R-look.
+[Raw final samples](benchmarks/wgpu-r2b-2026-11-09/ride.json) include per-stage
+hover, preview, frame and overlay timings.
+
+R3 remains live mesh tools (push/pull, line, erase), loose-face transforms and
+sheets. The unresolved drag gate and R2c activation checkpoint remain R2b
+acceptance work; they are not silently deferred to R3. No PR or push was made.
+
+## R-look 3a — 2026-11-09: wgpu horizon ambient occlusion
+
+AO is now a depth-based post pass in `ao.rs` / `ao.wgsl`, porting the GL
+horizon integral, two plane-aware blur passes, depth-aware upsampling and bounced
+light fit. Shared style settings control enablement, Distance and intensity;
+X-ray/wireframe bypass AO. It composites before edges and overlays, with 1x and
+4x MSAA. Half resolution is the default; full resolution is available through
+the diagnostic style payload. AO-off retains the combined geometry pass. GL
+behaviour and source model files are unchanged.
+
+[Comparison images and pixel differences](benchmarks/wgpu-look-2026-11-09/r-look-3a/samples.md),
+[full report and commands](benchmarks/wgpu-look-2026-11-09/r-look-3a/README.md),
+and [cost methodology](benchmarks/wgpu-look-2026-11-09/r-look-3a/costs.md).
+The paired ride images isolate `Groupe#310` (264 placements); costs retain the
+complete 76,029-instance ride with a closer camera, 2000×1400 at 2× HiDPI.
+
+| AO | MSAA | CPU ms | GPU ms | Wall ms |
+|---|---|---:|---:|---:|
+| off | off | 20.66 | 21.17 | 20.88 |
+| half | off | 16.80 | 18.46 | 17.02 |
+| full | off | 18.04 | 22.03 | 19.80 |
+| off | on | 33.11 | 33.30 | 33.29 |
+| half | on | 37.26 | 38.26 | 37.37 |
+| full | on | 41.58 | 42.20 | 41.69 |
+
+Three rounds, 105 measured frames per configuration. These are contended whole
+frame samples, not isolated AO timings: the no-MSAA AO-off anomaly makes direct
+subtraction unreliable. Full resolution is 3.57/3.94 ms slower than half in these
+samples. The isolated ~3 ms AO budget remains unverified. AO-change RGB MAE versus
+GL is 0.458/255 (pusher car), 0.205/255 (marquee), 0.024/255 (ride section).
+
+Remaining differences: existing materials and axes, single-sample depth at MSAA
+silhouettes, and no foliage exclusion mask in the current wgpu material stream.
+Both native release builds succeeded; renderer Rust tests **8 passed**, focused
+Python payload tests **2 passed**. The single full offscreen suite completed in
+1,903 s: **7,146 passed, 18 failed, 142 skipped, 2 xfailed, 805 deselected**,
+56 warnings. All failures match the supplied baseline (14 translations including
+Arabic, cursor pick, extension wrapping, hidden panels and toolbar bold); the
+baseline swatch-tooltip failure did not reproduce. No new failures. No batch
+exceeded 30 minutes (longest 509.81 s), so no split was needed.
+[Full suite log](benchmarks/wgpu-look-2026-11-09/r-look-3a/suite.txt).
+
+## Integration — R2b + AO — 2026-11-09
+
+Integrated `renderer/r2b-tools` (`7f847691`) and `renderer/look-ao`
+(`b9edf50f`) onto compact-edge base `025a768e`, on local branch
+`renderer/integrate-r2b-ao`. No PR or push.
+
+The update API now preserves 28-byte face vertices, 48-byte edge records,
+non-indexed edge commands, hard-only templates, survivor ranges and viewpoint
+bindings across replacement and doubling growth. Instance updates/removals
+invalidate settled IDs. Sparse replacement materials retain complete 32-byte
+corner records and resident texture layer identities. Tool dispatch, Tape and
+History-backed placement Move are integrated; `MainWindow._activate_tool`
+already enables native tools (`26b58367`), superseding the source R2b report's
+legacy-guard checkpoint. The GL viewport implementation was not changed.
+
+AO composites between faces and compact edge/profile passes and overlays, at
+half resolution by default, honoring the style flag and Distance. Both MSAA
+modes work. AO-enabled MSAA still needs a single-sample depth raster in addition
+to color rendering; its cost is included in the corrected GPU timestamps.
+Weighted X-ray retains its source behavior with AO inactive.
+
+### Ride update gates
+
+Explicit MSAA off and AO off, scene profile setting retained, 76,029 placements,
+2000×1400 physical pixels. The full test suite was running concurrently; other
+machine workloads were not controlled. These are observed samples, not a
+claim of stable timing on an otherwise idle machine.
+
+| Operation | Integrated measurement | Gate |
+| --- | ---: | --- |
+| One move, History through row submission | 1.27 ms, one row | Incremental |
+| Same move through render and synchronous pick | 47.10 ms | Pass: <50 ms |
+| Tag 1,000 placements | 20.88 ms; zero renderer calls | Pass |
+| Insert shared component | 4.73 ms; one row | Pass |
+| Dispatched drag of 1,000 placements | p95 38.36 ms; max 39.21 ms | **Unresolved: >33 ms** |
+
+The first successful diagnostic inherited MSAA on and measured 72.99 ms for
+move-through-pick and 60.07 ms drag p95; that sample is retained separately.
+The final script explicitly sets the source benchmark's MSAA-off configuration.
+[Raw samples and configuration](benchmarks/wgpu-integration-2026-11-09/README.md).
+
+### AO and compact-edge checks
+
+| Ride GPU median | AO off | Half | Full |
+| --- | ---: | ---: | ---: |
+| MSAA off | 39.55 ms | 41.67 ms | 43.92 ms |
+| MSAA on | 41.34 ms | 79.96 ms | 81.73 ms |
+
+[Small-model and ride AO tables](benchmarks/wgpu-integration-2026-11-09/ao-costs.md)
+include marquee, pusher car and track, with raw CPU/GPU/wall samples alongside.
+The track GL comparison reached its 240-second cap; the Metal-only timing retry
+completed. Three new GL/Metal AO comparisons are linked in the report.
+
+Resident scene buffers, counting spare capacity, are **1,169,587,060 bytes**
+(1.170 GB); settled pick **1.31 ms**, cold pick **90.90 ms**. Hard edges with
+profiles off cost **31.39 ms GPU** in the paced diagnostic. The earlier 30 ms
+hard-edge and 79 ms cold-pick items therefore remain open. MSAA + AO is another
+clear performance cost, not a completed 60 Hz gate.
+
+Marquee profiles/textures, pusher-car red wheels and marquee X-ray are
+**pixel-identical** to the committed compact-edge captures: RGB MAE zero and
+zero changed pixels in all three 2000×1400 images.
+[Images, parity JSON, commands and detailed results](benchmarks/wgpu-integration-2026-11-09/README.md).
+
+Focused tests: **73 passed** (`tests/test_wgpu_*`); renderer Rust tests:
+**21 passed**. Native smoke passed buffer growth, prototype insertion/replacement,
+removal and a settled-cache → instance-update invalidation → pick-refresh
+assertion. The sparse-material regression verifies full corner records and
+resident texture IDs. Full-suite results are recorded in the linked report.
+
+R3 remains live mesh tools, loose-face transforms and sheets. Append-only
+replacement storage still requires reclamation for sustained mesh editing.
+Drag p95, hard-edge GPU time, cold picking and MSAA/AO depth cost remain open;
+they are not presented as completed R3 work.
+
+Full-suite validation completed once in 24 batches, **1,312 seconds**:
+**7,187 passed, 18 failed, 142 skipped, 2 xfailed, 805 deselected**. All failures
+match the supplied baseline: 14 translations (including Arabic), cursor pick,
+extension wrap, hidden panels and toolbar bold. The baseline swatch-tooltip
+failure did not reproduce; **zero new failures**. No batch timed out or needed
+splitting. The full log and focused/native-test evidence are in the report.

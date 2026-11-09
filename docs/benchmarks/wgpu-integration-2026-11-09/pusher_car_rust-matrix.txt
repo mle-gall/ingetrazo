@@ -1,0 +1,31 @@
+loaded 141
+packed 1253
+qt.qpa.openglcontext: Could not create NSOpenGLContext with shared context, falling back to unshared context.
+UNSUPPORTED (log once): POSSIBLE ISSUE: unit 0 GLD_TEXTURE_INDEX_2D is unloadable and bound to sampler type (Float) - using zero texture because texture unloadable
+{"scale": 2.0, "size": [2000, 1400], "rgb_mae": 4.234596904761905, "frames": {"ao=off,msaa=False": {"cpu_median_ms": 18.991332999999997, "gpu_median_ms": 6.337125, "wall_median_ms": 19.00595799088478}, "ao=half,msaa=False": {"cpu_median_ms": 18.0025, "gpu_median_ms": 8.112791, "wall_median_ms": 18.017707974649966}, "ao=full,msaa=False": {"cpu_median_ms": 18.662000000000003, "gpu_median_ms": 9.360917, "wall_median_ms": 18.67745805066079}, "ao=off,msaa=True": {"cpu_median_ms": 18.266416, "gpu_median_ms": 6.792208, "wall_median_ms": 18.283374956808984}, "ao=half,msaa=True": {"cpu_median_ms": 20.048208000000002, "gpu_median_ms": 20.64825, "wall_median_ms": 20.060917013324797}, "ao=full,msaa=True": {"cpu_median_ms": 21.086958, "gpu_median_ms": 23.044292, "wall_median_ms": 21.102790953591466}}}
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed

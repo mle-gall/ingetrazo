@@ -1,0 +1,203 @@
+{
+  "implementation_head": "54c6209c77488c034f7d593be994aa92f8090ba2",
+  "base_head": "4df664716afcc62ce36ca5577935b5d314e5870d",
+  "branch": "renderer/r2b-tools",
+  "commits": [
+    {
+      "sha": "e8e086d8a6777c2f78750d6760cfb25cea3fcd0e",
+      "message": "Keep existing prototype edits and placement transforms on resident update paths"
+    },
+    {
+      "sha": "d48b7a477004d2489b7b8b55c483fc32788a03a1",
+      "message": "Share Tape measurements and placement Move commands through a native tool adapter"
+    },
+    {
+      "sha": "bdfb7e2bbe1d4a8d1e4dcf10f952703996c3de14",
+      "message": "Route native input through the supported tool table and leave other tools inert"
+    },
+    {
+      "sha": "5d67c532da471fc5f65c593b514586adb2df6588",
+      "message": "Retain IDs for new prototypes and ignore unchanged empty containers"
+    },
+    {
+      "sha": "157c2ea36e1075f34d8a0ef7ee8e2dec0fac2ceb",
+      "message": "Keep placement previews row-only and accept typed move distances"
+    },
+    {
+      "sha": "74d78c4aceefa407e437941bea24d21706a267d5",
+      "message": "Verify native update semantics and preserve tint and selection during growth"
+    },
+    {
+      "sha": "593e01722e966dc574b719cfd85299a0d5cdf130",
+      "message": "Use existing History notifications to limit known placement and record diffs"
+    },
+    {
+      "sha": "2ec0185197f82647e16f003ba5c1870ef8921f3a",
+      "message": "Document resident update contracts and outstanding R2b acceptance gates"
+    },
+    {
+      "sha": "fb25e595851f039f36c90cbf34cfb867fc0f0462",
+      "message": "Update placement bounds locally unless an edited row held a scene extremum"
+    },
+    {
+      "sha": "5f38645b274638ae247c7706b5bac7b70b3ba6fb",
+      "message": "Retain measurement results and infer free-space tool destinations"
+    },
+    {
+      "sha": "be512ebabd11f75142fe26bbaf8d9d2f85915d6c",
+      "message": "Validate Move preview and commit and isolate inference snapshots from edits"
+    },
+    {
+      "sha": "d51a192b0af08c7bb5d9bdb5776d4ca0347ec443",
+      "message": "Share native Move anchors with the existing keyboard inference state"
+    },
+    {
+      "sha": "2f9c851f2e91d6e948a213f14c13c0e730c36e77",
+      "message": "Exercise resident allocation growth on a bounded native Metal window"
+    },
+    {
+      "sha": "bf21368c85161fe122c0dd15b1c95c10a7db1e4d",
+      "message": "Measure shared component insertion with an explicit placement transform"
+    },
+    {
+      "sha": "2eb385ed953ca375ea9d54adbdd1832f18095dfb",
+      "message": "Retain resident inference and update only edited placements and prototypes"
+    },
+    {
+      "sha": "11d5f88e11fe2246e2ffad9ec15cc29eed9ef88d",
+      "message": "Grow resident tables geometrically and batch adjacent instance writes"
+    },
+    {
+      "sha": "7718c0f14289d13b3e4fd49fe910849586a89142",
+      "message": "Track History insertions and removals locally and observe native tool activation"
+    },
+    {
+      "sha": "a90cedfc4811fbed3d3425a4e9e9b9d0268c3842",
+      "message": "Show Move pickup feedback and verify native Escape Enter and inert tools"
+    },
+    {
+      "sha": "cdb9451f82841be35436f7d5f9650386da5b5ad1",
+      "message": "Measure settled edits and dispatched drags and exercise prototype capacity growth"
+    },
+    {
+      "sha": "54c6209c77488c034f7d593be994aa92f8090ba2",
+      "message": "Keep prototype rebakes from advancing document group names"
+    }
+  ],
+  "builds": {
+    "core_release": "passed",
+    "render_release_extension_module": "passed"
+  },
+  "focused_python": {
+    "passed": 50,
+    "summary": "50 passed in 1.08s"
+  },
+  "rust": {
+    "core_passed": 4,
+    "renderer_passed": 7
+  },
+  "native_smoke": "Native growth, prototype insertion/replacement and removal completed",
+  "suite": {
+    "primary_completed_batches": 59,
+    "primary_runner_error": "ENOSPC while reporting final batch",
+    "recovery_groups": [
+      "29 passed in 57.94s",
+      "45 passed, 4 skipped in 24.69s",
+      "49 passed in 10.73s",
+      "74 passed in 3.66s"
+    ],
+    "aggregate": {
+      "passed": 7133,
+      "warnings": 56,
+      "skipped": 138,
+      "failed": 19,
+      "xfailed": 2,
+      "deselected": 805
+    },
+    "failures": [
+      "tests/test_dimensions.py::test_world_under_cursor_uses_cached_pick",
+      "tests/test_extension_manager.py::test_extension_sort_modes_and_recent_date_availability",
+      "tests/test_extension_manager.py::test_long_author_tags_and_license_wrap_within_preview_width",
+      "tests/test_panel_refresh_deferred.py::test_hidden_panels_let_the_previous_document_go",
+      "tests/test_tooltips_wrap.py::test_an_extensions_toolbar_added_after_start_up_shows_names_in_bold",
+      "tests/test_translation_files.py::test_every_language_has_every_message[ar]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[de]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[id]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[it]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[ja]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[ko]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[lo]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[pl]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[pt-BR]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[ru]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[th]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[uk]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[vi]",
+      "tests/test_translation_files.py::test_every_language_has_every_message[zh-CN]"
+    ],
+    "baseline_comparison": "18 of 19 supplied baseline failures; swatch tooltip did not reproduce in recovery; one additional catalog-worker timeout passed its isolated rerun",
+    "catalog_rerun": "1 passed in 2.10s",
+    "batch_timeout_exceeded": false,
+    "final_changes_retested": "Final inference, buffer and dispatch refinements were followed by focused Python, Rust, native smoke and ride checks; the broad suite was not repeated."
+  },
+  "ride_summary": {
+    "matrix_preview_frames": {
+      "wall_ms": {
+        "mean": 5.469515805598348,
+        "p95": 10.11991631821729,
+        "max": 11.119915987364948
+      },
+      "gpu_ms": {
+        "mean": 21.892324219999995,
+        "p95": 26.659653799999997,
+        "max": 38.230708
+      }
+    },
+    "dispatched_drag_frames": {
+      "wall_ms": {
+        "mean": 26.83969580490763,
+        "p95": 34.64186499477364,
+        "max": 35.11799999978393
+      },
+      "gpu_ms": {
+        "mean": 28.051177699999997,
+        "p95": 34.54119405,
+        "max": 35.896875
+      },
+      "hover_ms": {
+        "mean": 21.518577763345093,
+        "p95": 29.745791712775823,
+        "max": 30.247542075812817
+      },
+      "preview_ms": {
+        "mean": 0.4711264045909047,
+        "p95": 0.5659412767272443,
+        "max": 0.606000074185431
+      },
+      "frame_ms": {
+        "mean": 4.851169368096937,
+        "p95": 5.759808752918616,
+        "max": 7.250875001773238
+      },
+      "overlay_ms": {
+        "mean": 2.3769777772637704,
+        "p95": 2.655007829889655,
+        "max": 4.262708011083305
+      }
+    }
+  },
+  "integration_dependency": "R2c must remove the legacy INGETRAZO_WGPU tool-activation guard in MainWindow._activate_tool and avoid GL Tape start_from_hover on the native path.",
+  "measured_implementation_head": "cdb9451f82841be35436f7d5f9650386da5b5ad1",
+  "post_benchmark_change": "Synthetic bake groups now use an explicit name to preserve document naming counters; focused tests rerun.",
+  "runtime_limits_seconds": {
+    "suite_batch": 1800,
+    "native_smoke": 120,
+    "ride": 290
+  },
+  "gates": {
+    "one_move_gpu_completion_under_50_ms": true,
+    "record_edit_renderer_calls_zero": true,
+    "component_insert_one_row": true,
+    "drag_max_under_33_ms": false
+  }
+}

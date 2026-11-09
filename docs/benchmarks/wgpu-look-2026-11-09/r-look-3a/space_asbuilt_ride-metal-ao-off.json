@@ -1,0 +1,20 @@
+{
+  "scale": 2.0,
+  "size": [
+    2000,
+    1400
+  ],
+  "rgb_mae": null,
+  "frames": {
+    "msaa=False": {
+      "cpu_median_ms": 8.081,
+      "gpu_median_ms": 8.901167,
+      "wall_median_ms": 8.276832988485694
+    },
+    "msaa=True": {
+      "cpu_median_ms": 25.433958,
+      "gpu_median_ms": 21.013416,
+      "wall_median_ms": 25.45474993530661
+    }
+  }
+}

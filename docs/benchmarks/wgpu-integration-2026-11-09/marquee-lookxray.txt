@@ -1,0 +1,7 @@
+qt.qpa.openglcontext: Could not create NSOpenGLContext with shared context, falling back to unshared context.
+UNSUPPORTED (log once): POSSIBLE ISSUE: unit 0 GLD_TEXTURE_INDEX_2D is unloadable and bound to sampler type (Float) - using zero texture because texture unloadable
+{"scale": 2.0, "size": [2000, 1400], "rgb_mae": 2.1715296428571427, "frames": {}, "prototypes": 30, "vertices": 183559, "material_bytes": 1740288, "resident_bytes": 25144444, "camera": {"target": [3.238016128540039, -0.9938574433326721, 3.3096446990966797], "distance": 14.009379386901854, "yaw": -0.7853981633974483, "pitch": 0.5235987755982988, "up": [0.0, 0.0, 1.0], "fov_deg": 45.0, "aspect": 1.0, "znear": 0.1, "zfar": 10000.0, "perspective": true, "two_point": false}}
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed

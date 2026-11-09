@@ -1,0 +1,8 @@
+loaded 21
+section roots ['Groupe#310']
+packed 264
+qt.qpa.openglcontext: Could not create NSOpenGLContext with shared context, falling back to unshared context.
+UNSUPPORTED (log once): POSSIBLE ISSUE: unit 0 GLD_TEXTURE_INDEX_2D is unloadable and bound to sampler type (Float) - using zero texture because texture unloadable
+{"scale": 2.0, "size": [2000, 1400], "rgb_mae": 3.983317976190476, "frames": {}}
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
