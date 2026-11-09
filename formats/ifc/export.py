@@ -93,6 +93,10 @@ def _save_ifc(scene, path, project_name, profile, stream):
                    if getattr(obj.get('group') if obj.get('group') is not None else obj.get('owner'), 'uid', None) in allowed]
     if not objects:
         raise ValueError('No tagged BIM objects to export')
+    from core.project import read as read_project
+    project = read_project(scene)
+    if project:
+        scene.plugin_data['ifc_identity'] = project['ifc_identity']
     identity = scene.plugin_data.setdefault('ifc_identity', {})
     if not identity.get('namespace'):
         identity['namespace'] = uuid.uuid4().hex

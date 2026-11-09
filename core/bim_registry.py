@@ -23,7 +23,9 @@ def seed_defaults(registry=None):
 
 def get(scene):
     """Return a detached view, seeded only if the document has no registry."""
-    stored = scene.plugin_data.get('bim_registry')
+    from core.project import read
+    project = read(scene)
+    stored = project['bim_registry'] if project else scene.plugin_data.get('bim_registry')
     return seed_defaults() if stored is None else deepcopy(stored)
 
 def add_system(registry, key, value, *, classification=False):

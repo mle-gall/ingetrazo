@@ -73,3 +73,10 @@ No downloaded definitions are bundled or copied into project source. The reader
 extracts names, scalar kinds, enumerations and applicable classes; it caches by
 directory and file modification times. Available library templates validate
 property names and enum members, otherwise baseline validation applies.
+
+## Shared project ownership (B1)
+
+When plugin_data.project references an existing .igzproj, the shared file owns
+the registry and IFC identity. Document-local data remains the migration source
+and fallback. See [project-file.md](project-file.md) for paths, the complete JSON
+envelope, last-writer-wins warnings and undo semantics.
