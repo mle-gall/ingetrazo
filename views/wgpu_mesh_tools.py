@@ -161,6 +161,17 @@ class MeshToolAccess:
 
     def mesh_feedback(self):
         lines = list(self.tool.rubber_band_lines())
+        state = getattr(self.tool, 'scale_box_state', lambda: None)()
+        if state:
+            lines.extend(state['segments'])
+            for point, role in state['grips']:
+                pixel = self._world_to_pixel(point)
+                if pixel is not None:
+                    x, y = pixel
+                    color = '#55dd55' if role == 'idle' else '#ff5555'
+                    self.view.overlay_primitives.append(Primitive(
+                        'rectangle', ((x-4, y-4), (x+4, y+4)), color, fill=color))
+
         entity = getattr(self, '_mesh_hover', None)
         if entity is not None:
             if hasattr(entity, 'vertices'):

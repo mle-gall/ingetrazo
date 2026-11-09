@@ -45,3 +45,35 @@ def test_rotate_loose_matches_direct_command_and_cancel():
     assert geometry(scene.mesh) == after
     native.cancel()
     assert not native.view.overlay_primitives
+
+from tools.scale import ScaleTool
+
+
+def test_scale_handles_numeric_commit_and_cancel():
+    scene, history, native, _ = prepare(ScaleTool())
+    face = scene.mesh.add_face([QVector3D(), QVector3D(2, 0, 0),
+                                QVector3D(0, 2, 0)])
+    scene.select([face])
+    native.tool.on_activate(native)
+    native.update()
+    before = geometry(scene.mesh)
+    native.mesh_feedback()
+    assert any(p.kind == 'rectangle' for p in native.view.overlay_primitives)
+    grip = next(g for g in native.tool._grips if len(g.mask) == 2)
+    native.tool._grab(native, grip, (0, 0))
+    native.tool._apply_preview(native, (2., 2., 1.))
+    native.cancel()
+    assert geometry(scene.mesh) == before
+    assert not native.view.overlay_primitives
+    native.tool.on_activate(native)
+    grip = next(g for g in native.tool._grips if len(g.mask) == 2)
+    native.tool._grab(native, grip, (0, 0))
+    assert native.tool.on_value(native, 2.)
+    after = geometry(scene.mesh)
+    assert after != before
+    history.undo()
+    native.update()
+    assert geometry(scene.mesh) == before
+    history.redo()
+    native.update()
+    assert geometry(scene.mesh) == after
