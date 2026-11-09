@@ -2,8 +2,9 @@
 """A live view of references, with subset edits scoped to one placement."""
 import json
 from pathlib import Path
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
-                               QPushButton, QInputDialog, QFileDialog, QMessageBox)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QGridLayout, QTreeWidget,
+                               QTreeWidgetItem, QPushButton, QInputDialog,
+                               QFileDialog, QMessageBox, QSizePolicy)
 from core import links, project
 
 
@@ -14,14 +15,25 @@ class LinksPanel(QWidget):
         layout = QVBoxLayout(self)
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(['Source', 'Status', 'Subset', 'Stable UIDs'])
+        # The tree takes what the buttons leave and asks for no minimum of
+        # its own, so the tab stays as short as the Model tab.
+        self.tree.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         layout.addWidget(self.tree)
-        for label, action in [('Refresh', self.refresh), ('Link selection…', self.link_selection),
-                              ('Edit linked subset', self.edit_subset), ('Reload', self.reload),
-                              ('Relink…', self.relink), ('Open source', self.open_source),
-                              ('Pack / unpack', self.pack), ('Move registry to project…', self.move_registry)]:
+        # Two columns: eight buttons one under the other gave this tab a
+        # minimum height that outgrew the Model tab's and, while the trays
+        # are docked one under the other before being tabbed, the window's.
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(4)
+        layout.addLayout(grid)
+        actions = [('Refresh', self.refresh), ('Link selection…', self.link_selection),
+                   ('Edit linked subset', self.edit_subset), ('Reload', self.reload),
+                   ('Relink…', self.relink), ('Open source', self.open_source),
+                   ('Pack / unpack', self.pack), ('Move registry to project…', self.move_registry)]
+        for i, (label, action) in enumerate(actions):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, fn=action: self.run(fn))
-            layout.addWidget(button)
+            grid.addWidget(button, i // 2, i % 2)
 
     @property
     def scene(self):

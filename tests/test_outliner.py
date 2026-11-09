@@ -461,7 +461,11 @@ def test_the_browser_is_the_model_tree_and_the_sheets_live_in_the_composer():
     dock = win.project_browser
     assert dock in win._sidebar_docks()
     assert dock.objectName() == "tray_project_browser"
-    assert dock.widget() is dock.outliner
+    # Since the Links tab (Phase B1) the dock holds a tab widget: the model
+    # tree first, the linked files beside it.
+    tabs = dock.widget()
+    assert tabs.widget(0) is dock.outliner
+    assert tabs.widget(1) is dock.links_panel
     comp_win = win._ensure_composer()
     assert comp_win._splitter.widget(0) is comp_win._left_panel
     # On the right with the others, second; the left side empty, folded.
