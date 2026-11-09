@@ -970,6 +970,10 @@ impl Renderer {
             if self.scene.as_ref().map(|s| s.rows.len()) != Some(rows.len()) {
                 return Err(PyValueError::new_err("capture rows must match resident instances"));
             }
+            let s = self.scene.as_ref().unwrap();
+            if rows.chunks_exact(80).zip(s.rows.chunks_exact(80)).any(|(a, b)| a[..72] != b[..72]) {
+                return Err(PyValueError::new_err("capture rows may only change visibility and tint"));
+            }
         }
         let format = self.config.format;
         let mut aa = antialias::Antialias::new(&self.device, format, &self.look.buffer, width, height);
@@ -1135,7 +1139,9 @@ impl Renderer {
         if bytes.len() % 72 != 0 {
             return Err(PyValueError::new_err("section geometry must contain 24-byte triangle vertices"));
         }
+        self.gpu_memory = self.gpu_memory.saturating_sub(self.sections.count as u64 * 24);
         self.sections.upload(&self.device, bytes);
+        self.gpu_memory += bytes.len() as u64;
         Ok(())
     }
     fn set_msaa(&mut self, enabled: bool) {
