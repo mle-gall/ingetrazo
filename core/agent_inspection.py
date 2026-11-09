@@ -156,11 +156,15 @@ class InspectionTools:
         return row
 
     def _tool_query_layers(self):
+        """Count unlabelled carriers on Layer 0, missed by the ride-model
+        agent on 2026-11-09, and count shared mesh faces only once."""
         scene = self._viewport.scene
         groups = [g for g, _, _ in self._groups()]
         meshes = {id(g.mesh): g.mesh for g in groups}
         meshes[id(scene.loose_mesh)] = scene.loose_mesh
-        from core.layers import DEFAULT_LAYER
+        from core.layers import layer_of
+        group_counts = Counter(layer_of(g) for g in groups)
+        face_counts = Counter(layer_of(f) for m in meshes.values() for f in m.faces)
         rows = []
         for layer in scene.layers:
             path, folder = [], layer.folder
@@ -168,9 +172,8 @@ class InspectionTools:
                 path.insert(0, folder)
                 folder = getattr(scene, "folder_parents", {}).get(folder)
             rows.append(dict(uid=layer.uid, name=layer.name, visible=layer.visible,
-                             folder_path=path, groups=sum(g.layer == layer.name for g in groups),
-                             faces=sum(f.attrs.get("layer", DEFAULT_LAYER) == layer.name
-                                       for m in meshes.values() for f in m.faces)))
+                             folder_path=path, groups=group_counts[layer.name],
+                             faces=face_counts[layer.name]))
         return {"layers": rows}
 
     def _tool_set_layer_visibility(self, uids_or_names, visible):

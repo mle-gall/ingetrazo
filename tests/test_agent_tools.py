@@ -133,6 +133,17 @@ def test_tree_entity_selection_and_layers(model):
     assert win.viewport.scene.layer("Walls").visible
 
 
+def test_layer_usage_includes_untagged_groups_and_shared_faces(model):
+    win, bridge, parent, child, layer = model
+    layer.name = child.layer = "A"
+    win.viewport.scene.groups.append(Group(child.mesh))
+    child.mesh.faces[0].attrs["layer"] = None
+    rows = {r["name"]: r for r in call(bridge, "query_layers")["layers"]}
+    assert rows["Layer 0"]["groups"] == 2
+    assert rows["Layer 0"]["faces"] == 1
+    assert rows["A"]["groups"] == 1
+
+
 def test_camera_zoom_and_screenshot(model, monkeypatch):
     win, bridge, parent, child, _ = model
     before = len(win.viewport.history.undo_stack)
