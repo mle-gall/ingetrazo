@@ -41,3 +41,17 @@ def test_profile_width_and_dash_defaults():
     assert payload['dash_width'] == 4.0
     assert style_payload(SimpleNamespace(display_style=style), scale=2)['dash_width'] == 8.0
     assert style_payload(SimpleNamespace(display_style=Style()))['profile_width'] == 1.0
+
+
+def test_section_plane_keeps_gl_half_space_and_resets():
+    from core.scene import Scene
+    from core.section import SectionPlane
+    from PySide6.QtGui import QVector3D
+    scene = Scene()
+    plane = SectionPlane(QVector3D(2, 3, 4), QVector3D(1, 0, 0), active=True)
+    scene.section_planes.append(plane)
+    assert style_payload(scene)['section_plane'] == (-1., 0., 0., 2.)
+    plane.normal = QVector3D(-1, 0, 0)
+    assert style_payload(scene)['section_plane'] == (1., 0., 0., -2.)
+    scene.show_section_cuts = False
+    assert style_payload(scene)['section_plane'] == (0., 0., 0., 0.)

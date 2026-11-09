@@ -20,4 +20,12 @@ def style_payload(scene, override=None, *, horizon=2.0, scale=1.0):
     result['horizon'] = float(horizon)
     result['profile_width'] = float(getattr(style, 'profile_width', 1.0))
     result['dash_width'] = 4.0 * max(1.0, float(scale))
+    # R3c-2a: GL keeps dot(normal, world - point) <= 0.
+    active = getattr(scene, 'active_section', lambda: None)()
+    plane = (0., 0., 0., 0.)
+    if active is not None and getattr(scene, 'show_section_cuts', True):
+        n, o = active.normal, active.point
+        plane = (-n.x(), -n.y(), -n.z(),
+                 n.x()*o.x() + n.y()*o.y() + n.z()*o.z())
+    result['section_plane'] = plane
     return result

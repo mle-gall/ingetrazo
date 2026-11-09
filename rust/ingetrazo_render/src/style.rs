@@ -4,7 +4,7 @@ use wgpu::util::DeviceExt;
 
 pub struct Style {
     pub buffer: wgpu::Buffer,
-    pub data: [[f32; 4]; 7],
+    pub data: [[f32; 4]; 8],
 }
 impl Style {
     pub fn new(d: &wgpu::Device) -> Self {
@@ -16,6 +16,7 @@ impl Style {
             [0.925, 0.935, 0.945, 2.],
             [0.815, 0.820, 0.815, 0.],
             [1., 1., 0., 4.],
+            [0.; 4],
         ];
         let buffer = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("display style"),
@@ -31,6 +32,13 @@ impl Style {
     ) -> PyResult<(u32, Option<bool>)> {
         let mut next = self.data;
         let (name, edges) = if let Ok(d) = value.cast::<PyDict>() {
+            if let Some(v) = d.get_item("section_plane")? {
+                let plane: [f32; 4] = v.extract()?;
+                if plane.iter().any(|v| !v.is_finite()) {
+                    return Err(PyValueError::new_err("section plane must be finite"));
+                }
+                next[7] = plane;
+            }
             for (i, key) in [
                 "front_color",
                 "back_color",
@@ -110,5 +118,27 @@ impl Style {
             self.data = next;
         }
         Ok((mode, edges))
+    }
+}
+
+#[cfg(test)]
+mod section_tests {
+    #[test]
+    fn section_uniform_is_a_sixteen_byte_tail() {
+        let data = [[0f32; 4]; 8];
+        assert_eq!(std::mem::size_of_val(&data), 128);
+        assert_eq!(data[7].as_ptr() as usize - data.as_ptr() as usize, 112);
+    }
+
+    #[test]
+    fn every_geometry_fragment_path_applies_the_section() {
+        let shader = include_str!("shading.wgsl");
+        for name in ["face_pixel", "edge_pixel", "depth_fs"] {
+            let body = shader.split(&format!("fn {name}(")).nth(1).unwrap();
+            assert!(body.split("let front").next().unwrap().contains("section_distance < 0."));
+        }
+        assert!(include_str!("xray.wgsl").contains("face_pixel(i, front)"));
+        assert!(include_str!("antialias.rs").contains("shading.wgsl"));
+        assert!(include_str!("edges.wgsl").contains("o.section_distance ="));
     }
 }
