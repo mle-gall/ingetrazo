@@ -3310,6 +3310,7 @@
   "Distance ({unit}):": "المسافة ({unit}):",
   "Restore defaults": "استعادة الإعدادات الافتراضية",
   "Puts the settings of this window back to how IngeTrazo comes. Nothing is saved until you press OK. The language, the AI Assistant, the keyboard shortcuts and the units of the open document stay as they are.": "يعيد إعدادات هذه النافذة إلى ما يأتي به IngeTrazo. لا يُحفظ شيء حتى تضغط موافق. تبقى اللغة ومساعد الذكاء الاصطناعي واختصارات لوحة المفاتيح ووحدات المستند المفتوح كما هي.",
+ "One-finger slide on the touch screen:": "تمرير بإصبع واحد على الشاشة اللمسية:",
  "Two-finger slide on the trackpad:": "التمرير بإصبعين على لوحة التعقب:",
  "Orbits the view": "يدور حول المشهد",
  "Pans the view": "يحرّك المشهد",

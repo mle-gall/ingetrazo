@@ -84,8 +84,9 @@ welcome arch with all its rebar (also attached to every release as
 - **Viewport** — Z-up camera that orbits around the point under the cursor,
   grid, colored axes, perspective ↔ parallel and two-point perspective,
   standard views, zoom-extents, hidden-line removal, real-sun shadows.
-  Trackpad and touch screen: pinch to zoom, slide to orbit (Shift pans,
-  Cmd/Ctrl zooms), two-finger double tap to frame the model.
+  Trackpad and touch screen: pinch to zoom, a finger on the touch screen
+  orbits (Shift pans, Cmd/Ctrl zooms), two-finger double tap to frame the
+  model.
 - **Walkthrough** — Position Camera, Walk and Look Around at eye height.
 - **Drawing tools** — Line, Rectangle, Rotated Rectangle, Circle, Polygon,
   Arc (2-point) and 3-Point Arc, with inferencing, snapping, axis locks and a

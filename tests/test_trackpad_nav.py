@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Trackpad and touch-screen navigation (#248).
 
-A finger slide (the wheel events with a scroll phase) orbits by default,
-Shift pans, Cmd/Ctrl zooms; a pinch zooms toward the fingers through the
-wheel's zoom; a slide and a pinch do not fight; the two-finger double tap
-frames the model and goes back. A mouse wheel notch zooms as before.
+A finger slide on the touch screen (the wheel events with a scroll phase
+that macOS 27 synthesises on the primary pointer) orbits by default,
+Shift pans, Cmd/Ctrl zooms; a two-finger slide on a real trackpad (its
+own device id) zooms as it always did unless the preference says
+otherwise; a pinch zooms toward the fingers through the wheel's zoom; a
+slide and a pinch do not fight; the two-finger double tap frames the
+model and goes back. A mouse wheel notch zooms as before.
 """
 from __future__ import annotations
 
@@ -22,12 +25,23 @@ _app = QApplication.instance() or QApplication([])
 
 CENTRE = QPointF(200, 150)
 
+# What Qt makes of the screen's emulated events: the primary pointer, id 1.
 TOUCHPAD = QPointingDevice(
-    "trackpad", 1, QInputDevice.DeviceType.TouchPad,
+    "trackpad or magic mouse", 1, QInputDevice.DeviceType.TouchPad,
+    QPointingDevice.PointerType.Finger, QInputDevice.Capability.Position, 2, 3)
+# A real trackpad carries its own device id.
+REAL_TRACKPAD = QPointingDevice(
+    "trackpad or magic mouse", 504403158265495724, QInputDevice.DeviceType.TouchPad,
     QPointingDevice.PointerType.Finger, QInputDevice.Capability.Position, 2, 3)
 MOUSE = QPointingDevice(
     "mouse", 2, QInputDevice.DeviceType.Mouse,
     QPointingDevice.PointerType.Generic, QInputDevice.Capability.Position, 1, 3)
+
+
+@pytest.fixture(autouse=True)
+def _touch_emulation(monkeypatch):
+    # The screen/trackpad distinction exists on macOS 27; test it everywhere.
+    monkeypatch.setattr(trackpad_nav, "TOUCH_EMULATION", True)
 
 
 @pytest.fixture
@@ -35,7 +49,8 @@ def vp():
     from views.viewport import Viewport
     view = Viewport(None)
     view.resize(400, 300)
-    view._trackpad_slide = "orbit"
+    view._touch_slide = "orbit"
+    view._trackpad_slide = "zoom"
     view._trackpad_inertia = True
     view._invert_orbit_y = False
     view._invert_wheel = False
@@ -43,11 +58,12 @@ def vp():
 
 
 def slide_event(dx, dy, phase=Qt.ScrollUpdate, mods=Qt.NoModifier,
-                inverted=True, at=CENTRE):
+                inverted=True, at=CENTRE, device=None):
     # Natural scrolling (the Mac default): the deltas follow the fingers.
     return QWheelEvent(at, at, QPoint(dx, dy), QPoint(dx * 8, dy * 8),
                        Qt.NoButton, mods, phase, inverted,
-                       Qt.MouseEventNotSynthesized, TOUCHPAD)
+                       Qt.MouseEventSynthesizedBySystem,
+                       device if device is not None else TOUCHPAD)
 
 
 def slide(vp, dx, dy, **kw):
@@ -115,8 +131,19 @@ def test_modifiers_pick_the_slide_mode(mods, expected):
     assert trackpad_nav.slide_mode(slide_event(0, 1, mods=mods), "orbit") == expected
 
 
-def test_an_unknown_preference_orbits():
-    assert trackpad_nav.slide_mode(slide_event(0, 1), "fly") == "orbit"
+def test_an_unknown_preference_zooms():
+    assert trackpad_nav.slide_mode(slide_event(0, 1), "fly") == "zoom"
+
+
+def test_the_screen_and_the_trackpad_are_told_apart_by_the_device():
+    assert trackpad_nav.is_touch_screen(slide_event(0, 1))
+    assert not trackpad_nav.is_touch_screen(slide_event(0, 1, device=REAL_TRACKPAD))
+    assert not trackpad_nav.is_touch_screen(slide_event(0, 1, device=MOUSE))
+
+
+def test_without_touch_emulation_every_slide_is_a_trackpads(monkeypatch):
+    monkeypatch.setattr(trackpad_nav, "TOUCH_EMULATION", False)
+    assert not trackpad_nav.is_touch_screen(slide_event(0, 1))
 
 
 def test_a_pinch_of_one_notchs_scale_is_one_step():
@@ -148,7 +175,7 @@ def test_the_first_pixels_are_not_lost(vp):
     from views.viewport import Viewport
     other = Viewport(None)
     other.resize(400, 300)
-    other._trackpad_slide = "orbit"
+    other._touch_slide = "orbit"
     other._trackpad_inertia = True
     other._invert_orbit_y = False
     finger_slide(other, 6, 0, steps=1)
@@ -170,7 +197,7 @@ def test_the_invert_orbit_preference_applies(vp):
     from views.viewport import Viewport
     ref = Viewport(None)
     ref.resize(400, 300)
-    ref._trackpad_slide = "orbit"
+    ref._touch_slide = "orbit"
     ref._invert_orbit_y = False
     finger_slide(ref, 0, 10, steps=1)
     vp._invert_orbit_y = True
@@ -194,15 +221,30 @@ def test_ctrl_zooms_like_the_wheel(vp):
 
 
 def test_the_zoom_preference_keeps_the_old_feel(vp):
-    vp._trackpad_slide = "zoom"
+    vp._touch_slide = "zoom"
     d0, yaw0 = vp.camera.distance, vp.camera.yaw
     finger_slide(vp, 0, -15)                                # fingers up: in
     assert vp.camera.distance < d0
     assert vp.camera.yaw == yaw0
 
 
+def test_a_trackpad_slide_zooms_as_before_by_default(vp):
+    d0, yaw0 = vp.camera.distance, vp.camera.yaw
+    finger_slide(vp, 0, -15, device=REAL_TRACKPAD)          # fingers up: in
+    assert vp.camera.distance < d0
+    assert vp.camera.yaw == yaw0
+
+
+def test_the_trackpad_can_be_told_to_orbit(vp):
+    vp._trackpad_slide = "orbit"
+    yaw0, d0 = vp.camera.yaw, vp.camera.distance
+    finger_slide(vp, 10, 0, device=REAL_TRACKPAD)
+    assert vp.camera.yaw != yaw0
+    assert vp.camera.distance == pytest.approx(d0)
+
+
 def test_the_pan_preference_pans(vp):
-    vp._trackpad_slide = "pan"
+    vp._touch_slide = "pan"
     t0 = pose(vp)[3:]
     finger_slide(vp, 20, 0)
     assert vp.camera.yaw == pytest.approx(pose(vp)[0])
@@ -406,7 +448,7 @@ def test_the_metal_view_orbits_and_pinches_too():
     scene.groups.append(group)
     source = Viewport(None)
     source.resize(400, 300)
-    source._trackpad_slide = "orbit"
+    source._touch_slide = "orbit"
     source._trackpad_inertia = True
     v = WgpuView()
     v.resize(400, 300)

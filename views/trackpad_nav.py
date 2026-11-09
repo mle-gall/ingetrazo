@@ -14,11 +14,17 @@ the viewport as two kinds of events:
 
 Until now the slide zoomed like a wheel and the gestures were dropped: on
 a Mac trackpad a pinch did nothing (#248), and on the touch screen a
-finger slid across the view zoomed it. Here the slide **orbits** the view
-around the point it started on (Preferences can make it pan or zoom
-instead), Shift turns it into a pan and Cmd/Ctrl into the zoom, the pinch
-zooms toward the fingers through the same zoom as the wheel, and the
-smart zoom asks the window to frame the model.
+finger slid across the view zoomed it. Here a slide on the **touch
+screen** orbits the view around the point it started on, a slide on the
+**trackpad** keeps zooming as it always did (Preferences can make either
+orbit, pan or zoom), Shift turns a slide into a pan and Cmd/Ctrl into the
+zoom, the pinch zooms toward the fingers through the same zoom as the
+wheel, and the smart zoom asks the window to frame the model.
+
+The two are told apart by the device: a real trackpad's wheel events
+carry the trackpad's own device id, the emulated ones of the screen come
+from the primary pointer (device id 1) -- measured on Maxence's MacBook
+Pro, 2026-11-09, both named "trackpad or magic mouse" by Qt otherwise.
 
 A slide and a pinch arrive mixed: the fingers of a slide drift apart a
 little, and a pinch wanders. The first of the two to move past a small
@@ -28,20 +34,30 @@ lift (``IDLE_RESET_S`` without events, or an end-of-gesture event).
 The functions take the *view* (a :class:`views.viewport.Viewport` or a
 :class:`views.wgpu_view.WgpuView`) and read what they need from it:
 ``camera``, ``height()``, ``_orbit_pivot_at``, ``_zoom_at`` and the
-``_invert_orbit_y`` / ``_trackpad_slide`` / ``_trackpad_inertia``
-preferences, looked up on the view, then on its ``source_viewport``.
+``_invert_orbit_y`` / ``_touch_slide`` / ``_trackpad_slide`` /
+``_trackpad_inertia`` preferences, looked up on the view, then on its
+``source_viewport``.
 """
 from __future__ import annotations
 
 import math
+import sys
 import time
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QInputDevice, QVector3D
 
-#: What a two-finger slide does by default: ``orbit`` | ``pan`` | ``zoom``.
+#: What a slide does: ``orbit`` | ``pan`` | ``zoom``. A finger on the touch
+#: screen orbits; two fingers on the trackpad zoom, as before 0.6.1.
 SLIDE_MODES = ("orbit", "pan", "zoom")
-DEFAULT_SLIDE = "orbit"
+DEFAULT_TOUCH_SLIDE = "orbit"
+DEFAULT_SLIDE = "zoom"
+
+#: Only macOS 27 hands the touch screen to a program as a trackpad; the
+#: id of the pointer those emulated events arrive on (a real trackpad's
+#: events carry its own, large, device id). Tests toggle the first.
+TOUCH_EMULATION = sys.platform == "darwin"
+TOUCH_SCREEN_IDS = (1,)
 
 #: A pinch takes the gesture once the scale has changed by this share.
 PINCH_LOCK_SHARE = 0.03
@@ -57,9 +73,17 @@ _NOTCH = -math.log(0.9)
 # ---- preferences -----------------------------------------------------------
 
 def load_slide_mode() -> str:
+    """The trackpad's two-finger slide."""
     from PySide6.QtCore import QSettings
     mode = str(QSettings().value("nav/trackpad_slide", DEFAULT_SLIDE)).lower()
     return mode if mode in SLIDE_MODES else DEFAULT_SLIDE
+
+
+def load_touch_slide() -> str:
+    """A finger's slide on the touch screen."""
+    from PySide6.QtCore import QSettings
+    mode = str(QSettings().value("nav/touch_slide", DEFAULT_TOUCH_SLIDE)).lower()
+    return mode if mode in SLIDE_MODES else DEFAULT_TOUCH_SLIDE
 
 
 def load_inertia() -> bool:
@@ -91,6 +115,15 @@ def is_slide(ev) -> bool:
     device = ev.device()
     return device is not None and device.type() in (
         QInputDevice.DeviceType.TouchPad, QInputDevice.DeviceType.TouchScreen)
+
+
+def is_touch_screen(ev) -> bool:
+    """A slide whose wheel events the system synthesised for a finger on
+    the touch screen, as opposed to a trackpad's (see the module doc)."""
+    if not TOUCH_EMULATION:
+        return False
+    device = ev.device()
+    return device is not None and device.systemId() in TOUCH_SCREEN_IDS
 
 
 def slide_pixels(ev) -> tuple[float, float]:
@@ -191,7 +224,11 @@ def slide(view, ev) -> bool:
     if g.lock == "pinch":
         ev.accept()                 # the fingers are pinching, not sliding
         return True
-    mode = slide_mode(ev, _pref(view, "_trackpad_slide", load_slide_mode))
+    if is_touch_screen(ev):
+        default = _pref(view, "_touch_slide", load_touch_slide)
+    else:
+        default = _pref(view, "_trackpad_slide", load_slide_mode)
+    mode = slide_mode(ev, default)
     if mode == "zoom":
         return False                # the wheel's zoom, momentum included
     if (phase == Qt.ScrollMomentum

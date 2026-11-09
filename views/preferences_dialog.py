@@ -224,17 +224,22 @@ class PreferencesDialog(QDialog):
                                       != "0")
         form.addRow("", self._invert_orbit)
 
-        # A two-finger slide on a trackpad (one finger on a touch screen)
-        # orbits by default; Shift pans and Cmd/Ctrl zooms whatever is
-        # chosen here. "Zooms" is how it behaved before 0.6.1 (#248).
+        # A finger's slide on the touch screen orbits by default; two
+        # fingers on the trackpad zoom, as before 0.6.1. Shift pans and
+        # Cmd/Ctrl zooms whatever is chosen here (#248).
         from views import trackpad_nav
-        self._trackpad_slide = QComboBox()
-        for key, label in (("orbit", "Orbits the view"),
-                           ("pan", "Pans the view"),
-                           ("zoom", "Zooms the view")):
-            self._trackpad_slide.addItem(tr(label), key)
-        self._trackpad_slide.setCurrentIndex(max(0, self._trackpad_slide.findData(
-            trackpad_nav.load_slide_mode())))
+
+        def slide_combo(current):
+            box = QComboBox()
+            for key, label in (("orbit", "Orbits the view"),
+                               ("pan", "Pans the view"),
+                               ("zoom", "Zooms the view")):
+                box.addItem(tr(label), key)
+            box.setCurrentIndex(max(0, box.findData(current)))
+            return box
+        self._touch_slide = slide_combo(trackpad_nav.load_touch_slide())
+        form.addRow(tr("One-finger slide on the touch screen:"), self._touch_slide)
+        self._trackpad_slide = slide_combo(trackpad_nav.load_slide_mode())
         form.addRow(tr("Two-finger slide on the trackpad:"), self._trackpad_slide)
         self._trackpad_inertia = QCheckBox(tr(
             "Keep moving after the fingers lift (inertia)"))
@@ -949,7 +954,8 @@ class PreferencesDialog(QDialog):
         pick(self._figure, sf.DEFAULT_PICK)
         self._invert.setChecked(False)
         self._invert_orbit.setChecked(False)
-        pick(self._trackpad_slide, "orbit")
+        pick(self._touch_slide, "orbit")
+        pick(self._trackpad_slide, "zoom")
         self._trackpad_inertia.setChecked(True)
         self._look_sens.setValue(DEFAULT_LOOK_SENSITIVITY)
         pick(self._cursor_style, "tool")
@@ -1132,11 +1138,14 @@ class PreferencesDialog(QDialog):
             v._invert_orbit_y = self._invert_orbit.isChecked()
 
         slide = self._trackpad_slide.currentData()
+        touch = self._touch_slide.currentData()
         st.setValue("nav/trackpad_slide", slide)
+        st.setValue("nav/touch_slide", touch)
         st.setValue("nav/trackpad_inertia",
                     "1" if self._trackpad_inertia.isChecked() else "0")
         for v in viewports:
             v._trackpad_slide = slide
+            v._touch_slide = touch
             v._trackpad_inertia = self._trackpad_inertia.isChecked()
 
         # First Person reads it on every look move: nothing to push.

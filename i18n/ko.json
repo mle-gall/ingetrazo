@@ -3275,6 +3275,7 @@
  "Distance ({unit}):": "거리 ({unit}):",
  "Restore defaults": "기본값 복원",
  "Puts the settings of this window back to how IngeTrazo comes. Nothing is saved until you press OK. The language, the AI Assistant, the keyboard shortcuts and the units of the open document stay as they are.": "이 창의 설정을 IngeTrazo 기본 상태로 되돌립니다. 확인을 누르기 전까지는 아무것도 저장되지 않습니다. 언어, AI 도우미, 단축키, 열린 문서의 단위는 그대로 유지됩니다.",
+ "One-finger slide on the touch screen:": "터치스크린에서 한 손가락 밀기:",
  "Two-finger slide on the trackpad:": "트랙패드 두 손가락 밀기:",
  "Orbits the view": "뷰 회전",
  "Pans the view": "뷰 이동",

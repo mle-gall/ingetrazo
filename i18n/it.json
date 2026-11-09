@@ -3276,6 +3276,7 @@
  "Distance ({unit}):": "Distanza ({unit}):",
  "Restore defaults": "Ripristina predefiniti",
  "Puts the settings of this window back to how IngeTrazo comes. Nothing is saved until you press OK. The language, the AI Assistant, the keyboard shortcuts and the units of the open document stay as they are.": "Riporta le impostazioni di questa finestra a come arriva IngeTrazo. Non viene salvato nulla finché non premi OK. La lingua, l'Assistente IA, le scorciatoie da tastiera e le unità del documento aperto restano come sono.",
+ "One-finger slide on the touch screen:": "Scorrimento con un dito sul touch screen:",
  "Two-finger slide on the trackpad:": "Scorrimento a due dita sul trackpad:",
  "Orbits the view": "Orbita la vista",
  "Pans the view": "Sposta la vista",

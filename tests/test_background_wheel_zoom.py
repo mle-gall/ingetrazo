@@ -41,7 +41,7 @@ def viewport():
     # keeps them zooming (views.trackpad_nav) so the fractions reach the
     # wheel's zoom.
     vp = SimpleNamespace(camera=camera, scene=SimpleNamespace(version=0),
-                         _invert_wheel=False, _trackpad_slide="zoom",
+                         _invert_wheel=False, _trackpad_slide="zoom", _touch_slide="zoom",
                          update=lambda: None,
                          _zoom_out_step=lambda: 1.0,
                          _world_under_cursor=lambda *a: V(0, 0, 0))

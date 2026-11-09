@@ -1991,6 +1991,7 @@ class Viewport(QOpenGLWidget):
         self._invert_orbit_y = _load_invert_orbit_y()
         from views import trackpad_nav
         self._trackpad_slide = trackpad_nav.load_slide_mode()
+        self._touch_slide = trackpad_nav.load_touch_slide()
         self._trackpad_inertia = trackpad_nav.load_inertia()
         self._msaa = _load_msaa()
 

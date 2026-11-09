@@ -10,15 +10,16 @@ follow [SemVer](https://semver.org).
 
 - **Navegación con el trackpad y la pantalla táctil** (#248): el pellizco
   hace zoom hacia los dedos con el mismo zoom que la rueda (antes no hacía
-  nada en un trackpad de Mac); deslizar con dos dedos en el trackpad, o
-  con un dedo en la pantalla táctil de un Mac, **orbita** alrededor del
-  punto donde empezó el gesto, con Mayús desplaza y con Cmd/Ctrl hace
-  zoom; el doble toque con dos dedos encuadra el modelo como Zoom
-  Extensión y un segundo vuelve a la vista anterior. La vista sigue
-  girando un poco al levantar los dedos (inercia). *Dónde:* Ventana ▸
-  Preferencias… ▸ «Deslizar con dos dedos en el trackpad» elige orbitar,
-  desplazar o hacer zoom (lo de antes), y la casilla de inercia. Vale
-  igual en la vista OpenGL y en la nativa Metal.
+  nada en un trackpad de Mac); deslizar **con un dedo en la pantalla
+  táctil** de un Mac **orbita** alrededor del punto donde empezó el
+  gesto, con Mayús desplaza y con Cmd/Ctrl hace zoom; deslizar con dos
+  dedos en el trackpad sigue haciendo zoom como siempre. El doble toque
+  con dos dedos encuadra el modelo como Zoom Extensión y un segundo
+  vuelve a la vista anterior. La vista sigue girando un poco al levantar
+  los dedos (inercia). *Dónde:* Ventana ▸ Preferencias… ▸ «Deslizar con
+  un dedo en la pantalla táctil» y «Deslizar con dos dedos en el
+  trackpad» eligen orbitar, desplazar o hacer zoom cada uno, y la casilla
+  de inercia. Vale igual en la vista OpenGL y en la nativa Metal.
 
 ## [0.6.0] — 2026-11-01
 

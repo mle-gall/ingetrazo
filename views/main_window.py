@@ -2253,17 +2253,18 @@ class MainWindow(WorksessionMixin, QMainWindow):
         if btn is None:
             return
         from PySide6.QtCore import QPoint
-        edge = self.viewport.mapTo(self, QPoint(self.viewport.width(), 0))
+        view = self._shown_viewport()
+        edge = view.mapTo(self, QPoint(view.width(), 0))
         x = edge.x() - btn.width() // 2
         x = max(0, min(x, self.width() - btn.width()))
-        y = edge.y() + (self.viewport.height() - btn.height()) // 2
+        y = edge.y() + (view.height() - btn.height()) // 2
         btn.move(x, max(0, y))
         btn.raise_()
         btn.setVisible(not self._act_clean_screen.isChecked()
                        if hasattr(self, "_act_clean_screen") else True)
         left = getattr(self, "_left_handle", None)
         if left is not None:
-            start = self.viewport.mapTo(self, QPoint(0, 0))
+            start = view.mapTo(self, QPoint(0, 0))
             left.move(max(0, start.x() - left.width() // 2), max(0, y))
             left.raise_()
             clean = (self._act_clean_screen.isChecked()
@@ -2368,12 +2369,23 @@ class MainWindow(WorksessionMixin, QMainWindow):
         self.viewport.installEventFilter(self)
         return btn
 
+    def _shown_viewport(self):
+        """The widget the model is drawn in right now: the Metal stand-in
+        while it is up, else the GL viewport. The hidden one keeps a stale
+        size in the stack, so anything placed from its geometry (sidebar
+        handle, clean-screen exit) landed over the view (Maxence,
+        2026-11-09, new Mac on Metal)."""
+        stand_in = getattr(getattr(self, "_doc", None), "stand_in", None)
+        if stand_in is not None and stand_in.isVisible():
+            return stand_in
+        return self.viewport
+
     def _place_clean_screen_exit(self) -> None:
         btn = getattr(self, "_clean_exit_btn", None)
         if btn is None or not btn.isVisible():
             return
         btn.adjustSize()
-        btn.move(self.viewport.width() - btn.width() - 12, 12)
+        btn.move(self._shown_viewport().width() - btn.width() - 12, 12)
         btn.raise_()
 
     def eventFilter(self, obj, event):  # noqa: N802 — Qt override
@@ -2382,7 +2394,10 @@ class MainWindow(WorksessionMixin, QMainWindow):
         # window's children, the view comes out above the handles and its
         # OpenGL hides the half of them that lies over it.
         if (obj is getattr(self, "viewport", None)
-                or obj is getattr(self, "_doc_area", None)) and event.type() in (
+                or obj is getattr(self, "_doc_area", None)
+                or (obj is not None and obj is getattr(
+                    getattr(self, "_doc", None), "stand_in", None))
+                ) and event.type() in (
                 QEvent.Resize, QEvent.Move, QEvent.Show,
                 QEvent.ZOrderChange):
             self._place_clean_screen_exit()
@@ -6300,6 +6315,7 @@ class MainWindow(WorksessionMixin, QMainWindow):
         display._repaint_timer = repaint
         doc.stand_in = display
         self._doc_stack.addWidget(display)
+        display.installEventFilter(self)       # re-place the handles on resize
         refresh = QTimer(display)
         refresh.setSingleShot(True)
         def rebuild():
