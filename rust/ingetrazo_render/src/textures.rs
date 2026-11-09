@@ -3,6 +3,7 @@ pub struct Textures {
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
     pub bytes: u64,
+    pub layers: u32,
     pub materials: wgpu::Buffer,
 }
 impl Textures {
@@ -52,7 +53,7 @@ impl Textures {
             );
         }
         Self {
-            materials: crate::buffer(d, &[0;16], wgpu::BufferUsages::STORAGE),
+            layers,            materials: crate::buffer(d, &[0;16], wgpu::BufferUsages::STORAGE),
             view: texture.create_view(&wgpu::TextureViewDescriptor {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..Default::default()

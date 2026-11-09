@@ -2404,6 +2404,69 @@ Raw local logs: `.spike-results/r3a-pusher-local.log` and
 ### Validation
 
 Private interpreter and Cargo cache:
+## Renderer — face pass — 2026-11-09
+
+Instrumentation baseline on `renderer/perf-face-pass`, Apple M1 Max, 2000×1400,
+10 warm-ups / 20 samples, 120 ms pacing. These runs are **contended**: the
+owner authorized diagnostic measurements with Ableton and the main-checkout
+review instance left running. Load averages accompany every configuration in
+`wgpu-perf-2026-11-09/{ride,pusher}-before.json`.
+
+The baseline splits single-sample faces and edges into separate native passes
+because this Metal adapter does not support timestamps inside render passes.
+Encoder-level timestamps returned zero in validation; native pass descriptor
+timestamps work. This extra store/load boundary means the instrumented edge
+baseline is not identical to the original uninstrumented renderer. The frame
+column spans the earliest to latest measured pass, including inter-pass gaps;
+individual pass medians need not sum to its median. No depth pre-pass exists.
+`last_timings()` preserves its first three tuple entries and appends the named
+GPU table and asynchronous GPU culling counters. Profile classification is
+integrated into edge quads; AO upsample/composite are fused. `ao_inputs` and
+`profile_top` are reserved, currently unmeasured columns, **not evidence of zero
+cost**. Present remains CPU-only through `frame_stage_timings()`.
+
+Faces-only baseline: ride face 24.827 ms, background 1.133 ms, culling 0.241 ms,
+frame 29.102 ms (load 5.994); pusher face 3.086 ms, background 0.818 ms,
+culling 0.022 ms, frame 5.014 ms (load recorded in JSON). The pusher is not a
+few-thousand-triangle workload: even the 400×280 smoke test submits 1,320,760
+triangles. At full resolution the counters establish the actual workload.
+There is no measured standalone 5 ms disabled-feature pass: most pusher cost
+is faces, with background and inter-pass scheduling contributing the rest.
+AO, X-ray and MSAA do not execute in the faces-only baseline.
+
+Initial validation: both isolated release builds succeeded; 23 render-crate
+unit tests passed before the final instrumentation adjustments. Final checks
+and optimization results follow below. Performance gates remain open.
+
+### Face specialization and ID attachment scheduling
+
+Untextured prototype runs use a fragment pipeline compiled with `TEXTURED=false`.
+The vertex material stream, back paint, mirrored-side handling, selection dots,
+lighting and sRGB conversion are unchanged. Textured prototypes retain sampling
+and alpha rejection; contiguous runs preserve original draw order. Sparse
+material updates and prototype additions rebuild the classification. Both front
+and back texture indices participate in classification. Explicit layouts let
+these variants reuse the resident bind groups.
+
+Settled single-sample **faces-only** frames omit the ID attachment, clear and
+store. Dirty IDs refresh on the second stable frame; explicit picks still use
+the existing independent ID renderer. Edge-bearing frames retain their original
+ID behavior. This is intentionally narrower than eliminating all redundant ID
+writes: edge variants, MSAA allocation, and cold-pick scheduling are not solved.
+
+The first specialization-only run is retained as `{ride,pusher}-after.json`.
+The final binary additionally omits idle faces-only IDs and corrects AO+MSAA
+instrumentation to keep separate face and post-AO edge/resolve timestamps.
+Unmeasured fields now return JSON null instead of the earlier reserved zeros.
+No AO normal target exists in this implementation; AO reconstructs from depth.
+Actual attachment write traffic and encoded draw-call counters remain missing.
+Culling's triangle counter counts visible face triangles once, not geometry
+replays or generated edge triangles. GPU pass durations can overlap on Metal;
+do not add them to infer frame latency or subtract noisy medians as causal cost.
+
+Final focused validation before the repeat matrix: **26 Rust unit tests passed**,
+**74 Python tests passed** (4 existing deprecation warnings), plus native
+faces-only validation with the final ID-free pipeline. Commands:
 
 ```sh
 python3.13 -m venv .venv-work
@@ -2438,3 +2501,147 @@ builds were created. No full-suite batch runner was used.
 - R3b: sheets, composer, and their annotation/selection paths. The mesh facade
   intentionally supplies no annotation picks for those features.
 - R3c: default renderer switch and GL fallback, plus full UI acceptance.
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work \
+  .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work CARGO_PROFILE_RELEASE_STRIP=none \
+  .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work PYO3_PYTHON=$PWD/.venv-work/bin/python \
+  cargo test --release --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_*.py
+```
+
+Neither crate has a `target/debug` directory. No tools, inference, overlay Python,
+or tool-routing code was changed. All reference documents were read-only.
+
+### Final repeated matrix (contended)
+
+All values below are median GPU milliseconds. Load is the 1/5/15-minute average at the start of each configuration. Each configuration contains 20 samples after 10 warm-ups. Zero denotes a skipped measured pass; unmeasured/fused stages are documented above and in JSON.
+
+
+ride / before-repeat ([JSON](benchmarks/wgpu-perf-2026-11-09/ride-before-repeat.json))
+
+| Configuration | Load 1/5/15 | background | culling | faces | edge_quads | ao_kernel | ao_blur_x | ao_blur_y | ao_upsample_composite | antialias | antialias_edges | frame |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| msaa=False,ao=off,edges=True,profiles=False | 5.27/5.60/5.99 | 1.018 | 0.110 | 24.799 | 14.021 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | — | 39.936 |
+| msaa=False,ao=half,edges=True,profiles=False | 5.56/5.66/6.01 | 0.317 | 0.108 | 25.170 | 8.217 | 2.081 | 2.470 | 2.516 | 2.835 | 0.000 | — | 37.805 |
+| msaa=False,ao=full,edges=True,profiles=False | 5.56/5.66/6.01 | 0.339 | 0.104 | 26.845 | 8.951 | 2.799 | 0.906 | 0.779 | 0.888 | 0.000 | — | 45.910 |
+| msaa=True,ao=off,edges=True,profiles=False | 5.28/5.60/5.99 | 0.447 | 0.103 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 41.929 | — | 44.074 |
+| msaa=True,ao=half,edges=True,profiles=False | 5.10/5.56/5.97 | 0.569 | 0.108 | 17.021 | 0.000 | 2.579 | 0.682 | 0.807 | 1.238 | 10.903 | — | 51.930 |
+| msaa=True,ao=full,edges=True,profiles=False | 4.93/5.51/5.95 | 1.793 | 0.104 | 14.715 | 0.000 | 3.359 | 2.129 | 2.178 | 1.754 | 8.487 | — | 55.226 |
+| msaa=False,ao=off,edges=False,profiles=False | 4.93/5.51/5.95 | 0.377 | 0.191 | 27.399 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | — | 30.439 |
+| msaa=False,ao=off,edges=True,profiles=True | 5.49/5.62/5.99 | 1.192 | 0.104 | 26.209 | 23.032 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | — | 53.163 |
+
+Cold / settled pick wall medians: 47.986 / 1.422 ms; end load 5.45/5.61/5.98.
+
+
+ride / after-repeat ([JSON](benchmarks/wgpu-perf-2026-11-09/ride-after-repeat.json))
+
+| Configuration | Load 1/5/15 | background | culling | faces | edge_quads | ao_kernel | ao_blur_x | ao_blur_y | ao_upsample_composite | antialias | antialias_edges | frame |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| msaa=False,ao=off,edges=True,profiles=False | 5.37/5.34/5.78 | 0.739 | 0.105 | 18.664 | 15.106 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 33.487 |
+| msaa=False,ao=half,edges=True,profiles=False | 5.26/5.32/5.77 | 1.555 | 0.104 | 17.247 | 7.326 | 1.017 | 0.787 | 0.745 | 0.719 | 0.000 | 0.000 | 32.266 |
+| msaa=False,ao=full,edges=True,profiles=False | 5.26/5.32/5.77 | 0.364 | 0.105 | 18.960 | 8.077 | 2.087 | 1.047 | 1.119 | 1.076 | 0.000 | 0.000 | 33.660 |
+| msaa=True,ao=off,edges=True,profiles=False | 4.83/5.23/5.73 | 1.125 | 0.105 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 41.885 | 0.000 | 45.671 |
+| msaa=True,ao=half,edges=True,profiles=False | 4.61/5.17/5.71 | 0.090 | 0.105 | 16.477 | 0.000 | 4.013 | 2.763 | 2.901 | 4.143 | 24.959 | 11.097 | 55.308 |
+| msaa=True,ao=full,edges=True,profiles=False | 4.32/5.11/5.68 | 0.598 | 0.104 | 15.213 | 0.000 | 3.273 | 2.907 | 3.132 | 2.482 | 25.809 | 10.031 | 52.258 |
+| msaa=False,ao=off,edges=False,profiles=False | 4.32/5.11/5.68 | 1.073 | 0.147 | 24.551 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 27.666 |
+| msaa=False,ao=off,edges=True,profiles=True | 4.05/5.04/5.66 | 0.331 | 0.106 | 15.998 | 27.299 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 48.051 |
+
+Cold / settled pick wall medians: 29.080 / 1.425 ms; end load 3.97/5.00/5.64.
+
+
+pusher / before-repeat ([JSON](benchmarks/wgpu-perf-2026-11-09/pusher-before-repeat.json))
+
+| Configuration | Load 1/5/15 | background | culling | faces | edge_quads | ao_kernel | ao_blur_x | ao_blur_y | ao_upsample_composite | antialias | antialias_edges | frame |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| msaa=False,ao=off,edges=True,profiles=False | 4.29/5.66/6.05 | 0.314 | 0.026 | 2.413 | 0.960 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | — | 5.795 |
+| msaa=False,ao=half,edges=True,profiles=False | 4.29/5.66/6.05 | 0.613 | 0.021 | 2.786 | 2.442 | 0.859 | 0.876 | 1.263 | 2.097 | 0.000 | — | 9.231 |
+| msaa=False,ao=full,edges=True,profiles=False | 4.35/5.65/6.04 | 1.008 | 0.021 | 3.636 | 2.856 | 1.335 | 1.493 | 1.909 | 2.602 | 0.000 | — | 10.914 |
+| msaa=True,ao=off,edges=True,profiles=False | 4.16/5.59/6.02 | 0.227 | 0.021 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 3.700 | — | 9.644 |
+| msaa=True,ao=half,edges=True,profiles=False | 4.07/5.55/6.00 | 0.505 | 0.044 | 2.853 | 0.000 | 2.150 | 1.537 | 1.843 | 3.178 | 3.214 | — | 14.878 |
+| msaa=True,ao=full,edges=True,profiles=False | 4.07/5.55/6.00 | 2.425 | 0.020 | 2.561 | 0.000 | 2.063 | 2.033 | 2.457 | 2.884 | 3.377 | — | 17.281 |
+| msaa=False,ao=off,edges=False,profiles=False | 4.22/5.55/6.00 | 0.737 | 0.050 | 2.951 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | — | 7.712 |
+| msaa=False,ao=off,edges=True,profiles=True | 4.12/5.51/5.98 | 0.552 | 0.032 | 2.969 | 2.274 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | — | 9.424 |
+
+Cold / settled pick wall medians: 10.177 / 2.715 ms; end load 3.87/5.44/5.95.
+
+
+pusher / after-repeat ([JSON](benchmarks/wgpu-perf-2026-11-09/pusher-after-repeat.json))
+
+| Configuration | Load 1/5/15 | background | culling | faces | edge_quads | ao_kernel | ao_blur_x | ao_blur_y | ao_upsample_composite | antialias | antialias_edges | frame |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| msaa=False,ao=off,edges=True,profiles=False | 4.96/5.38/5.83 | 0.374 | 0.021 | 2.227 | 0.991 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 5.419 |
+| msaa=False,ao=half,edges=True,profiles=False | 4.96/5.38/5.83 | 0.349 | 0.021 | 2.254 | 0.894 | 0.922 | 0.567 | 0.510 | 0.759 | 0.000 | 0.000 | 10.091 |
+| msaa=False,ao=full,edges=True,profiles=False | 4.80/5.34/5.81 | 0.214 | 0.021 | 3.514 | 1.099 | 1.172 | 0.954 | 1.186 | 1.309 | 0.000 | 0.000 | 10.394 |
+| msaa=True,ao=off,edges=True,profiles=False | 4.66/5.30/5.80 | 0.537 | 0.021 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 4.696 | 0.000 | 8.970 |
+| msaa=True,ao=half,edges=True,profiles=False | 4.61/5.28/5.79 | 0.514 | 0.021 | 2.211 | 0.000 | 1.522 | 1.317 | 1.553 | 3.421 | 3.042 | 3.701 | 16.059 |
+| msaa=True,ao=full,edges=True,profiles=False | 4.61/5.28/5.79 | 0.514 | 0.020 | 1.937 | 0.000 | 1.316 | 1.278 | 2.105 | 2.797 | 2.517 | 2.948 | 12.989 |
+| msaa=False,ao=off,edges=False,profiles=False | 4.40/5.22/5.76 | 0.285 | 0.021 | 2.329 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 3.998 |
+| msaa=False,ao=off,edges=True,profiles=True | 4.77/5.28/5.78 | 0.514 | 0.030 | 2.842 | 4.052 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 10.077 |
+
+Cold / settled pick wall medians: 7.633 / 1.402 ms; end load 4.62/5.25/5.77.
+
+### Attribution, limits, and handover status
+
+The repeat preserves the central attribution: the ride spends 27.399 ms in
+faces before / 24.551 ms after, rather than paying a hidden AO or OIT pass.
+Pusher faces are 2.951 / 2.329 ms. Frame spans are 30.439 / 27.666 ms and
+7.712 / 3.998 ms respectively. The larger first-run ride improvement did not
+reproduce at the same magnitude. These contended samples do **not** establish
+that the historical 6.7 ms spike regression has been removed.
+
+Pusher submits **2,195,932** face triangles in **1,233** surviving placements
+(20 subpixel rejects, zero frustum rejects; 13 texture layers). Ride submits
+**15,720,613** face triangles in **42,776** surviving placements (24,098 subpixel
+rejects, zero frustum rejects; one fallback texture layer). Hidden placements
+are excluded from those survivor/reject counts. The full-scene view fitting
+explains the zero frustum rejection. These counters contradict treating the
+pusher as a few-thousand-triangle fixed-overhead probe.
+
+Compared with the spike, the face ABI is still 28 bytes and depth is still
+Depth32Float. Current shading adds cofactor normals, sparse back-material and
+texture lookup, texture-alpha rejection, front/back selection, contrasting
+highlight dots and sRGB conversion. Only alpha-rejection specialization and
+settled faces-only ID writes were changed here. There is no depth pre-pass;
+its benefit has not been measured. Draw order and culling thresholds remain
+unchanged. No pass-skipping optimization was justified for AO or OIT in the
+faces-only path because those passes were already absent.
+
+**Acceptance gates remain open.** Final ride hard-edge quads take 15.106 ms;
+quads with profiles take 27.299 ms (classification is fused into that shader).
+Cold ride pick wall time is 29.080 ms, exceeding 20 ms; settled median remains
+1.425 ms versus 1.422 ms. Faces-only frame times exceed both requested gates.
+The existing independent ID submission still queues behind already-submitted
+display work; this task did not redesign that readback dependency.
+
+Remaining instrumentation: independent explicit-pick timestamps, exact draw
+counts, render-target write traffic, and separate AO input-copy timing. MSAA
+resolve is included in its native render pass, not isolated. In baseline AO+
+MSAA rows, `antialias` records the last edge/resolve pass only; the final version
+adds `antialias_edges` and retains the face pass. Profile classification cannot
+be presented as a separate compute pass because this renderer has none.
+
+Next investigations should isolate vertex/fetch cost (including cached normal
+and clip transforms), and compare a measured depth pre-pass against the current
+single-pass face path. A controlled, GPU-idle run is still needed for acceptance;
+the present results should not be used as guaranteed interactive frame rates.
+
+All three final reference comparisons completed within their 240-second bounds:
+**pusher, marquee and track are pixel-identical** before/after (zero changed
+pixels and zero maximum channel delta). The first track run with the full
+comparison/performance loop timed out; the capture-only rerun succeeded.
+To exercise the changed path, the comparison script was copied into local
+scratch, set to single-sample rendering before `read_pixels()`, and given two
+settle frames, `--capture-only --edges-off`. No model or tracked comparison
+script was modified. Images and comparison data:
+
+- [Pusher before](benchmarks/wgpu-perf-2026-11-09/look-before-repeat/pusher_car_rust-edges-off-wgpu.png) / [after](benchmarks/wgpu-perf-2026-11-09/look-after-repeat/pusher_car_rust-edges-off-wgpu.png)
+- [Marquee before](benchmarks/wgpu-perf-2026-11-09/look-before-repeat/marquee-edges-off-wgpu.png) / [after](benchmarks/wgpu-perf-2026-11-09/look-after-repeat/marquee-edges-off-wgpu.png)
+- [Track before](benchmarks/wgpu-perf-2026-11-09/look-before-repeat/track-edges-off-wgpu.png) / [after](benchmarks/wgpu-perf-2026-11-09/look-after-repeat/track-edges-off-wgpu.png)
+- [Pixel comparison](benchmarks/wgpu-perf-2026-11-09/face-image-comparison.json), [bounded runs](benchmarks/wgpu-perf-2026-11-09/validation-runs.json), [Rust tests](benchmarks/wgpu-perf-2026-11-09/face-render-tests.txt), [Python tests](benchmarks/wgpu-perf-2026-11-09/face-python-tests.txt).
+
+Handover is local only on `renderer/perf-face-pass`: instrumentation commit
+`85bab318`, specialization/scheduling commit `96265cfe`, followed by the
+measurement/validation report commit. No push, PR, issue or remote comment.
+This is a partial implementation with explicit remaining gates, not completion
+of the full renderer performance brief.

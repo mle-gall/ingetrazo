@@ -86,7 +86,7 @@ impl Overlay {
             },
         );
     }
-    pub fn draw(&self, e: &mut wgpu::CommandEncoder, color: &wgpu::TextureView, w: u32, h: u32) {
+    pub fn draw(&self, e: &mut wgpu::CommandEncoder, color: &wgpu::TextureView, w: u32, h: u32, queries: Option<&wgpu::QuerySet>) {
         if let Some((_, group, iw, ih)) = &self.image {
             if (*iw, *ih) != (w, h) {
                 return;
@@ -102,7 +102,7 @@ impl Overlay {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: crate::timing::writes(queries, "overlay"),
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.pipeline);

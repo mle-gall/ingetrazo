@@ -181,6 +181,7 @@ impl AmbientOcclusion {
         depth: &wgpu::TextureView,
         output: &wgpu::TextureView,
         msaa: bool,
+        queries: Option<&wgpu::QuerySet>,
     ) {
         let (w, h, scale) = (scene.width(), scene.height(), self.settings[3] as u32);
         if self.targets.as_ref().map(|t| (t.0, t.1, t.2)) != Some((w, h, scale)) {
@@ -255,7 +256,12 @@ impl AmbientOcclusion {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: queries.map(|q| {
+                    let name = match i { 0 => "ao_kernel", 1 => "ao_blur_x", 2 => "ao_blur_y", _ => "ao_upsample_composite" };
+                    wgpu::RenderPassTimestampWrites { query_set: q,
+                        beginning_of_pass_write_index: Some(crate::timing::index(name)),
+                        end_of_pass_write_index: Some(crate::timing::index(name)+1) }
+                }),
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.pipelines[i]);
@@ -371,7 +377,7 @@ mod tests {
                 pass.set_pipeline(&pipeline);
                 pass.draw(0..3, 0..1);
             }
-            ao.draw(&d, &q, &mut e, &scene, &dv, &cv, false);
+            ao.draw(&d, &q, &mut e, &scene, &dv, &cv, false, None);
             let read = d.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
                 size: 64 * 256,

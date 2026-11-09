@@ -45,7 +45,7 @@ impl Background {
         let group = crate::bind(d, &pipeline.get_bind_group_layout(0), &[style]);
         Self { pipeline, group }
     }
-    pub fn draw(&self, e: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+    pub fn draw(&self, e: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, queries: Option<&wgpu::QuerySet>) {
         let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("style background"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -57,7 +57,7 @@ impl Background {
                 },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: None,
+            timestamp_writes: crate::timing::writes(queries, "background"),
             occlusion_query_set: None,
         });
         pass.set_pipeline(&self.pipeline);
