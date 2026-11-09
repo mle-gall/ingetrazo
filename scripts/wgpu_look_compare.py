@@ -31,6 +31,8 @@ parser.add_argument('--pitch', type=float)
 parser.add_argument('--capture-only', action='store_true')
 parser.add_argument('--output', type=Path, default=out)
 parser.add_argument('--edges-off', action='store_true')
+parser.add_argument('--profiles-off', action='store_true')
+parser.add_argument('--back-edges', action='store_true')
 parser.add_argument('--highlight', choices=('selected', 'hovered'))
 parser.add_argument('--edge-width', type=float)
 
@@ -43,6 +45,10 @@ if args.mode:
     label += '-' + args.mode
 if args.pitch is not None:
     label += '-pitch' + str(args.pitch)
+if args.profiles_off:
+    label += '-profiles-off'
+if args.back_edges:
+    label += '-back-edges'
 if args.edges_off:
     label += '-edges-off'
 if args.edge_width is not None:
@@ -55,6 +61,10 @@ if args.mode:
     scene.display_style.face_mode = args.mode
 if args.edges_off:
     scene.display_style.edges = False
+if args.profiles_off:
+    scene.display_style.profiles = False
+if args.back_edges:
+    scene.display_style.back_edges = True
 metal = WgpuView()
 metal.resize(1000, 700)
 metal.set_scene(scene)
@@ -109,14 +119,29 @@ def capture():
             for edges in (False, True):
                 scene.display_style.edges = edges
                 samples = []
+                stages = []
                 for i in range(45):
                     sample = metal.draw_frame()
                     if i >= 10:
                         samples.append(sample)
+                        stages.append(metal.renderer.frame_stage_timings())
                 result['frames'][f'msaa={aa},edges={edges}'] = {
+                    'stages_ms': dict(zip(('poll', 'acquire', 'encode', 'submit', 'present'), np.median(stages, axis=0).tolist())),
                     'cpu_median_ms': float(np.median([s[0] for s in samples])),
                     'gpu_median_ms': float(np.median([s[1] for s in samples if s[1] is not None])),
                     'wall_median_ms': float(np.median([s[2] for s in samples]))}
+        if not args.capture_only:
+            offscreen = []
+            for i in range(45):
+                before = time.perf_counter()
+                cpu, gpu = metal.renderer.render(False)
+                wall = (time.perf_counter()-before)*1000
+                if i >= 10:
+                    offscreen.append((cpu, gpu, wall))
+            result['offscreen_msaa_edges_on'] = {
+                'cpu_median_ms': float(np.median([s[0] for s in offscreen])),
+                'gpu_median_ms': float(np.median([s[1] for s in offscreen if s[1] is not None])),
+                'wall_median_ms': float(np.median([s[2] for s in offscreen]))}
         (out / f'{label}.json').write_text(json.dumps(result, indent=2))
         print(json.dumps(result), flush=True)
     except Exception as error:

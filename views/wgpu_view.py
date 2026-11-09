@@ -81,6 +81,7 @@ class WgpuView(QWidget):
             self.renderer = ingetrazo_render.Renderer(int(self.winId()), self.width(), self.height(), self.devicePixelRatioF())
         if len(self.packed.instances):
             self.packed.upload(self.renderer)
+            self._frame_style = None
         self.upload_seconds = time.perf_counter()-start
         self._scene_dirty = False
         self.update()
@@ -102,13 +103,21 @@ class WgpuView(QWidget):
         start = time.perf_counter()
         if self.source_viewport is not None:
             self.camera = self.source_viewport.camera
+        # R-look 3c: compute each camera matrix once, after updating aspect.
+        self.camera.aspect = self.width()/max(1, self.height())
+        view = self.camera.view_matrix()
+        projection = self.camera.projection_matrix()
+        if self.source_viewport is not None:
             style = self.source_viewport._effective_style()
             from views.wgpu_style import style_payload
-            mvp = self.camera.projection_matrix() * self.camera.view_matrix()
-            self.renderer.set_style(style_payload(
+            mvp = projection * view
+            payload = style_payload(
                 self.source_viewport.scene, style,
-                horizon=self.source_viewport._horizon_ndc_y(mvp)))
-            self.renderer.set_edges(style.edges)
+                horizon=self.source_viewport._horizon_ndc_y(mvp),
+                scale=self.devicePixelRatioF())
+            if payload != getattr(self, '_frame_style', None):
+                self.renderer.set_style(payload)
+                self._frame_style = payload
             tint = getattr(self.source_viewport, 'view_tint', None) or {}
             context = self.scene.edit_group
             signature = (tuple(sorted(tint.items())), id(context))
@@ -130,12 +139,12 @@ class WgpuView(QWidget):
             self.inference_index = future.result()
             self._inference_future = None
         self.sync_selection()
-        self.camera.aspect = self.width()/max(1, self.height())
         physical = (self.width(), self.height(), self.devicePixelRatioF())
         if physical != getattr(self, '_physical_size', None):
             self.renderer.resize(*physical)
             self._physical_size = physical
-        self.renderer.set_camera(self.camera.view_matrix().data(), self.camera.projection_matrix().data())
+        self.renderer.set_camera(view.data(), projection.data())
+        # End R-look 3c camera/style work.
         if self.overlay_primitives or getattr(self, "_had_overlay", False):
             from views.wgpu_overlay import rasterize, pixels
             before = time.perf_counter()
