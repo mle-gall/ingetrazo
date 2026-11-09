@@ -27,7 +27,7 @@ def capture_rows(packed, scene, tint):
             visible[id(group)] = not hidden
     rows = packed.instances.copy()
     for i, (uid, group) in enumerate(zip(packed.uids, packed.groups)):
-        rows['info'][i, 2] = int(not visible.get(id(group), group is None))
+        rows['info'][i, 2] = int(not visible.get(id(group), group is None)) | (8 if getattr(group, 'billboard', False) else 0)
         rgb = (tint or {}).get(uid)
         rows['info'][i, 3] = (int(np.array([*np.clip(np.array(rgb[:3])*255, 0, 255), 255],
                                          np.uint8).view('<u4')[0]) if rgb is not None else 0)

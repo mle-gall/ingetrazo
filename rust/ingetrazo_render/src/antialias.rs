@@ -159,6 +159,7 @@ impl Antialias {
         queries: Option<&wgpu::QuerySet>,
         edge_only: Option<bool>,
         sections: bool,
+        axes: &crate::axes::Axes,
     ) {
         let color = self.color.create_view(&Default::default());
         let depth = self.depth.create_view(&Default::default());
@@ -180,6 +181,7 @@ impl Antialias {
         pass.set_vertex_buffer(0, scene.vertex.slice(..));
         pass.set_index_buffer(scene.index.slice(..), wgpu::IndexFormat::Uint32);
         for &edge in geometry_stages(edge_only) {
+            if edge { axes.encode(&mut pass, true); }
             if (!edge && mode == 4) || (edge && !edges && mode != 4) {
                 continue;
             }

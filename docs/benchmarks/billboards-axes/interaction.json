@@ -1,0 +1,8 @@
+{
+  "select": true,
+  "move_preview": true,
+  "move_commit": true,
+  "inference": true,
+  "tint": true,
+  "edit_context": true
+}

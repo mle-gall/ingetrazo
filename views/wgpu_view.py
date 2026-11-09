@@ -98,6 +98,8 @@ class WgpuView(QWidget):
                 and paint_key == getattr(self, "_paint_key", None)):
             self.update()
             return
+        if getattr(self, "_billboards", None) is not None:
+            self._billboards.restore()
         previous_token = getattr(self, "_content_token", None)
         # Colour by tag toggled, or a tag's colour or look changed: the
         # per-face colours are baked into the resident vertices, so the
@@ -116,6 +118,8 @@ class WgpuView(QWidget):
         if delta is not None:
             ids, rows = delta
             tracker.apply(ids, rows, self.renderer)
+            from views.wgpu_billboards import Billboards
+            self._billboards = Billboards(self.packed)
             if len(ids) or tracker.changed or tracker.removed:
                 mapping_changed = bool(tracker.removed)
                 for row in ids:
@@ -145,6 +149,8 @@ class WgpuView(QWidget):
             self.update()
             return
         self.packed = pack_scene(scene, getattr(self.source_viewport, 'view_tint', None))
+        from views.wgpu_billboards import Billboards
+        self._billboards = Billboards(self.packed)
         self._scene_dirty = True
         self._selection_signature = None
         self._tint_signature = None
@@ -175,6 +181,8 @@ class WgpuView(QWidget):
             tracker.unsubscribe()
         self._instance_updates = None
         self.packed = pack_scene(Scene())
+        from views.wgpu_billboards import Billboards
+        self._billboards = Billboards(self.packed)
         self._content_token = None
         self._selection_signature = None
         self._tint_signature = None
@@ -228,6 +236,9 @@ class WgpuView(QWidget):
             scratch.instances['info'][:, 2] = 1
             scratch.upload(self.renderer)
         self._frame_style = None
+        self._axes_state = None
+        if getattr(self, "_billboards", None) is not None:
+            self._billboards.key = None
         self.upload_seconds = time.perf_counter()-start
         self._scene_dirty = False
         self.update()
@@ -295,6 +306,8 @@ class WgpuView(QWidget):
         future = getattr(self, '_inference_future', None)
         if future is not None and future.done():
             self.inference_index = future.result()
+            if getattr(self, "_billboards", None) is not None:
+                self._billboards.key = None
             self._inference_future = None
         self.sync_selection()
         physical = (self.width(), self.height(), self.devicePixelRatioF())
@@ -306,6 +319,13 @@ class WgpuView(QWidget):
             self._last_camera = camera_key
             self._settle_timer.start(80)
         self.renderer.set_camera(*camera_key)
+        if getattr(self, '_billboards', None) is not None:
+            self._billboards.update(self.camera, self.renderer, self.inference_index)
+        from views.wgpu_axes import axes_state
+        axes = axes_state(self.scene, self.camera, self.source_viewport)
+        if axes != getattr(self, '_axes_state', None):
+            self.renderer.set_axes(*axes)
+            self._axes_state = axes
         # End R-look 3c camera/style work.
         annotations = bool(self.scene.dimensions or self.scene.text_labels
                            or (type(self.tools.tool).__name__ == 'TexturePositionTool'
@@ -379,14 +399,25 @@ class WgpuView(QWidget):
         payload['profile_width'] = float(getattr(source, '_export_profile_px', 1))
         from views.wgpu_sections import capture_rows, geometry
         rows = capture_rows(self.packed, source.scene, getattr(source, 'view_tint', None))
+        from views.wgpu_billboards import Billboards
+        from views.wgpu_axes import axes_state
+        capture = copy(self.packed)
+        capture.instances = rows
+        billboards = getattr(self, '_billboards', None)
+        if billboards is not None:
+            rows['world'][billboards.ids] = billboards.base
+        Billboards(capture).update(camera)
+        old_axes = getattr(self, '_axes_state', None) or axes_state(source.scene, self.camera, source)
         previous = getattr(self, '_section_uploaded', np.empty(0, np.uint8))
         data = geometry(self, source.scene, source._effective_style(), camera, height_px, rows)
         try:
+            self.renderer.set_axes(*axes_state(source.scene, camera, source))
             self.renderer.set_section_geometry(data)
             pixels = bytes(self.renderer.render_image(
                 width_px, height_px, tuple(view.data()), tuple(projection.data()), payload,
                 rows.view(np.uint8).reshape(-1)))
         finally:
+            self.renderer.set_axes(*old_axes)
             self.renderer.set_section_geometry(previous)
         return QImage(pixels, width_px, height_px, width_px * 4,
                       QImage.Format_RGBA8888).copy()

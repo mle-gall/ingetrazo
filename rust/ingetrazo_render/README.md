@@ -308,3 +308,33 @@ scene upload if the view has never been initialized.
 This is partial section parity: cap fills, hatching and thick cut boundaries
 are not yet implemented. Saved-frame visibility/tint changes that differ
 from the resident scene also need a temporary instance-state path.
+
+
+## Face-me billboards and drawing axes (2026-11-09)
+
+Instance flag bit 3 marks a face-me placement. Culling omits its edge draw;
+the face shader is unlit and retains the alpha cut even under a view tint.
+Selection/hover updates preserve this bit. Ordinary geometry is unchanged.
+`set_instance_world(ids, float32_matrices)` accepts contiguous column-major
+matrices, writes only the named 64-byte matrix fields, preserves every other
+instance field, and invalidates picking. Python caches the billboard rows,
+base transforms, anchors and normals per scene edit and updates O(billboards)
+when the camera changes. Resident inference receives the same turned rows.
+
+Simple sprites have fitted 0..1 affine UV columns on both sides; mesh face-me
+placements retain their original geometry and UV mapping. Billboard and ordinary
+uses of the same mesh get separate prototypes. Edits of such mixed-use meshes
+fall back to scene packing because the older incremental tracker keys by mesh;
+orbits never use that fallback. Drag previews also reorient the moved anchor.
+
+`set_axes(frame, spacing, visible)` sends a column-major drawing frame and the
+GL distance-scaled dot spacing. Procedural one-pixel quads reproduce the positive
+100 km half-axis and 520 short negative dashes. Lines are one physical pixel,
+depth-tested, with depth writes disabled and no effect on placement IDs. MSAA
+axes draw inside the existing edge pass, before model edges. Single-sample axes
+use a small separate pass. No Python image rasterization or upload is involved.
+Scene axes visibility, edit-context frames and composer style suppression are
+resolved in `views/wgpu_axes.py`, without changing global `core.axes` state.
+
+See `docs/benchmarks/billboards-axes/README.md` for bounded captures, targeted
+tests and same-session timing evidence.

@@ -46,7 +46,7 @@ fn cull(@builtin(global_invocation_id) gid: vec3u) {
  }
  let edge_command = i.info.x + arrayLength(&proto);
  atomicAdd(&counters[5], commands[edge_command].count / 6u);
- atomicAdd(&commands[edge_command].instances, 1u);
+ if (i.info.z & 8u) == 0u { atomicAdd(&commands[edge_command].instances, 1u); }
  let slot = atomicAdd(&commands[i.info.x].instances, 1u);
  survivors[commands[i.info.x].start+slot] = id;
 }

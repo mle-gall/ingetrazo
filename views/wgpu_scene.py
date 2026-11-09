@@ -81,7 +81,7 @@ def bake_mesh(mesh):
 
 
 
-def _source_arrays(mesh, paint=None, texture_ids=None, face_overrides=None):
+def _source_arrays(mesh, paint=None, texture_ids=None, face_overrides=None, billboard=False):
     """Use source topology directly; the resident renderer needs no welded Plan."""
     if face_overrides:
         # Resolve lazy faces before reading topology; never mutate document attrs.
@@ -126,6 +126,11 @@ def _source_arrays(mesh, paint=None, texture_ids=None, face_overrides=None):
         palette[ids, 3] = 255
     maps, paints = _material_columns(pos, corners, sizes, counts, table, attr+1,
                                      texture_ids if texture_ids is not None else {})
+    if billboard is True:
+        from views.wgpu_billboards import fitted_maps
+        maps = fitted_maps(pos, corners, sizes, counts, maps)
+        # GL's cutout uses the same image on either side.
+        paints[:, 2] = paints[:, 1]
     return (np.asarray(pos, np.float32), np.asarray(corners, np.int64),
             np.asarray(sizes, np.int64), np.asarray(counts, np.int64),
             np.asarray(edges, np.int64), np.asarray(flags, np.uint8),
@@ -177,6 +182,7 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
     vp = SimpleNamespace(scene=scene)
     texture_ids = {}
     meshes, lookup, rows, uids, paints = [], {}, [], [], []
+    billboard_codes = set()
     groups = []
     placements = [(None, None, scene.loose_mesh, False)]
     # Visibility is inherited down the tree, as the GL proxies do it: a
@@ -211,18 +217,21 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
         # container colors already live in the instance's packed RGBA word.
         baked_paint = ({k: paint_attrs[k] for k in ('texture', 'by_layer', 'layer_fx')
                         if k in paint_attrs} if paint_attrs else None) or None
-        key = (id(mesh), repr(baked_paint))
+        billboard = getattr(group, "billboard", False)
+        key = (id(mesh), repr(baked_paint), billboard)
         if key not in lookup:
-            arrays = _source_arrays(mesh, baked_paint, texture_ids, face_overrides)
+            arrays = _source_arrays(mesh, baked_paint, texture_ids, face_overrides, billboard)
             lookup[key] = len(meshes) if len(arrays[0]) else -1
             if len(arrays[0]):
                 meshes.append(arrays)
         code = lookup[key]
         if code < 0:
             continue
+        if billboard:
+            billboard_codes.add(code)
         visible, paint = state(paint_group)
         world = np.eye(4, dtype=np.float32) if matrix is None else np.array(matrix.data(), np.float32).reshape(4, 4)
-        rows.append((code, world, hidden or not visible))
+        rows.append((code, world, int(hidden or not visible) | (8 if billboard else 0)))
         uids.append(getattr(group, 'uid', 'loose'))
         groups.append(group)
         paints.append(paint)
@@ -263,12 +272,14 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
     counts = np.bincount(instances['info'][:, 0], minlength=len(meshes))
     commands['count'] = table[:, 1]
     edge_commands['count'] = table[:, 2]
+    if billboard_codes:
+        edge_commands['count'][list(billboard_codes)] = 0
     commands['first'] = commands['base'] = edge_commands['base'] = table[:, 0]
     edge_commands['first'] = table[:, 0]+table[:, 1]
     commands['start'] = edge_commands['start'] = np.cumsum(counts)-counts
     world_bounds = np.zeros((2, 3))
     if len(rows):
-        shown = instances[instances['info'][:, 2] == 0]
+        shown = instances[(instances['info'][:, 2] & 1) == 0]
         if not len(shown):
             return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures, tuple(texture_ids))
         b = bounds[shown['info'][:, 0], :, :3]

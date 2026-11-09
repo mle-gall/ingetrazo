@@ -49,11 +49,13 @@ def test_offscreen_supplies_cap_and_restores_after_failure():
     scene, model, camera = fixture()
     view = WgpuView()
     view.packed = model.packed
-    view.source_viewport = SimpleNamespace(scene=scene, camera=camera,
+    view.source_viewport = SimpleNamespace(scene=scene, camera=camera, plano_style=None, style_override=None,
         _effective_style=lambda: scene.display_style, _horizon_ndc_y=lambda m: 2.)
     previous = np.empty(0, np.uint8)
     view._section_uploaded = previous
     class Renderer:
+        def set_axes(self, frame, spacing, visible):
+            self.axes = (frame, spacing, visible)
         def set_section_geometry(self, data):
             self.data = data
         def render_image(self, w, h, v, p, payload, rows):

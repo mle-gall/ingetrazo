@@ -142,6 +142,10 @@ class NativeTools(MeshToolAccess):
                     return
                 selected = {g.uid for root in self.groups for g, _ in iter_placements(root)}
                 self.ids = np.asarray([row for uid in selected for row in self.view.uid_rows.get(uid, ())], np.int64)
+                billboards = getattr(self.view, '_billboards', None)
+                if billboards is not None:
+                    billboards.restore()
+                    billboards.key = None
                 self.original = self.view.packed.instances[self.ids].copy()
                 self.start_point = QVector3D(ctx.world)
                 self.tool.start_point = QVector3D(ctx.world)
@@ -260,7 +264,14 @@ class NativeTools(MeshToolAccess):
     def write_rows(self, rows):
         if self.view.renderer is not None:
             self.view.renderer.update_instances(self.ids.tolist(), rows.view(np.uint8).reshape(-1))
+        billboards = getattr(self.view, '_billboards', None)
+        if billboards is not None:
+            billboards.restore()
         self.view.packed.instances[self.ids] = rows
+        if billboards is not None and len(billboards.ids):
+            from views.wgpu_billboards import Billboards
+            self.view._billboards = Billboards(self.view.packed)
+            self.view._billboards.update(self.view.camera, self.view.renderer, self.view.inference_index)
 
     def restore(self):
         if self.original is not None:

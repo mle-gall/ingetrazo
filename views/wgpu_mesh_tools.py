@@ -284,6 +284,10 @@ class MeshToolAccess:
         selected = {g.uid for root in groups for g, _ in iter_placements(root)}
         self.ids = np.asarray([row for uid in selected
                                for row in self.view.uid_rows.get(uid, ())], np.int64)
+        billboards = getattr(self.view, '_billboards', None)
+        if billboards is not None:
+            billboards.restore()
+            billboards.key = None
         self.original = self.view.packed.instances[self.ids].copy()
 
     def set_groups_preview_matrix(self, matrix):

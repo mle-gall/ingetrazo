@@ -65,6 +65,8 @@ def test_offscreen_size_and_live_camera_unchanged(monkeypatch):
     from core.scene import Scene
     from core.camera import OrbitCamera
     class Renderer:
+        def set_axes(self, frame, spacing, visible):
+            assert len(frame) == 16
         def set_section_geometry(self, data):
             pass
         def render_image(self, w, h, view, projection, payload, rows):
