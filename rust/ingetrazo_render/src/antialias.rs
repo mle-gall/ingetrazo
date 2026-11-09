@@ -2,6 +2,7 @@
 //! Geometry is replayed after IDs, trading GPU work for an isolated integration.
 pub struct Antialias {
     pipelines: Vec<wgpu::RenderPipeline>,
+    texture_groups: Vec<wgpu::BindGroup>,
     groups: Vec<(wgpu::BindGroup, wgpu::BindGroup)>,
     background: crate::background::Background,
     color: wgpu::Texture,
@@ -48,11 +49,11 @@ impl Antialias {
                         module: &shader,
                         entry_point: Some(if edge { "edge_vs" } else { "vs" }),
                         compilation_options: Default::default(),
-                        buffers: &[wgpu::VertexBufferLayout {
+                        buffers: &{ let mut layouts = vec![wgpu::VertexBufferLayout {
                             array_stride: 28,
                             step_mode: wgpu::VertexStepMode::Vertex,
                             attributes: &attrs,
-                        }],
+                        }]; if !edge { layouts.push(crate::textures::layout()); } layouts },
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
@@ -102,12 +103,16 @@ impl Antialias {
             .collect();
         Self {
             pipelines,
+            texture_groups: Vec::new(),
             groups: Vec::new(),
             background: crate::background::Background::new(d, format, style, 4),
             color: target(d, w, h, format),
             depth: target(d, w, h, wgpu::TextureFormat::Depth32Float),
             format,
         }
+    }
+    pub fn bind_textures(&mut self, d: &wgpu::Device, textures: &crate::textures::Textures) {
+        self.texture_groups = self.pipelines[..2].iter().map(|p| textures.bind(d,p)).collect();
     }
     pub fn bind_scene(
         &mut self,
@@ -170,6 +175,7 @@ impl Antialias {
             }),
             occlusion_query_set: None,
         });
+        pass.set_vertex_buffer(1, scene.materials.slice(..));
         pass.set_vertex_buffer(0, scene.vertex.slice(..));
         pass.set_index_buffer(scene.index.slice(..), wgpu::IndexFormat::Uint32);
         for edge in [false, true] {
@@ -178,6 +184,7 @@ impl Antialias {
             }
             let k = usize::from(edge) * 2 + usize::from(mode == 1);
             pass.set_pipeline(&self.pipelines[k]);
+            if !edge { pass.set_bind_group(2, &self.texture_groups[k], &[]); }
             pass.set_bind_group(0, &self.groups[k].0, &[]);
             pass.set_bind_group(1, &self.groups[k].1, &[]);
             let first = if edge { scene.p } else { 0 };

@@ -1,3 +1,5 @@
+@group(2) @binding(0) var material_images: texture_2d_array<f32>;
+@group(2) @binding(1) var material_sampler: sampler;
 // GL uses display-referred colors; explicitly decode for the sRGB surface.
 struct Style { front: vec4f, back: vec4f, edge: vec4f, background: vec4f, sky: vec4f, ground: vec4f }
 @group(1) @binding(0) var<uniform> style: Style;
@@ -7,8 +9,8 @@ struct Camera { vp: mat4x4f, size: vec4f }
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var<storage, read> inst: array<Instance>;
 @group(0) @binding(2) var<storage, read> survivors: array<u32>;
-struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f, @location(1) @interpolate(flat) id: u32, @location(2) shade: f32, @location(3) @interpolate(flat) decorated: u32 }
-@vertex fn vs(@location(0) pos: vec3f, @location(1) normal: vec3f, @location(2) color: vec4f, @builtin(instance_index) index: u32) -> Out {
+struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f, @location(1) @interpolate(flat) id: u32, @location(2) shade: f32, @location(3) @interpolate(flat) decorated: u32, @location(4) uv: vec4f, @location(5) @interpolate(flat) back: vec4f, @location(6) @interpolate(flat) textures: vec2u }
+@vertex fn vs(@location(0) pos: vec3f, @location(1) normal: vec3f, @location(2) color: vec4f, @location(3) uv: vec4f, @location(4) back: vec4f, @location(5) front_tex: u32, @location(6) back_tex: u32, @builtin(instance_index) index: u32) -> Out {
  let id = survivors[index]; let i = inst[id];
  let a=i.world[0].xyz; let b=i.world[1].xyz; let c=i.world[2].xyz;
  let n = normalize(mat3x3f(cross(b,c),cross(c,a),cross(a,b))*normal);
@@ -22,12 +24,23 @@ struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f, @loc
  if (i.info.w >> 24u) != 0u { o.color = unpack4x8unorm(i.info.w).rgb; }
 
  o.decorated = (i.info.z & 6u) | select(0u,8u,(i.info.w >> 24u) != 0u);
+ o.uv = uv; o.back = back; o.textures = vec2u(front_tex,back_tex);
  o.id = id+1u; return o;
 }
 struct Pixel { @location(0) color: vec4f, @location(1) id: u32 }
 fn face_pixel(i: Out, front: bool) -> Pixel {
  var c = i.color;
- if !front && camera.size.z != 2 && (i.decorated & 8u) == 0u { c = style.back.rgb * select(i.shade,1.,camera.size.z == 3); }
+ if !front && camera.size.z != 2 && (i.decorated & 8u) == 0u { c = select(style.back.rgb, i.back.rgb, i.back.a > 0.5 && camera.size.z != 3) * select(i.shade,1.,camera.size.z == 3); }
+ let tex = select(i.textures.y,i.textures.x,front);
+ let uv = select(i.uv.zw,i.uv.xy,front);
+ var sampled = textureSample(material_images,material_sampler,uv,i32(tex));
+ if camera.size.w > 0.5 {
+  sampled = textureSampleLevel(material_images,material_sampler,vec2f(0.5),i32(tex),f32(textureNumLevels(material_images)-1u));
+ }
+ if tex != 0u && camera.size.z < 2 && (i.decorated & 8u) == 0u {
+  if sampled.a < 0.5 { discard; }
+  c = sampled.rgb * i.shade;
+ }
  if (i.decorated & 6u) != 0u && all((i.position.xy % vec2f(6.)) < vec2f(2.)) {
   let surface = c / max(i.shade, 0.001);
   let high = max(surface.r,max(surface.g,surface.b));

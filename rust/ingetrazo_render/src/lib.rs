@@ -1,5 +1,6 @@
 //! A resident Metal scene: compute compaction precedes native indirect draws.
 mod overlay;
+mod textures;
 // R-look: isolated style and background passes.
 mod style;
 mod background;
@@ -27,6 +28,7 @@ struct TimingSlot {
     pending: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
 }
 struct Scene {
+    materials: wgpu::Buffer,
     inst: wgpu::Buffer,
     flags: Vec<u32>,
     vertex: wgpu::Buffer,
@@ -43,6 +45,9 @@ struct Scene {
 }
 #[pyclass(unsendable)]
 struct Renderer {
+    textures: textures::Textures,
+    textures_enabled: bool,
+    texture_groups: Vec<wgpu::BindGroup>,
     antialias: bool,
     aa: antialias::Antialias,
     look: style::Style,
@@ -223,11 +228,11 @@ impl Renderer {
                     module: &vs,
                     entry_point: Some(if fragment == "edge_fs" { "edge_vs" } else { "vs" }),
                     compilation_options: Default::default(),
-                    buffers: &[wgpu::VertexBufferLayout {
+                    buffers: &{ let mut layouts = vec![wgpu::VertexBufferLayout {
                         array_stride: 28,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &attrs,
-                    }],
+                    }]; if fragment != "edge_fs" { layouts.push(textures::layout()); } layouts },
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &vs,
@@ -323,9 +328,14 @@ impl Renderer {
         let background = background::Background::new(&device, format, &look.buffer, 1);
         let look_groups = [&draw, &xray, &edge, &xray_edge].iter().map(|p|
             bind(&device, &p.get_bind_group_layout(1), &[&look.buffer])).collect();
+        let textures = textures::Textures::new(&device, &queue, 1, 1, 1, &[vec![255;4]]);
+        let texture_groups = [&draw, &xray].iter().map(|p| textures.bind(&device,p)).collect();
+        let mut aa = antialias::Antialias::new(&device, format, &look.buffer, w, h);
+        aa.bind_textures(&device, &textures);
         Ok(Self {
+            textures, texture_groups, textures_enabled: true,
             antialias: true,
-            aa: antialias::Antialias::new(&device, format, &look.buffer, w, h),
+            aa,
             look, background, look_groups,
             capture_next: false,
             captured: None,
@@ -484,8 +494,9 @@ impl Renderer {
         self.aa.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer);
         self.gpu_memory =
             (v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 416)
-                as u64;
+                as u64 + (expanded_v.len()/28*32) as u64 + self.textures.bytes;
         self.scene = Some(Scene {
+            materials: buffer(&self.device, &vec![0; expanded_v.len()/28*32], wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST),
             inst,
             flags: instances
                 .chunks_exact(80)
@@ -550,6 +561,10 @@ impl Renderer {
     fn set_style(&mut self, style: &Bound<'_, PyAny>) -> PyResult<()> {
         let (mode, edges) = self.look.update(style, &self.queue)?;
         self.style = mode;
+        let name = if let Ok(d) = style.cast::<pyo3::types::PyDict>() {
+            d.get_item("face_mode")?.map(|v| v.extract::<String>()).transpose()?.unwrap_or_default()
+        } else { style.extract::<String>()? };
+        self.textures_enabled = name != "shaded";
         if let Some(enabled) = edges { self.edges = enabled; }
         Ok(())
     }
@@ -578,7 +593,7 @@ impl Renderer {
             self.config.width as f32,
             self.config.height as f32,
             self.style as f32,
-            0.,
+            if self.textures_enabled { 0. } else { 1. },
         ]);
         self.queue
             .write_buffer(&self.camera, 0, bytemuck::cast_slice(&data));
@@ -586,6 +601,32 @@ impl Renderer {
     }
     /// Kept for the R2a measurement script: anti-aliasing now lives in the
     /// antialias module, so this is the same switch as ``set_antialias``.
+    fn set_materials(&mut self, data: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
+        let data = data.as_slice()?;
+        let scene = self.scene.as_ref().ok_or_else(|| PyValueError::new_err("no scene"))?;
+        if data.len() % 32 != 0 || data.len() as u64 > scene.materials.size() {
+            return Err(PyValueError::new_err("invalid material stream"));
+        }
+        if !data.is_empty() { self.queue.write_buffer(&scene.materials, 0, data); }
+        Ok(())
+    }
+    fn set_textures(&mut self, width: u32, height: u32, layers: u32, levels: Vec<Vec<u8>>) -> PyResult<()> {
+        let limits = self.device.limits();
+        if width == 0 || height == 0 || layers == 0 || width > limits.max_texture_dimension_2d
+            || height > limits.max_texture_dimension_2d || layers > limits.max_texture_array_layers
+            || levels.len() != (32-width.max(height).leading_zeros()) as usize
+            || levels.iter().enumerate().any(|(k,v)| v.len() as u64 != (width>>k).max(1) as u64 * (height>>k).max(1) as u64 * layers as u64 * 4) {
+            return Err(PyValueError::new_err("invalid texture array dimensions or mip data"));
+        }
+        self.gpu_memory = self.gpu_memory.saturating_sub(self.textures.bytes);
+        self.textures = textures::Textures::new(&self.device, &self.queue, width, height, layers, &levels);
+        self.gpu_memory += self.textures.bytes;
+        self.texture_groups = [&self.draw, &self.xray].iter().map(|p| self.textures.bind(&self.device,p)).collect();
+        self.aa.bind_textures(&self.device, &self.textures);
+        Ok(())
+    }
+    #[getter]
+    fn texture_memory(&self) -> u64 { self.textures.bytes }
     fn set_msaa(&mut self, enabled: bool) {
         self.antialias = enabled;
     }
@@ -715,6 +756,8 @@ impl Renderer {
                 &[],
             );
             pass.set_bind_group(1, &self.look_groups[if self.style == 1 { 1 } else { 0 }], &[]);
+            pass.set_bind_group(2, &self.texture_groups[usize::from(self.style == 1)], &[]);
+            pass.set_vertex_buffer(1, s.materials.slice(..));
             pass.set_vertex_buffer(0, s.vertex.slice(..));
             pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
             if self.style != 4 {
