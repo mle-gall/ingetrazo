@@ -983,9 +983,12 @@ record edits do not scan placements or submit GPU work. Untracked edits use a
 conservative full placement scan, without rebaking unchanged prototypes. Bounds
 updates touch changed rows; a full reduction is needed when an edited row held
 a scene extremum. Untracked edit discovery still scans the resident table.
-Exact inference is invalidated immediately after changes and prepared again
-in the background, scheduled after the input event. Its prototype BVHs are
-still rebuilt; incremental inference preparation remains an R2b gap.
+Initial exact inference still waits for background preparation. Once ready,
+`ResidentInference` retains the initial acceleration and unchanged prototype
+BVHs. Edited rows get small placement sets on their next query; only mutated
+prototype BVHs rebuild. This avoids destroying a document-sized index during
+input. The initial acceleration retains its original geometry until scene
+release, another reclamation consideration for sustained editing.
 
 The dispatch adapter invokes the existing Tape tool with snapped world points;
 rubber lines, labels and inference markers use the overlay. It does not acquire
@@ -1014,7 +1017,7 @@ QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2b-tmp .venv-work/bin/python scripts/pyt
 .venv-work/bin/python scripts/wgpu_r2b_measure.py /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz
 ```
 
-Both release builds passed. Focused Python: **42 passed**. Rust: **4 core,
+Both release builds passed. Focused Python: **44 passed**. Rust: **4 core,
 6 renderer passed**. Device-free tests cover record-only no-ops, changed/shared
 prototypes, new prototypes, stable row IDs, additions/removals, History command
 identity and undo, direct Tape versus native adapter measurement, dispatch, and

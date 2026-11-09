@@ -202,3 +202,32 @@ def test_native_move_preview_then_history_commit():
     assert scene.groups[0].xform.column(3).x() == 2
     history.undo()
     assert scene.groups[0].xform.column(3).x() == 0
+
+
+def test_inference_move_reuses_prototype_and_hits_updated_row():
+    from views.wgpu_inference import prepare, surface
+    scene, updates = fixture_scene()
+    index = prepare(updates.packed)
+    base, prototype = index.base, index.protos[0]
+    scene.groups[0].xform.translate(10, 0, 0)
+    ids, rows = updates.diff(scene)
+    updates.apply(ids, rows)
+    index.update(ids, updates.packed)
+    assert index.base is base
+    assert index.protos[0] is prototype
+    hit = surface(index, 0, QVector3D(10.25, .25, 1), QVector3D(0, 0, -1))
+    assert hit == QVector3D(10.25, .25, 0)
+    assert surface(index, 1, QVector3D(.25, .25, 1), QVector3D(0, 0, -1)) == QVector3D(.25, .25, 0)
+
+
+def test_inference_shared_mesh_change_invalidates_only_its_prototype():
+    from views.wgpu_inference import prepare, surface
+    scene, updates = fixture_scene()
+    index = prepare(updates.packed)
+    mesh = scene.groups[0].mesh
+    for vertex in list(mesh.vertices):
+        mesh.move_vertex(vertex, QVector3D(0, 0, 2))
+    ids, rows = updates.diff(scene)
+    updates.apply(ids, rows)
+    index.update(ids, updates.packed, [code for _, _, code in updates.changed])
+    assert surface(index, 1, QVector3D(.25, .25, 3), QVector3D(0, 0, -1)) == QVector3D(.25, .25, 2)

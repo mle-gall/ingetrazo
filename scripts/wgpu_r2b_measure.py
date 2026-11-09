@@ -60,6 +60,9 @@ result['move_submission_ms'] = (time.perf_counter()-command_end)*1000
 result['move_update_ms'] = (time.perf_counter()-start)*1000
 result['move_calls'] = dict(renderer.calls)
 result['move_row_counts'] = list(renderer.rows)
+view.draw_frame()
+view.pick_row(0, 0)
+result['move_gpu_complete_ms'] = (time.perf_counter()-start)*1000
 renderer.rows.clear()
 renderer.calls.clear()
 start = time.perf_counter()
@@ -101,6 +104,7 @@ for i in range(50):
     app.processEvents()
     time.sleep(.016)
 result['matrix_preview_frames'] = frames
+renderer.update_instances(ids.tolist(), original.view(np.uint8).reshape(-1))
 # Exercise the dispatched Move hover, resident preview, overlay and frame.
 from types import SimpleNamespace
 from PySide6.QtCore import QPointF, Qt

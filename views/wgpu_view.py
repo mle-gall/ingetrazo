@@ -67,14 +67,18 @@ class WgpuView(QWidget):
                     self._selection_signature = None
                     self._tint_signature = None
                 self._resident_count = len(self.packed.instances)
-                self.inference_index = None
-                previous = getattr(self, '_inference_future', None)
-                if previous is not None:
-                    previous.cancel()
-                    self._inference_future = None
-                if not getattr(self, '_inference_queued', False):
-                    self._inference_queued = True
-                    QTimer.singleShot(0, self._refresh_inference)
+                if self.inference_index is not None:
+                    self.inference_index.update(ids, self.packed,
+                                                [code for _, _, code in tracker.changed])
+                else:
+                    self.inference_index = None
+                    previous = getattr(self, '_inference_future', None)
+                    if previous is not None:
+                        previous.cancel()
+                        self._inference_future = None
+                    if not getattr(self, '_inference_queued', False):
+                        self._inference_queued = True
+                        QTimer.singleShot(0, self._refresh_inference)
             self.build_seconds = time.perf_counter() - start
             self.update()
             return
