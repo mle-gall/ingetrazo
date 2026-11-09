@@ -7,7 +7,7 @@ upsampling, and the cubic multi-bounce fit. AO runs after opaque faces and befor
 edges and overlays. X-ray and wireframe bypass it, as in GL. GL is unchanged.
 
 `ambient_occlusion`, `ao_distance` and `ao_intensity` come from the display style.
-The shared GL settings helper also supplies the existing environment overrides.
+The shared GL settings helper also supplies enable/radius/intensity/sample-count environment overrides.
 `ao_samples` and `ao_resolution` (1 full, 2 half, default 2) are diagnostic payload
 fields. Invalid or nonfinite native parameters are rejected.
 
@@ -31,7 +31,7 @@ bounded to 240 seconds by the capture runner (including load and GUI startup).
 Pairs place GL `render_image` on the left and Metal `read_pixels` on the right.
 The paired ride section is root 1 (`Groupe#310`, 264 placements), isolated in
 memory with `--root-start 1 --root-limit 1 --capture-only`. The complete ride
-(76,029 instances) is retained for timing, using `--metal-only --section --matrix`: 
+(76,029 instances) is retained for timing, using `--metal-only --section --matrix`:
 the camera distance is one fifth of the full-scene fit. The first whole-ride GL
 capture was stopped near its 240-second bound without an image.
 
@@ -75,3 +75,13 @@ execution against synthetic flat and concave depth buffers and pipeline validati
 for both sample counts. Focused Python style tests: **2 passed**. Model captures
 exercise the split MSAA timestamp path as well as AO itself. Initial shader-mask
 and empty-timestamp validation errors were corrected before successful captures.
+
+
+The single complete offscreen suite finished in **1,903 seconds**, six batches:
+**7,146 passed, 18 failed, 142 skipped, 2 xfailed, 805 deselected, 56 warnings**.
+All 18 failures match the supplied 19-failure baseline: 14 translations (including
+`ar`), cursor pick, extension wrapping, hidden panels and toolbar bold. The
+baseline swatch-tooltip failure did not reproduce. **No additional failures**
+were observed. The longest batch took 509.81 seconds; none exceeded 30 minutes,
+so no split or second full-suite run was needed. See [full suite output](suite.txt)
+and [final renderer Rust output](rust-tests.txt).

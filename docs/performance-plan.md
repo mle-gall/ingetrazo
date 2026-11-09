@@ -1318,5 +1318,10 @@ GL is 0.458/255 (pusher car), 0.205/255 (marquee), 0.024/255 (ride section).
 Remaining differences: existing materials and axes, single-sample depth at MSAA
 silhouettes, and no foliage exclusion mask in the current wgpu material stream.
 Both native release builds succeeded; renderer Rust tests **8 passed**, focused
-Python payload tests **2 passed**. Full-suite results follow when the bounded run
-completes.
+Python payload tests **2 passed**. The single full offscreen suite completed in
+1,903 s: **7,146 passed, 18 failed, 142 skipped, 2 xfailed, 805 deselected**,
+56 warnings. All failures match the supplied baseline (14 translations including
+Arabic, cursor pick, extension wrapping, hidden panels and toolbar bold); the
+baseline swatch-tooltip failure did not reproduce. No new failures. No batch
+exceeded 30 minutes (longest 509.81 s), so no split was needed.
+[Full suite log](benchmarks/wgpu-look-2026-11-09/r-look-3a/suite.txt).
