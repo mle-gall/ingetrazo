@@ -1116,3 +1116,42 @@ offscreen scene/style Python tests 21 passed. The one bounded full-suite run
 completed five batches with 6,136 passed and the 19 known baseline failures;
 batch six reached the extended approximately 30-minute bound. Full-suite
 regression status is therefore **unverified**, not a clean-suite claim.
+
+
+## 2026-11-09 — R-look 2 (partial)
+
+Hard edges now use screen-space quads in both Metal color paths, preserving
+scene ABI and depth bias. Unpainted placement alpha now distinguishes default
+warm Front tint from explicit gray. Instance selection/hover uses GL-like dots
+with contrast switching. GL defaults and code are unchanged.
+
+This is not look-parity acceptance: profiles, back edges, AO/Distance, UV/atlas,
+distinct back paint and X-ray sorting/hidden-edge washing remain unfinished.
+No silhouette test or per-pass timing is claimed. Edge upload expansion adds
+192 resident bytes per hard edge. Selection remains instance-granular.
+
+See [R-look 2 report](benchmarks/wgpu-look-2026-11-09/r-look-2/README.md)
+and [frame-cost table and comparison images](benchmarks/wgpu-look-2026-11-09/r-look-2/samples.md).
+The table contains whole-frame on/off samples, not isolated pass costs.
+
+## Frame-cost samples at 2× HiDPI
+
+| Model | MSAA | Edges | CPU ms | GPU ms | Wall ms |
+|---|---|---|---:|---:|---:|
+| pusher_car_rust | False | False | 14.26 | 1.34 | 14.42 |
+| pusher_car_rust | False | True | 12.95 | 1.40 | 13.18 |
+| pusher_car_rust | True | False | 14.26 | 2.35 | 14.41 |
+| pusher_car_rust | True | True | 11.95 | 3.12 | 12.17 |
+| marquee | False | False | 13.75 | 0.36 | 13.98 |
+| marquee | False | True | 13.60 | 0.43 | 13.82 |
+| marquee | True | False | 13.96 | 0.56 | 14.27 |
+| marquee | True | True | 13.63 | 0.69 | 13.79 |
+
+AO, profiles, textures, back paint and X-ray pass costs: not implemented / not measured.
+
+
+Validation: 5 core Rust, 6 renderer Rust and 24 focused Python tests passed.
+The once-invoked full suite stopped at a 12-minute overall bound: four
+completed batches, 1,267 passed / 18 failed / 48 skipped / 1 deselected;
+all observed failures match the baseline, but the remainder is unverified.
+Ride default and edges-off captures timed out; its width-4 diagnostic succeeded.

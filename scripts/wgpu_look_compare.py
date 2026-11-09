@@ -29,17 +29,32 @@ parser.add_argument('model', type=Path)
 parser.add_argument('--mode', choices=('shaded', 'hidden_line', 'monochrome', 'wireframe', 'xray'))
 parser.add_argument('--pitch', type=float)
 parser.add_argument('--capture-only', action='store_true')
+parser.add_argument('--output', type=Path, default=out)
+parser.add_argument('--edges-off', action='store_true')
+parser.add_argument('--highlight', choices=('selected', 'hovered'))
+parser.add_argument('--edge-width', type=float)
+
 args = parser.parse_args()
+out = args.output
+out.mkdir(parents=True, exist_ok=True)
 source = args.model
 label = source.stem
 if args.mode:
     label += '-' + args.mode
 if args.pitch is not None:
     label += '-pitch' + str(args.pitch)
+if args.edges_off:
+    label += '-edges-off'
+if args.edge_width is not None:
+    label += '-width' + str(args.edge_width)
+if args.highlight:
+    label += '-' + args.highlight
 scene = Scene()
 load_into(scene, source)
 if args.mode:
     scene.display_style.face_mode = args.mode
+if args.edges_off:
+    scene.display_style.edges = False
 metal = WgpuView()
 metal.resize(1000, 700)
 metal.set_scene(scene)
@@ -60,6 +75,16 @@ failed = []
 def capture():
     try:
         metal.draw_frame()
+        if args.highlight:
+            # Instance highlight diagnostic; GL export intentionally omits its
+            # selection overlay, so this pair is not selection parity evidence.
+            metal.renderer.set_highlight([0] if args.highlight == 'selected' else [],
+                                         0 if args.highlight == 'hovered' else None)
+        if args.edge_width is not None:
+            from views.wgpu_style import style_payload
+            payload = style_payload(scene)
+            payload['edge_width'] = args.edge_width
+            metal.renderer.set_style(payload)
         scale = metal.devicePixelRatioF()
         w, h = int(metal.width()*scale), int(metal.height()*scale)
         reference = gl.render_image(w, h, overlays=False)
