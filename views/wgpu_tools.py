@@ -18,6 +18,7 @@ TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 
 TOOL_DISPATCH['FreehandTool'] = 'mesh'
 TOOL_DISPATCH['RotatedRectangleTool'] = 'mesh'
 TOOL_DISPATCH['ThreePointArcTool'] = 'mesh'
+TOOL_DISPATCH['CenterArcTool'] = 'mesh'
 
 def move_command(groups, delta):
     commands = [MoveGroupCommand(group, delta) for group in groups]
