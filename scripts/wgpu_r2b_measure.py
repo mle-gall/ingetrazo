@@ -26,6 +26,7 @@ view.set_scene(scene)
 view.show()
 app.processEvents()
 view._inference_future.result()
+view.renderer.set_antialias(False)
 for _ in range(20):
     view.draw_frame()
     app.processEvents()
@@ -53,7 +54,7 @@ class Counted:
 
 renderer = Counted(view.renderer)
 view.renderer = renderer
-result = {'placements': len(view.packed.instances)}
+result = {'placements': len(view.packed.instances), 'msaa': False, 'ao': False}
 g = next(g for g in scene.groups if g.xform is not None and not g.children
          and view._instance_updates.meshes[id(g.mesh)][2] >= 0)
 start = time.perf_counter()
