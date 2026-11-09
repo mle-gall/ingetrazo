@@ -2375,3 +2375,48 @@ AO, X-ray and MSAA do not execute in the faces-only baseline.
 Initial validation: both isolated release builds succeeded; 23 render-crate
 unit tests passed before the final instrumentation adjustments. Final checks
 and optimization results follow below. Performance gates remain open.
+
+### Face specialization and ID attachment scheduling
+
+Untextured prototype runs use a fragment pipeline compiled with `TEXTURED=false`.
+The vertex material stream, back paint, mirrored-side handling, selection dots,
+lighting and sRGB conversion are unchanged. Textured prototypes retain sampling
+and alpha rejection; contiguous runs preserve original draw order. Sparse
+material updates and prototype additions rebuild the classification. Both front
+and back texture indices participate in classification. Explicit layouts let
+these variants reuse the resident bind groups.
+
+Settled single-sample **faces-only** frames omit the ID attachment, clear and
+store. Dirty IDs refresh on the second stable frame; explicit picks still use
+the existing independent ID renderer. Edge-bearing frames retain their original
+ID behavior. This is intentionally narrower than eliminating all redundant ID
+writes: edge variants, MSAA allocation, and cold-pick scheduling are not solved.
+
+The first specialization-only run is retained as `{ride,pusher}-after.json`.
+The final binary additionally omits idle faces-only IDs and corrects AO+MSAA
+instrumentation to keep separate face and post-AO edge/resolve timestamps.
+Unmeasured fields now return JSON null instead of the earlier reserved zeros.
+No AO normal target exists in this implementation; AO reconstructs from depth.
+Actual attachment write traffic and encoded draw-call counters remain missing.
+Culling's triangle counter counts visible face triangles once, not geometry
+replays or generated edge triangles. GPU pass durations can overlap on Metal;
+do not add them to infer frame latency or subtract noisy medians as causal cost.
+
+Final focused validation before the repeat matrix: **26 Rust unit tests passed**,
+**74 Python tests passed** (4 existing deprecation warnings), plus native
+faces-only validation with the final ID-free pipeline. Commands:
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work \
+  .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work CARGO_PROFILE_RELEASE_STRIP=none \
+  .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work PYO3_PYTHON=$PWD/.venv-work/bin/python \
+  cargo test --release --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_*.py
+```
+
+Neither crate has a `target/debug` directory. No tools, inference, overlay Python,
+or tool-routing code was changed. All reference documents were read-only.

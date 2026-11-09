@@ -25,7 +25,7 @@ view.draw_frame()
 if view._inference_future is not None:
     view._inference_future.result()
 result = {'size': [int(view.width()*view.devicePixelRatioF()), int(view.height()*view.devicePixelRatioF())],
-          'adapter': view.renderer.adapter, 'frames': {}, 'warmup': 10, 'samples': 20, 'sleep_seconds': .12, 'load_average_start': os.getloadavg()}
+          'adapter': view.renderer.adapter, 'frames': {}, 'warmup': 10, 'samples': 20, 'sleep_seconds': .12, 'load_average_start': os.getloadavg(), 'contended': True, 'pass_notes': {'ao_inputs': 'copy not timed separately', 'profile_classification': 'included in edge_quads', 'id': 'included in faces when refreshed; explicit pick pass not timestamped', 'present': 'CPU-only, offscreen frames do not present', 'antialias': 'faces and resolve; edges included when AO off', 'antialias_edges': 'edges and resolve after AO'}}
 payload = style_payload(scene, scale=view.devicePixelRatioF())
 for aa, ao, edges, profiles in [(aa, ao, True, False) for aa in (False, True) for ao in ('off','half','full')] + [(False,'off',False,False),(False,'off',True,True)]:
     payload.update(ambient_occlusion=ao != 'off', ao_resolution=1 if ao == 'full' else 2,
@@ -45,7 +45,7 @@ for aa, ao, edges, profiles in [(aa, ao, True, False) for aa in (False, True) fo
             passes.append(view.renderer.last_timings()[3])
             counters.append(view.renderer.last_timings()[4])
         time.sleep(.12)
-    result['frames'][f'msaa={aa},ao={ao},edges={edges},profiles={profiles}'] = {'median': np.median(samples,axis=0).tolist(), 'samples': samples, 'gpu_pass_medians_ms': {k: float(np.median([p[k] for p in passes])) for k in passes[0]}, 'gpu_pass_samples_ms': passes, 'counters': counters, 'load_average_start': load_start, 'load_average_end': os.getloadavg()}
+    result['frames'][f'msaa={aa},ao={ao},edges={edges},profiles={profiles}'] = {'median': np.median(samples,axis=0).tolist(), 'samples': samples, 'gpu_pass_medians_ms': {k: (float(np.median([p[k] for p in passes])) if passes[0][k] is not None else None) for k in passes[0]}, 'gpu_pass_samples_ms': passes, 'counters': counters, 'load_average_start': load_start, 'load_average_end': os.getloadavg()}
 view.renderer.set_antialias(False)
 payload.update(ambient_occlusion=False, edges=True, profiles=False)
 view.renderer.set_style(payload)

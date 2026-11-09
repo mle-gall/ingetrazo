@@ -1,3 +1,4 @@
+override TEXTURED: bool = true;
 @group(2) @binding(0) var material_images: texture_2d_array<f32>;
 @group(2) @binding(1) var material_sampler: sampler;
 @group(2) @binding(2) var<storage, read> materials: array<vec4u>;
@@ -45,7 +46,7 @@ fn face_pixel(i: Out, facing: bool) -> Pixel {
  let tex = select(i.textures.y,i.textures.x,front);
  let uv = select(i.uv.zw,i.uv.xy,front);
  let uv_dx = dpdx(uv); let uv_dy = dpdy(uv);
- if tex != 0u && camera.size.z < 2 && (i.decorated & 8u) == 0u {
+ if TEXTURED && tex != 0u && camera.size.z < 2 && (i.decorated & 8u) == 0u {
   var sampled = textureSampleGrad(material_images,material_sampler,uv,i32(tex),uv_dx,uv_dy);
   if camera.size.w > 0.5 {
    sampled = textureSampleLevel(material_images,material_sampler,vec2f(0.5),i32(tex),f32(textureNumLevels(material_images)-1u));

@@ -173,7 +173,7 @@ impl Antialias {
                 }),
                 stencil_ops: None,
             }),
-            timestamp_writes: crate::timing::writes(queries, "antialias"),
+            timestamp_writes: crate::timing::writes(queries, if edge_only == Some(true) { "antialias_edges" } else { "antialias" }),
             occlusion_query_set: None,
         });
         pass.set_vertex_buffer(0, scene.vertex.slice(..));

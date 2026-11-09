@@ -35,6 +35,7 @@ struct TimingSlot {
 struct Scene {
     material_shifts: Vec<i64>,
     material_data: Vec<u8>,
+    face_ranges: Vec<(u32, u32, bool)>,
     inst: wgpu::Buffer,
     flags: Vec<u32>,
     rows: Vec<u8>,
@@ -92,6 +93,9 @@ struct Renderer {
     camera: wgpu::Buffer,
     compute: wgpu::ComputePipeline,
     draw: wgpu::RenderPipeline,
+    draw_plain: wgpu::RenderPipeline,
+    draw_noids: wgpu::RenderPipeline,
+    plain_noids: wgpu::RenderPipeline,
     edge: wgpu::RenderPipeline,
     xray: wgpu::RenderPipeline,
     xray_edge: wgpu::RenderPipeline,
@@ -235,7 +239,7 @@ impl Renderer {
             ..Default::default()
         }))
         .ok_or_else(|| PyValueError::new_err("no Metal adapter"))?;
-        let optional = wgpu::Features::MULTI_DRAW_INDIRECT | wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
+        let optional = wgpu::Features::MULTI_DRAW_INDIRECT | wgpu::Features::TIMESTAMP_QUERY;
         let features = (a.features() & optional) | wgpu::Features::INDIRECT_FIRST_INSTANCE;
         let (device, queue) = pollster::block_on(a.request_device(
             &wgpu::DeviceDescriptor {
@@ -347,6 +351,29 @@ impl Renderer {
             Default::default(),
             1,
         );
+        // Keep the same explicit layouts so resident draw groups can be reused.
+        let plain_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("untextured faces"),
+            bind_group_layouts: &[&draw.get_bind_group_layout(0), &draw.get_bind_group_layout(1), &draw.get_bind_group_layout(2)],
+            push_constant_ranges: &[],
+        });
+        let face_variant = |plain: bool, ids: bool| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("untextured faces without alpha discard"), layout: Some(&plain_layout),
+            vertex: wgpu::VertexState { module: &vs, entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout { array_stride: 28, step_mode: wgpu::VertexStepMode::Vertex, attributes: &face_attrs }] },
+            fragment: Some(wgpu::FragmentState { module: &vs, entry_point: Some("fs"),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &[("TEXTURED".to_string(), if plain { 0. } else { 1. })].into_iter().collect(), ..Default::default() },
+                targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL }),
+                    ids.then_some(wgpu::ColorTargetState { format: wgpu::TextureFormat::R32Uint, blend: None, write_mask: wgpu::ColorWrites::ALL })] }),
+            primitive: Default::default(),
+            depth_stencil: Some(wgpu::DepthStencilState { format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true, depth_compare: wgpu::CompareFunction::Less, stencil: Default::default(), bias: Default::default() }),
+            multisample: Default::default(), multiview: None, cache: None,
+        });
+        let draw_plain = face_variant(true, true);
+        let draw_noids = face_variant(false, false);
+        let plain_noids = face_variant(true, false);
         let xray = pipeline(
             wgpu::PrimitiveTopology::TriangleList,
             "depth_fs",
@@ -436,7 +463,7 @@ impl Renderer {
             last_gpu: None,
             pass_gpu: Default::default(),
             last_counters: Default::default(),
-            detailed_timestamps: features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS),
+            detailed_timestamps: features.contains(wgpu::Features::TIMESTAMP_QUERY),
             last_cpu: 0.,
             last_acquire: 0.,
             frame_stages: [0.; 5],
@@ -447,6 +474,9 @@ impl Renderer {
             camera,
             compute,
             draw,
+            draw_plain,
+            draw_noids,
+            plain_noids,
             edge,
             xray,
             xray_edge,
@@ -616,6 +646,7 @@ impl Renderer {
             edge_records,
             viewpoints,
             counters,
+            face_ranges: vec![(0, count as u32, true)],
             material_data: vec![0; count*16],
             material_shifts,
             inst,
@@ -682,6 +713,7 @@ impl Renderer {
             s.template_data.splice(old_p*20..old_p*20, [0;20]);
             s.template_data.extend_from_slice(&[0;20]);
         }
+        s.face_ranges = face_ranges(&s.material_data, s.p);
         s.material_shifts[id] = vertex_base as i64 + shifts[0];
         s.prototype_data[id*32..(id+1)*32].copy_from_slice(bounds);
         s.vertex_data.extend_from_slice(&face);
@@ -940,6 +972,7 @@ impl Renderer {
         }
         s.material_data[id*16..(id+1)*16].copy_from_slice(bytemuck::bytes_of(&header));
         s.material_data.extend_from_slice(data);
+        s.face_ranges = face_ranges(&s.material_data, s.p);
         self.textures.materials = buffer(&self.device, &s.material_data, wgpu::BufferUsages::STORAGE);
         self.texture_groups = [&self.draw, &self.xray].iter().map(|p| self.textures.bind(&self.device,p)).collect();
         self.aa.bind_textures(&self.device, &self.textures);
@@ -959,6 +992,7 @@ impl Renderer {
             let base = u32::from_le_bytes(header[..4].try_into().unwrap());
             header[..4].copy_from_slice(&((i64::from(base) + shift) as u32).to_le_bytes());
         }
+        scene.face_ranges = face_ranges(&resident, scene.p);
         scene.material_data = resident.clone();
         let data = resident.as_slice();
         self.gpu_memory = self.gpu_memory.saturating_sub(self.textures.materials.size());
@@ -1088,15 +1122,18 @@ impl Renderer {
             pass.set_bind_group(0, &s.compute, &[]);
             pass.dispatch_workgroups(s.n.div_ceil(64), 1, 1);
         }
-        let msaa = self.antialias && self.style != 1 && self.look.data[6][2] == 0.;
+        let plan = PassPlan::new(self.antialias, self.style, self.look.data[6][2] != 0., self.ao.active(self.style));
+        let msaa = plan.msaa;
         self.stable_frames = self.stable_frames.saturating_add(1);
-        let draw_ids = needs_id_pass(msaa, self.pick_pending, self.ids_dirty, self.stable_frames);
-        if self.style == 1 { self.transparency.draw(&mut e, &color, s, self.multi, tq); }
+        let color_only = !msaa && !self.edges && self.style != 4 && !plan.ao && !plan.xray;
+        let draw_ids = if color_only { needs_settled_ids(self.pick_pending, self.ids_dirty, self.stable_frames) }
+            else { needs_id_pass(msaa, self.pick_pending, self.ids_dirty, self.stable_frames) };
+        if plan.xray { self.transparency.draw(&mut e, &color, s, self.multi, tq); }
 
-        let ao_active = self.ao.active(self.style);
+        let ao_active = plan.ao;
         for edge_only in [false, true] {
-            if edge_only && !(self.edges || self.style == 4) { break; }
-            if (draw_ids || ao_active) && (!msaa || !edge_only) {
+            if edge_only && !(self.edges || self.style == 4 || ao_active) { break; }
+            if (draw_ids || ao_active || !msaa) && (!msaa || !edge_only) {
             let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[
@@ -1108,7 +1145,7 @@ impl Renderer {
                             store: wgpu::StoreOp::Store,
                         },
                     }),
-                    Some(wgpu::RenderPassColorAttachment {
+                    (draw_ids || ao_active).then_some(wgpu::RenderPassColorAttachment {
                         view: &ids,
                         resolve_target: None,
                         ops: wgpu::Operations {
@@ -1135,6 +1172,10 @@ impl Renderer {
             });
             pass.set_pipeline(if self.style == 1 || msaa {
                 &self.xray
+            } else if !draw_ids {
+                &self.draw_noids
+            } else if self.textures.layers == 1 {
+                &self.draw_plain
             } else {
                 &self.draw
             });
@@ -1152,12 +1193,19 @@ impl Renderer {
             pass.set_vertex_buffer(0, s.vertex.slice(..));
             pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
             if !edge_only && self.style != 4 {
-                if self.multi {
+                if self.style != 1 && !msaa {
+                    for &(first, count, plain) in &s.face_ranges {
+                        pass.set_pipeline(match (plain, draw_ids) {
+                            (true, true) => &self.draw_plain, (false, true) => &self.draw,
+                            (true, false) => &self.plain_noids, (false, false) => &self.draw_noids,
+                        });
+                        if self.multi { pass.multi_draw_indexed_indirect(&s.commands, first as u64 * 20, count); }
+                        else { for k in first..first+count { pass.draw_indexed_indirect(&s.commands, k as u64 * 20); } }
+                    }
+                } else if self.multi {
                     pass.multi_draw_indexed_indirect(&s.commands, 0, s.p);
                 } else {
-                    for k in 0..s.p {
-                        pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
-                    }
+                    for k in 0..s.p { pass.draw_indexed_indirect(&s.commands, k as u64 * 20); }
                 }
             }
             if !msaa && edge_only && (self.edges || self.style == 4) {
@@ -1277,8 +1325,8 @@ impl Renderer {
                 });
             self.timings[k].pending = Some(rx);
             let mut active = vec!["background", "culling", "overlay", "frame"];
-            if draw_ids || ao_active { active.push("faces"); if !msaa && (self.edges || self.style == 4) { active.push("edge_quads"); } }
-            if msaa && !self.pick_pending { active.push("antialias"); }
+            if draw_ids || ao_active || !msaa { active.push("faces"); if !msaa && (self.edges || self.style == 4) { active.push("edge_quads"); } }
+            if msaa && !self.pick_pending { active.push("antialias"); if ao_active { active.push("antialias_edges"); } }
             if self.style == 1 { active.extend(["xray_accumulation", "xray_composite"]); }
             if ao_active { active.extend(["ao_inputs", "ao_kernel", "ao_blur_x", "ao_blur_y", "ao_upsample_composite"]); }
             self.timings[k].active = active;
@@ -1313,8 +1361,17 @@ impl Renderer {
             .upload(&self.device, &self.queue, width, height, bytes);
         Ok(())
     }
-    fn last_timings(&self) -> (f64, Option<f64>, f64, std::collections::BTreeMap<String, f64>, std::collections::BTreeMap<String, u64>) {
-        (self.last_cpu, self.last_gpu, self.last_acquire, self.pass_gpu.clone(), self.last_counters.clone())
+    fn last_timings(&self) -> (f64, Option<f64>, f64, std::collections::BTreeMap<String, Option<f64>>, std::collections::BTreeMap<String, u64>) {
+        let mut counters = self.last_counters.clone();
+        counters.insert("texture_layers".into(), self.textures.layers as u64);
+        counters.insert("instances_input".into(), self.scene.as_ref().map_or(0, |s| s.n as u64));
+        counters.insert("depth_prepass".into(), 0);
+        let mut passes: std::collections::BTreeMap<_, _> = self.pass_gpu.iter().map(|(n,v)| (n.clone(), Some(*v))).collect();
+        for name in ["ao_inputs", "profile_top", "profile_classification", "id", "present"] {
+            passes.insert(name.into(), None);
+        }
+        passes.insert("depth_prepass".into(), Some(0.));
+        (self.last_cpu, self.last_gpu, self.last_acquire, passes, counters)
     }
     fn ensure_ids(&mut self) -> PyResult<()> {
         if !self.ids_dirty { return Ok(()); }
@@ -1680,5 +1737,74 @@ mod update_tests {
         assert_eq!(merge_instance_flags(6, 1), 7);
         assert_eq!(merge_instance_flags(7, 0), 6);
         assert_eq!(merge_instance_flags(0, 6), 0);
+    }
+}
+
+// Sparse rows contain a back color followed by front/back texture indices.
+// Only the fragment texture branch is specialized: vertex paint lookup stays.
+fn face_ranges(data: &[u8], prototypes: u32) -> Vec<(u32, u32, bool)> {
+    let word = |at: usize| data.get(at..at+4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+    let mut runs: Vec<(u32, u32, bool)> = Vec::new();
+    for p in 0..prototypes {
+        let header = p as usize * 16;
+        let plain = match (word(header+4), word(header+8)) {
+            (Some(start), Some(count)) => (0..count as usize).all(|i| {
+                let row = (start as usize+i*2+1)*16;
+                word(row+4) == Some(0) && word(row+8) == Some(0)
+            }),
+            _ => false,
+        };
+        if let Some(last) = runs.last_mut().filter(|r| r.2 == plain) { last.1 += 1; }
+        else { runs.push((p, 1, plain)); }
+    }
+    runs
+}
+#[cfg(test)]
+mod plain_face_tests {
+    #[test]
+    fn sparse_texture_indices_split_only_textured_prototypes() {
+        let mut words = vec![0u32; 24];
+        words[5] = 3; words[6] = 1; // prototype 1 has one sparse vertex
+        words[17] = 2; // its front texture
+        assert_eq!(super::face_ranges(bytemuck::cast_slice(&words), 3), vec![(0,1,true),(1,1,false),(2,1,true)]);
+        words[17] = 0; words[18] = 2; // back texture also needs alpha rejection
+        assert_eq!(super::face_ranges(bytemuck::cast_slice(&words), 3)[1], (1,1,false));
+        words[18] = 0;
+        assert_eq!(super::face_ranges(bytemuck::cast_slice(&words), 3), vec![(0,3,true)]);
+        assert_eq!(super::face_ranges(&[], 1), vec![(0,1,false)]);
+    }
+}
+
+struct PassPlan { msaa: bool, ao: bool, xray: bool }
+impl PassPlan {
+    fn new(antialias: bool, mode: u32, back_edges: bool, ao: bool) -> Self {
+        Self { msaa: antialias && mode != 1 && !back_edges,
+            ao: ao && mode != 1 && mode != 4, xray: mode == 1 }
+    }
+}
+#[cfg(test)]
+mod pass_plan_tests {
+    #[test]
+    fn disabled_features_encode_no_optional_passes() {
+        let p = super::PassPlan::new(false, 0, false, false);
+        assert!(!p.msaa && !p.ao && !p.xray);
+        let p = super::PassPlan::new(true, 1, false, true);
+        assert!(p.xray && !p.msaa && !p.ao);
+        let p = super::PassPlan::new(true, 4, true, true);
+        assert!(!p.msaa && !p.ao && !p.xray);
+        let p = super::PassPlan::new(true, 0, false, true);
+        assert!(p.msaa && p.ao && !p.xray);
+    }
+}
+
+fn needs_settled_ids(pick: bool, dirty: bool, stable: u32) -> bool { pick || (dirty && stable >= 2) }
+#[cfg(test)]
+mod color_only_schedule_tests {
+    #[test]
+    fn settled_color_does_not_clear_or_write_an_id_target() {
+        assert!(!super::needs_settled_ids(false, false, 4));
+        assert!(!super::needs_settled_ids(false, true, 1));
+        assert!(super::needs_settled_ids(false, true, 2));
+        assert!(super::needs_settled_ids(true, true, 0));
     }
 }
