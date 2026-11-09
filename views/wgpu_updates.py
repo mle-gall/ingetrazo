@@ -158,7 +158,7 @@ class InstanceUpdates:
     def apply(self, ids, rows, renderer=None):
         if self.changed:
             # A single native bake for the changed set, including shared meshes.
-            baked = pack_scene(Scene(groups=[Group(mesh) for mesh, _, _ in self.changed]))
+            baked = pack_scene(Scene(groups=[Group(mesh, name="Resident prototype") for mesh, _, _ in self.changed]))
             for i, (mesh, _, code) in enumerate(self.changed):
                 uid = next((j for j, group in enumerate(baked.groups) if group.mesh is mesh), None)
                 if uid is None:

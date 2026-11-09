@@ -308,3 +308,15 @@ def test_tool_change_signal_reports_unsupported_tool_without_mouse_input():
     assert view.tools.mode == 'inert'
     assert messages == ['not yet available on the Metal renderer']
     view.close()
+
+
+def test_prototype_bake_does_not_consume_document_group_names(monkeypatch):
+    import itertools
+    import core.group as groups
+    monkeypatch.setattr(groups, '_counter', itertools.count(100))
+    scene, updates = fixture_scene()
+    before = next(groups._counter)
+    mesh = scene.groups[0].mesh
+    mesh.move_vertex(mesh.vertices[0], QVector3D(0, 0, 1))
+    updates.apply(*updates.diff(scene))
+    assert next(groups._counter) == before + 1
