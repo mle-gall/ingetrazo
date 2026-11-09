@@ -95,7 +95,12 @@ fn blur(frag: vec4<f32>, spread: f32) -> vec4<f32> {
     }}
     let v=clamp(select(nearest,sum/max(total,0.000001),total>0.000001),0.,1.);
     // Decode/encode follows the render target's linear colour convention.
-    let a=clamp(textureLoad(color,coord(uv,textureDimensions(color)),0).rgb,vec3<f32>(0.),vec3<f32>(1.))*0.5;
+    let source_color=clamp(textureLoad(color,coord(uv,textureDimensions(color)),0).rgb,vec3<f32>(0.),vec3<f32>(1.));
+    let display=select(source_color*12.92,1.055*pow(source_color,vec3f(1./2.4))-0.055,source_color>vec3f(0.0031308));
+    let a=display*0.5;
     let lit=max(vec3<f32>(v),((v*(2.0404*a-0.3324)+(-4.7951*a+0.6417))*v+(2.7552*a+0.6903))*v);
-    return vec4<f32>(max(vec3<f32>(0.3),1.-(1.-lit)*clamp(u.settings.y,0.,2.)),1.);
+    let multiplier=max(vec3f(0.3),1.-(1.-lit)*clamp(u.settings.y,0.,2.));
+    let shaded=display*multiplier;
+    let decoded=select(shaded/12.92,pow((shaded+0.055)/1.055,vec3f(2.4)),shaded>vec3f(0.04045));
+    return vec4f(select(vec3f(1.),decoded/max(source_color,vec3f(1e-8)),source_color>vec3f(1e-8)),1.);
 }
