@@ -39,11 +39,42 @@ class WgpuView(QWidget):
         self.overlay_ms = 0.
         self.last = None
         self.build_seconds = self.upload_seconds = 0.
+        from views.wgpu_tools import NativeTools
+        self.tools = NativeTools(self)
 
     def paintEngine(self):
         return None
 
+    def _observe_tool_source(self):
+        source = self.source_viewport
+        previous = getattr(self, '_tool_source', None)
+        if source is previous:
+            return
+        signal = getattr(previous, 'measurementChanged', None)
+        if hasattr(signal, 'disconnect'):
+            signal.disconnect(self._schedule_tool_sync)
+        self._tool_source = source
+        signal = getattr(source, 'measurementChanged', None)
+        if hasattr(signal, 'connect'):
+            signal.connect(self._schedule_tool_sync)
+
+    def _schedule_tool_sync(self, *_):
+        tool = getattr(self.source_viewport, 'active_tool', None)
+        reset = self.tools.start_point is not None and getattr(tool, 'start_point', None) is None
+        if self.isVisible() and (tool is not self.tools.tool or reset):
+            QTimer.singleShot(0, self._sync_tool_dispatch)
+
+    def _sync_tool_dispatch(self):
+        if self.isVisible():
+            self.tools.sync()
+            self.update()
+
+    def hideEvent(self, event):
+        self.tools.cancel()
+        super().hideEvent(event)
+
     def set_scene(self, scene):
+        self._observe_tool_source()
         self.scene = scene
         allowed = getattr(scene, '_navigator_allowed', None)
         token = (id(scene), scene._bounds_key(),
@@ -51,8 +82,46 @@ class WgpuView(QWidget):
         if token == getattr(self, "_content_token", None):
             self.update()
             return
+        previous_token = getattr(self, "_content_token", None)
         self._content_token = token
         start = time.perf_counter()
+        tracker = getattr(self, '_instance_updates', None)
+        if tracker is not None:
+            if previous_token is not None and (previous_token[1][1:], previous_token[2]) != (token[1][1:], token[2]):
+                tracker.journal_valid = False
+            tracker.observe(getattr(self.source_viewport, 'history', None))
+        delta = tracker.diff(scene) if tracker is not None and len(self.packed.instances) else None
+        if delta is not None:
+            ids, rows = delta
+            tracker.apply(ids, rows, self.renderer)
+            if len(ids) or tracker.changed or tracker.removed:
+                mapping_changed = bool(tracker.removed)
+                for row in ids:
+                    uid = self.packed.uids[row]
+                    if uid not in self.uid_rows:
+                        self.uid_rows[uid] = [int(row)]
+                        mapping_changed = True
+                for row in tracker.removed:
+                    self.uid_rows.pop(self.packed.uids[row], None)
+                if mapping_changed:
+                    self._selection_signature = None
+                    self._tint_signature = None
+                self._resident_count = len(self.packed.instances)
+                if self.inference_index is not None:
+                    self.inference_index.update(ids, self.packed,
+                                                [code for _, _, code in tracker.changed])
+                else:
+                    self.inference_index = None
+                    previous = getattr(self, '_inference_future', None)
+                    if previous is not None:
+                        previous.cancel()
+                        self._inference_future = None
+                    if not getattr(self, '_inference_queued', False):
+                        self._inference_queued = True
+                        QTimer.singleShot(0, self._refresh_inference)
+            self.build_seconds = time.perf_counter() - start
+            self.update()
+            return
         self.packed = pack_scene(scene, getattr(self.source_viewport, 'view_tint', None))
         self._scene_dirty = True
         self._selection_signature = None
@@ -60,6 +129,27 @@ class WgpuView(QWidget):
         self.uid_rows = {}
         for row, uid in enumerate(self.packed.uids):
             self.uid_rows.setdefault(uid, []).append(row)
+        from views.wgpu_updates import InstanceUpdates
+        if tracker is not None and tracker.unsubscribe is not None:
+            tracker.unsubscribe()
+        self._resident_count = len(self.packed.instances)
+        self._instance_updates = InstanceUpdates(scene, self.packed)
+        self._instance_updates.observe(getattr(self.source_viewport, 'history', None))
+        self._prepare_inference()
+        self.build_seconds = time.perf_counter()-start
+        lo, hi = self.packed.world_bounds
+        if self.source_viewport is None:
+            self.camera.target = QVector3D(*((lo+hi)/2))
+            self.camera.distance = max(float(np.linalg.norm(hi-lo))*1.4, 1.)
+        self._upload()
+
+    def _refresh_inference(self):
+        self._inference_queued = False
+        if getattr(self, "_closed", False):
+            return
+        self._prepare_inference()
+
+    def _prepare_inference(self):
         from concurrent.futures import ThreadPoolExecutor
         from views.wgpu_inference import prepare
         if not hasattr(self, '_inference_worker'):
@@ -68,13 +158,12 @@ class WgpuView(QWidget):
         if previous is not None:
             previous.cancel()
         self.inference_index = None
-        self._inference_future = self._inference_worker.submit(prepare, self.packed)
-        self.build_seconds = time.perf_counter()-start
-        lo, hi = self.packed.world_bounds
-        if self.source_viewport is None:
-            self.camera.target = QVector3D(*((lo+hi)/2))
-            self.camera.distance = max(float(np.linalg.norm(hi-lo))*1.4, 1.)
-        self._upload()
+        self._inference_future = self._inference_worker.submit(prepare, self._inference_snapshot())
+    def _inference_snapshot(self):
+        from dataclasses import replace
+        return replace(self.packed, instances=self.packed.instances.copy(),
+                       bounds=self.packed.bounds.copy(), commands=self.packed.commands.copy(),
+                       edge_commands=self.packed.edge_commands.copy())
 
     def _upload(self):
         if self.packed is None or not self.isVisible():
@@ -105,6 +194,7 @@ class WgpuView(QWidget):
         if self.renderer is None or not len(self.packed.instances):
             return None
         start = time.perf_counter()
+        self.tools.sync()
         if self.source_viewport is not None:
             self.camera = self.source_viewport.camera
         # R-look 3c: compute each camera matrix once, after updating aspect.
@@ -172,6 +262,8 @@ class WgpuView(QWidget):
         """The resident row identifies both the placement and shared prototype."""
         if self.packed is None or row is None or not 0 <= row < len(self.packed.uids):
             return None
+        if self.packed.instances['info'][row, 2] & 1:
+            return None
         return self.packed.groups[row], int(self.packed.instances['info'][row, 0])
 
     def pick_row(self, x, y):
@@ -196,26 +288,38 @@ class WgpuView(QWidget):
         self.hovered_row = self.pick_row(x, y)
         self.last_snap = None
         self.overlay_primitives = []
+        source = self.source_viewport
+        tool = getattr(source, 'active_tool', None)
+        inference = getattr(source, 'inference', None)
+        options = dict(start_point=self.tools.start_point,
+                       acquired_point=getattr(inference, '_acquired_point', None),
+                       acquired_points=getattr(inference, '_encouraged', None),
+                       axis_lock=getattr(inference, 'axis_lock', None),
+                       shift_held=bool(modifiers & Qt.ShiftModifier),
+                       reference_edge=getattr(inference, 'reference_edge', None),
+                       reference_mode=getattr(inference, 'reference_mode', None),
+                       magnetic_axis_deg=getattr(tool, 'magnetic_axis_deg', None),
+                       screen_axis_px=getattr(tool, 'screen_axis_px', None),
+                       linear_mode=getattr(source, 'linear_inference_mode', 'all'),
+                       project_onto_line=lambda start, direction:
+                           self._project_to_lock_line(start, direction, x, y))
         if self.hovered_row is not None and self.inference_index is not None:
-            source = self.source_viewport
-            tool = getattr(source, 'active_tool', None)
-            inference = getattr(source, 'inference', None)
-            self.last_snap = snap(self.inference_index, self.hovered_row, self, x, y,
-                                  start_point=getattr(tool, 'start_point', None),
-                                  acquired_point=getattr(inference, '_acquired_point', None),
-                                  acquired_points=getattr(inference, '_encouraged', None),
-                                  axis_lock=getattr(inference, 'axis_lock', None),
-                                  shift_held=bool(modifiers & Qt.ShiftModifier),
-                                  reference_edge=getattr(inference, 'reference_edge', None),
-                                  reference_mode=getattr(inference, 'reference_mode', None),
-                                  linear_mode=getattr(source, 'linear_inference_mode', 'all'),
-                                  project_onto_line=lambda start, direction:
-                                      self._project_to_lock_line(start, direction, x, y))
-            if inference is not None:
-                source._note_snap(self.last_snap)
-                point = (self.last_snap.point if self.last_snap is not None
-                         and self.last_snap.kind in source._ENCOURAGING_KINDS else None)
-                inference._dwell_on(point)
+            self.last_snap = snap(self.inference_index, self.hovered_row, self, x, y, **options)
+        elif self.tools.sync() in ('tape', 'move'):
+            from core.snap import compute_snap
+            from types import SimpleNamespace
+            origin, direction = self._pixel_to_ray(x, y)
+            plane = self.tools.start_point if self.tools.start_point is not None else self.camera.target
+            normal = self.camera.forward()
+            denominator = QVector3D.dotProduct(direction, normal)
+            if abs(denominator) > 1e-9:
+                point = origin + direction * (QVector3D.dotProduct(plane-origin, normal)/denominator)
+                self.last_snap = compute_snap(point, (x, y), SimpleNamespace(edges=[]),
+                                              self._world_to_pixel, 12., **options)
+        if inference is not None and self.last_snap is not None:
+            source._note_snap(self.last_snap)
+            point = (self.last_snap.point if self.last_snap.kind in source._ENCOURAGING_KINDS else None)
+            inference._dwell_on(point)
         if self.last_snap is not None:
             pixel = self._world_to_pixel(self.last_snap.point)
             if pixel is not None:
@@ -265,6 +369,10 @@ class WgpuView(QWidget):
         self.last = self.press = event.position()
         self._drag_nav = event.button() == Qt.MiddleButton or bool(
             getattr(self.source_viewport, 'nav_mode', None))
+        mode = self.tools.sync()
+        if not self._drag_nav and event.button() == Qt.LeftButton and mode in ('tape', 'move'):
+            self.hover(self.press.x(), self.press.y(), event.modifiers())
+            self.tools.click(event)
         if self._drag_nav:
             self._pivot = self._orbit_pivot_at(self.press.x(), self.press.y())
 
@@ -272,6 +380,7 @@ class WgpuView(QWidget):
         if not event.buttons():
             self.last = None
             self.hover(event.position().x(), event.position().y(), event.modifiers())
+            self.tools.hover(event)
             return
         if self.last is None:
             return
@@ -287,7 +396,10 @@ class WgpuView(QWidget):
             else:
                 dy = -delta.y() if getattr(self.source_viewport, '_invert_orbit_y', False) else delta.y()
                 self.camera.orbit_about(self._pivot, delta.x(), dy, self.height())
-        elif event.buttons() & Qt.LeftButton:
+        elif self.tools.sync() in ('tape', 'move'):
+            self.hover(event.position().x(), event.position().y(), event.modifiers())
+            self.tools.hover(event)
+        elif event.buttons() & Qt.LeftButton and self.tools.mode == 'select':
             from views.wgpu_overlay import Primitive
             self.overlay_primitives = [Primitive('rectangle',
                 ((self.press.x(), self.press.y()), (self.last.x(), self.last.y())))]
@@ -301,7 +413,7 @@ class WgpuView(QWidget):
             if mode == 'zoom_window':
                 from views.viewport import Viewport
                 Viewport._zoom_to_box(self, self.press, event.position())
-        elif event.button() == Qt.LeftButton:
+        elif event.button() == Qt.LeftButton and self.tools.sync() == 'select':
             start = time.perf_counter()
             if (event.position()-self.press).manhattanLength() < 3:
                 row = self.pick_row(event.position().x(), event.position().y())
@@ -315,6 +427,13 @@ class WgpuView(QWidget):
         self.update()
 
     def mouseDoubleClickEvent(self, event):
+        mode = self.tools.sync()
+        if mode in ('tape', 'move'):
+            self.hover(event.position().x(), event.position().y(), event.modifiers())
+            self.tools.click(event)
+            return
+        if mode != 'select':
+            return
         row = self.pick_row(event.position().x(), event.position().y())
         resolved = self.resolve(row)
         if resolved is not None and resolved[0] is not None and self.source_viewport is not None:
@@ -323,7 +442,10 @@ class WgpuView(QWidget):
             self.update()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
+        mode = self.tools.sync()
+        if event.key() == Qt.Key_Escape and mode in ('tape', 'move'):
+            self.tools.cancel()
+        elif event.key() == Qt.Key_Escape:
             if self.scene.edit_group is not None and self.source_viewport is not None:
                 self.source_viewport.end_one_group_edit()
                 self.source_viewport.notify_scene_changed()
@@ -332,11 +454,18 @@ class WgpuView(QWidget):
             self.last = None
             self.overlay_primitives = []
             self.sync_selection()
+        elif self.tools.key(event):
+            pass
+        elif mode == 'inert':
+            event.ignore()
         elif self.source_viewport is not None:
             self.source_viewport.keyPressEvent(event)
         self.update()
 
     def keyReleaseEvent(self, event):
+        if self.tools.sync() == 'inert':
+            event.ignore()
+            return
         if self.source_viewport is not None:
             self.source_viewport.keyReleaseEvent(event)
 
@@ -399,6 +528,10 @@ class WgpuView(QWidget):
         return [self.packed.uids[i] for i in self.rect_rows(x0, y0, x1, y1)]
 
     def closeEvent(self, event):
+        self._closed = True
+        tracker = getattr(self, '_instance_updates', None)
+        if tracker is not None and tracker.unsubscribe is not None:
+            tracker.unsubscribe()
         self.renderer = None
         if hasattr(self, '_inference_worker'):
             self._inference_worker.shutdown(wait=False, cancel_futures=True)

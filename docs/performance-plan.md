@@ -1775,6 +1775,80 @@ Both crates were built in this worktree with Python 3.13 and isolated Cargo
 storage. No push or PR was made. Source documents were read-only. No debug
 build directories existed before capture; builds and Rust tests use release.
 
+
+## R2b — 2026-11-09: resident updates and first native tools
+
+Tape, placement Move and explicit tool dispatch are implemented on the native
+view. Move/tag/insertion gates pass in the recorded ride run. The strict drag
+gate remains **unresolved**: the final sample reached 35.12 ms,
+above 33 ms, despite earlier sampled runs passing. This is not full R2b
+acceptance.
+
+**R2c integration checkpoint:** this worktree's `MainWindow._activate_tool`
+still disables tool activation when `INGETRAZO_WGPU=1`. R2c owns that file;
+it was not edited here. Its integration must remove that legacy guard and
+avoid the GL-only Tape `start_from_hover` pickup on the native path. Native
+activation observes the source viewport's existing measurement signal and
+queues status refresh after the main-window action completes.
+
+### Resident update contract
+
+`InstanceUpdates` retains mesh identity/serial and uid-to-row tables. Mutated
+prototypes use one R1b bake for the changed set. Replacements retain prototype
+IDs; removed placements become hidden tombstones. Empty containers have serial
+sentinels instead of GPU rows. New group objects carrying an existing uid
+refresh row resolution without changing the row ID.
+
+The native APIs are `update_instances(ids, rows)`, `remove_instances(ids)` and
+`replace_prototype(id, vertices, indices, bounds, face_count)`. Native instance,
+geometry, prototype and indirect allocations grow by doubling. Prototype
+bindings expose their logical length so spare capacity does not change the
+shader's edge-command offset. Adjacent updated rows share queue writes;
+unchanged color overrides submit no writes. Highlight and override state
+survives row updates and allocation growth.
+
+History's existing listeners identify root Move, Insert/Delete and
+record/registry commands, including compound commands and undo/redo. Known
+record edits do not scan placements or submit GPU work. Untracked edits use a
+conservative full placement scan, without rebaking unchanged prototypes.
+Bounds update locally, with a full bounds reduction when an edited row held a
+scene extremum. Host array append/storage and command-range bookkeeping still
+have costs proportional to table size for structural changes.
+
+Initial exact inference still waits for background preparation. Once ready,
+`ResidentInference` retains the initial acceleration and unchanged prototype
+BVHs. Edited rows get small placement sets on their next query; only mutated
+prototype BVHs rebuild. A placement edit no longer destroys a document-sized
+index during input. Replacement geometry is append-only, and the initial
+inference acceleration retains its original geometry until scene release.
+Reclamation remains necessary for sustained mesh editing.
+
+### Tools and document semantics
+
+The adapter invokes the existing Tape tool with snapped world points; its
+rubber line and length label use the overlay, alongside the R2a inference
+lines. Completed measurements remain in the measurement field. The supported
+R2b workflow is two-point measurement; parallel-guide acquisition through GL
+edge picking is not invoked by this adapter.
+
+Move previews update resident instance matrices without mutating the document.
+Commit first restores the preview, then executes `MoveGroupCommand`, or the
+same `CompoundCommand` wrapper used by GL. Esc restores the preview; typed
+numeric input accepts Enter. Pickup presents its zero-distance feedback;
+unchanged preview matrices are not rewritten. Hiding the native view cancels
+an uncommitted preview. The source tool receives the native anchor for keyboard
+inference. Select and navigation retain their existing native paths. Other
+tools show "not yet available on the Metal renderer" and remain inert.
+
+The GL viewport implementation is unchanged. Full application shortcut and
+renderer-switch GUI acceptance still depends on the R2c integration above.
+R2a's documented limitations for cross-placement and reference inference
+remain; these tests do not establish exhaustive inference parity.
+
+### Builds and tests
+
+Private Python 3.13 environment and Cargo cache:
+
 ```sh
 python3.13 -m venv .venv-work
 .venv-work/bin/pip install -r requirements.txt maturin
@@ -1942,3 +2016,71 @@ is reported separately in the handover):
 - `e034bc91` Benchmark faces-only configurations retain their requested edge state
 - `ede478e5` Profile classification reuses one local camera vector per visible placement
 - `d3705514` Renderer comparisons restore and record the same fitted camera
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2b-tmp .venv-work/bin/python -m pytest -q tests/test_wgpu_updates.py tests/test_wgpu_interaction.py tests/test_wgpu_scene.py tests/test_wgpu_overlay.py
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_core/Cargo.toml
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen TMPDIR=$PWD/.r2b-tmp .venv-work/bin/python scripts/pytest_batches.py -m 'not slow' --batches 60
+.venv-work/bin/python scripts/wgpu_r2b_smoke.py
+.venv-work/bin/python scripts/wgpu_r2b_measure.py /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz
+```
+
+Both release builds passed. Focused Python: **50 passed**. Rust: **4 core,
+7 renderer passed**. Coverage includes shared and new prototypes, stable row
+IDs, insertion/deletion/undo/redo, record-only no-ops, Tape versus direct GL
+tool measurement, native Move preview/commit, Esc/Enter dispatch, immediate
+unsupported-tool status, local inference hits and unchanged-prototype reuse.
+Rust checks include growth, flag preservation and contiguous write ranges.
+The native-window smoke, bounded externally to 120 seconds, exercised instance
+and prototype growth (including spare capacity), replacement and removal
+without a wgpu validation error.
+
+The broad suite ran once. Batches 1–59 completed; the runner hit **ENOSPC while
+reporting batch 60**. Only this worktree's temporary/debug outputs were removed.
+The final 12 files were then rerun in four groups of three: **197 passed,
+4 skipped**. No batch exceeded 30 minutes; the longest completed batch was
+600.87 seconds. Aggregate across the 59 completed batches and recovery:
+**7,133 passed, 19 failed, 138 skipped, 2 xfailed, 805 deselected, 56 warnings**.
+
+This is not an exact match to the supplied 19-failure baseline: **18 baseline
+failures reproduced** (14 translations including Arabic, cursor pick, extension
+wrapping, hidden panels and toolbar bold). The swatch-tooltip failure did not
+reproduce in recovery. One additional extension-catalog test exceeded its
+15-second worker wait; its isolated rerun passed (**1 passed, 2.10 s**).
+Final inference, allocation and dispatch refinements followed the broad run;
+the focused Python, Rust, native smoke and ride checks were rerun afterward.
+The broad suite was not run a second time.
+
+[Validation, failure names and implementation commits](benchmarks/wgpu-r2b-2026-11-09/validation.json)
+and [batch/recovery summaries](benchmarks/wgpu-r2b-2026-11-09/suite-summary.txt)
+retain the exact hand-over evidence.
+
+### Ride measurements
+
+Read-only input: 76,029 resident placements, 1000×700 logical pixels at 2×,
+MSAA disabled. Each native diagnostic was externally bounded to 290 seconds.
+The model and initial inference settle before editing; the pickup frame is
+presented before measuring drag. The final run follows this agent's suite;
+other machine workloads are not controlled. GPU timestamp samples are
+asynchronous and may repeat. OS compositor presentation is not measured.
+
+| Operation | Final measurement | Gate |
+| --- | --- | --- |
+| One leaf placement, History through row submission | 1.94 ms; one row | Local update |
+| Same move through render and synchronous ID readback | 22.24 ms | Under 50 ms |
+| Tag 1,000 placements through the bridge's History command | 19.92 ms; zero renderer calls | No GPU work |
+| Insert shared component through History | 4.21 ms; one instance row | No geometry bake/upload |
+| 1,000-placement dispatched drag, 30 frames | mean 26.84, p95 34.64, max 35.12 ms | **33 ms gate not consistently met** |
+
+The tag diagnostic exercises the same record command used by the bridge;
+bridge transport itself is excluded. During dispatched drag, preview submission
+max was 0.61 ms, hover max 30.25 ms and GPU sample max
+35.90 ms. Earlier settled samples passed the drag gate, but the final
+sample above is retained rather than selecting the fastest run. Readback and
+renderer timing under the shared workload need further work with R-look.
+[Raw final samples](benchmarks/wgpu-r2b-2026-11-09/ride.json) include per-stage
+hover, preview, frame and overlay timings.
+
+R3 remains live mesh tools (push/pull, line, erase), loose-face transforms and
+sheets. The unresolved drag gate and R2c activation checkpoint remain R2b
+acceptance work; they are not silently deferred to R3. No PR or push was made.

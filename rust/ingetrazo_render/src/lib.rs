@@ -33,6 +33,17 @@ struct Scene {
     material_shifts: Vec<i64>,
     inst: wgpu::Buffer,
     flags: Vec<u32>,
+    rows: Vec<u8>,
+    protos: wgpu::Buffer,
+    prototype_data: Vec<u8>,
+    survivors: wgpu::Buffer,
+    template_data: Vec<u8>,
+    capacity: usize,
+    edge_data: Vec<u8>,
+    edge_records: wgpu::Buffer,
+    viewpoints: wgpu::Buffer,
+    vertex_data: Vec<u8>,
+    index_data: Vec<u8>,
     vertex: wgpu::Buffer,
     index: wgpu::Buffer,
     commands: wgpu::Buffer,
@@ -96,6 +107,30 @@ struct Renderer {
     #[pyo3(get)]
     adapter: String,
 }
+fn row_runs(mut ids: Vec<usize>) -> Vec<(usize, usize)> {
+    ids.sort_unstable();
+    ids.dedup();
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for id in ids {
+        if let Some(last) = runs.last_mut() {
+            if last.1 == id {
+                last.1 += 1;
+                continue;
+            }
+        }
+        runs.push((id, id + 1));
+    }
+    runs
+}
+
+fn grown_capacity(current: usize, needed: usize) -> usize {
+    current.max(needed.max(1).next_power_of_two())
+}
+
+fn merge_instance_flags(old: u32, incoming: u32) -> u32 {
+    (old & 6) | (incoming & 1)
+}
+
 fn texture(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
     d.create_texture(&wgpu::TextureDescriptor {
         label: None,
@@ -135,6 +170,27 @@ fn buffer(d: &wgpu::Device, bytes: &[u8], usage: wgpu::BufferUsages) -> wgpu::Bu
         usage,
     })
 }
+fn capacity_buffer(d: &wgpu::Device, bytes: &[u8], capacity: usize, usage: wgpu::BufferUsages) -> wgpu::Buffer {
+    let mut padded = vec![0; capacity];
+    padded[..bytes.len()].copy_from_slice(bytes);
+    buffer(d, &padded, usage)
+}
+
+fn bind_prototypes(d: &wgpu::Device, layout: &wgpu::BindGroupLayout,
+    buffers: &[&wgpu::Buffer], count: u32) -> wgpu::BindGroup {
+    // arrayLength(proto) defines the edge-command offset in the shader.
+    // Bind the logical range even when its allocation has spare capacity.
+    let entries: Vec<_> = buffers.iter().enumerate().map(|(i, b)| wgpu::BindGroupEntry {
+        binding: i as u32,
+        resource: if i == 2 {
+            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: b, offset: 0, size: std::num::NonZeroU64::new(count as u64 * 32),
+            })
+        } else { b.as_entire_binding() },
+    }).collect();
+    d.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout, entries: &entries })
+}
+
 fn bind(
     d: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -435,6 +491,12 @@ impl Renderer {
         }
         let n = instances.len() / 80;
         let count = p.len() / 32;
+        let capacity = grown_capacity(0, n);
+        let prototype_capacity = grown_capacity(0, count);
+        let limit = self.device.limits().max_storage_buffer_binding_size as usize;
+        if capacity * 80 > limit || prototype_capacity * 40 > limit {
+            return Err(PyValueError::new_err("scene capacity exceeds storage binding limit"));
+        }
         let mut counts = vec![0u32; count];
         for row in instances.chunks_exact(80) {
             let id = u32::from_le_bytes(row[64..68].try_into().unwrap()) as usize;
@@ -477,35 +539,43 @@ impl Renderer {
         if expanded_v.len() as u64 > self.device.limits().max_storage_buffer_binding_size as u64 {
             return Err(PyValueError::new_err("edge records exceed storage binding limit"));
         }
-        let edge_records = buffer(&self.device, &expanded_v, wgpu::BufferUsages::STORAGE);
-        let vertex = buffer(&self.device, v, wgpu::BufferUsages::VERTEX);
-        let index = buffer(&self.device, ix, wgpu::BufferUsages::INDEX);
-        let protos = buffer(&self.device, p, wgpu::BufferUsages::STORAGE);
+        let edge_records = buffer(&self.device, &expanded_v, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
+        let vertex = buffer(&self.device, v, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
+        let index = buffer(&self.device, ix, wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST);
+        let protos = capacity_buffer(&self.device, p, prototype_capacity * 32, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
+        let mut padded = vec![0; capacity * 80];
+        for row in padded.chunks_exact_mut(80) {
+            row[72] = 1;
+        }
+        padded[..instances.len()].copy_from_slice(instances);
+
         let inst = buffer(
             &self.device,
-            instances,
+            &padded,
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         );
-        let commands = buffer(
+        let commands = capacity_buffer(
             &self.device,
             cmd,
+            prototype_capacity * 40,
             wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::INDIRECT
                 | wgpu::BufferUsages::COPY_DST,
         );
-        let template = buffer(&self.device, cmd, wgpu::BufferUsages::COPY_SRC);
+        let template = capacity_buffer(&self.device, cmd, prototype_capacity * 40, wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
         let mut hard_cmd = cmd.to_vec();
         for row in hard_cmd.chunks_exact_mut(20).skip(count) {
             let hard_count = row[16..20].to_vec();
             row[..4].copy_from_slice(&hard_count);
         }
-        let hard_template = buffer(&self.device, &hard_cmd, wgpu::BufferUsages::COPY_SRC);
-        let survivors = buffer(&self.device, &vec![0; n * 4], wgpu::BufferUsages::STORAGE);
-        let viewpoints = buffer(&self.device, &vec![0; n * 16], wgpu::BufferUsages::STORAGE);
-        let compute = bind(
+        let hard_template = capacity_buffer(&self.device, &hard_cmd, prototype_capacity * 40, wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
+        let survivors = buffer(&self.device, &vec![0; capacity * 4], wgpu::BufferUsages::STORAGE);
+        let viewpoints = buffer(&self.device, &vec![0; capacity * 16], wgpu::BufferUsages::STORAGE);
+        let compute = bind_prototypes(
             &self.device,
             &self.compute.get_bind_group_layout(0),
             &[&self.camera, &inst, &protos, &commands, &survivors, &viewpoints],
+            count as u32,
         );
         let draw = bind(
             &self.device,
@@ -535,8 +605,19 @@ impl Renderer {
                 as u64 + self.textures.bytes + self.textures.materials.size();
         self.ids_dirty = true;
         self.scene = Some(Scene {
+            edge_data: expanded_v,
+            edge_records,
+            viewpoints,
             material_shifts,
             inst,
+            rows: instances.to_vec(),
+            protos,
+            prototype_data: p.to_vec(),
+            survivors,
+            template_data: cmd.to_vec(),
+            capacity,
+            vertex_data: v.to_vec(),
+            index_data: ix.to_vec(),
             flags: instances
                 .chunks_exact(80)
                 .map(|r| u32::from_le_bytes(r[72..76].try_into().unwrap()))
@@ -558,6 +639,180 @@ impl Renderer {
         self.device.poll(wgpu::Maintain::Wait);
         Ok(())
     }
+    /// Append compact replacement ranges while preserving placement identities.
+    fn replace_prototype(&mut self, id: usize, vertices: PyReadonlyArray1<'_, u8>,
+        indices: PyReadonlyArray1<'_, u8>, bounds: PyReadonlyArray1<'_, u8>, faces: u32) -> PyResult<()> {
+        let (v, ix, bounds) = (vertices.as_slice()?, indices.as_slice()?, bounds.as_slice()?);
+        let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+        if id > s.p as usize || v.len()%28 != 0 || ix.len()%4 != 0 || bounds.len()!=32 || faces as usize > ix.len()/4 {
+            return Err(PyValueError::new_err("invalid prototype"));
+        }
+        if ix.chunks_exact(4).any(|i| u32::from_le_bytes(i.try_into().unwrap()) as usize >= v.len()/28) {
+            return Err(PyValueError::new_err("vertex index out of range"));
+        }
+        let source = [Command { count: faces, instances: 0, first: 0, base: 0, start: 0 },
+            Command { count: ix.len() as u32/4-faces, instances: 0, first: faces, base: 0, start: 0 }];
+        let (edge, expanded_ix, mut commands) = edges::expand(v, ix, bytemuck::cast_slice(&source), 1).map_err(PyValueError::new_err)?;
+        let (face, indices, shifts) = faces::compact(v, &expanded_ix, &mut commands, 1);
+        let edge_base = s.edge_data.len()/48;
+        let vertex_base = s.vertex_data.len()/28;
+        let index_base = s.index_data.len()/4;
+        if (s.edge_data.len()+edge.len()).next_power_of_two() > self.device.limits().max_storage_buffer_binding_size as usize {
+            return Err(PyValueError::new_err("edge capacity exceeds storage binding limit"));
+        }
+        if id == s.p as usize {
+            let old_p = s.p as usize;
+            s.p += 1;
+            s.prototype_data.extend_from_slice(bounds);
+            s.material_shifts.push(0);
+            s.template_data.splice(old_p*20..old_p*20, [0;20]);
+            s.template_data.extend_from_slice(&[0;20]);
+        }
+        s.material_shifts[id] = vertex_base as i64 + shifts[0];
+        s.prototype_data[id*32..(id+1)*32].copy_from_slice(bounds);
+        s.vertex_data.extend_from_slice(&face);
+        s.index_data.extend_from_slice(&indices);
+        s.edge_data.extend_from_slice(&edge);
+        for (target, data, usage, offset, addition) in [
+            (&mut s.vertex, &s.vertex_data, wgpu::BufferUsages::VERTEX, vertex_base*28, face.as_slice()),
+            (&mut s.index, &s.index_data, wgpu::BufferUsages::INDEX, index_base*4, indices.as_slice()),
+            (&mut s.edge_records, &s.edge_data, wgpu::BufferUsages::STORAGE, edge_base*48, edge.as_slice())] {
+            if data.len() as u64 > target.size() {
+                *target = capacity_buffer(&self.device, data, grown_capacity(target.size() as usize, data.len()), usage | wgpu::BufferUsages::COPY_DST);
+            } else if !addition.is_empty() { self.queue.write_buffer(target, offset as u64, addition); }
+        }
+        let mut face_cmd: Command = bytemuck::pod_read_unaligned(&commands[..20]);
+        face_cmd.base += vertex_base as i32;
+        face_cmd.first += index_base as u32;
+        let mut edge_cmd: [u32;5] = bytemuck::pod_read_unaligned(&commands[20..]);
+        edge_cmd[2] += edge_base as u32*6;
+        s.template_data[id*20..(id+1)*20].copy_from_slice(bytemuck::bytes_of(&face_cmd));
+        s.template_data[(id+s.p as usize)*20..(id+s.p as usize+1)*20].copy_from_slice(bytemuck::bytes_of(&edge_cmd));
+        let mut counts = vec![0u32; s.p as usize];
+        for row in s.rows.chunks_exact(80) { counts[u32::from_le_bytes(row[64..68].try_into().unwrap()) as usize] += 1; }
+        let mut start = 0u32;
+        for (i, count) in counts.into_iter().enumerate() {
+            s.template_data[i*20+16..i*20+20].copy_from_slice(&start.to_le_bytes());
+            let offset = (i+s.p as usize)*20+12;
+            s.template_data[offset..offset+4].copy_from_slice(&start.to_le_bytes());
+            start += count;
+        }
+        let mut hard = s.template_data.clone();
+        for row in hard.chunks_exact_mut(20).skip(s.p as usize) { let count = row[16..20].to_vec(); row[..4].copy_from_slice(&count); }
+        for (target, data, usage) in [
+            (&mut s.protos, &s.prototype_data, wgpu::BufferUsages::STORAGE),
+            (&mut s.template, &s.template_data, wgpu::BufferUsages::COPY_SRC),
+            (&mut s.hard_template, &hard, wgpu::BufferUsages::COPY_SRC),
+            (&mut s.commands, &s.template_data, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT)] {
+            if data.len() as u64 > target.size() { *target = capacity_buffer(&self.device, data, grown_capacity(target.size() as usize, data.len()), usage | wgpu::BufferUsages::COPY_DST); }
+            else { self.queue.write_buffer(target, 0, data); }
+        }
+        s.compute = bind_prototypes(&self.device, &self.compute.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors, &s.viewpoints], s.p);
+        s.edge_draw = bind(&self.device, &self.edge.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors, &s.edge_records, &s.viewpoints]);
+        s.xray_edge_draw = bind(&self.device, &self.xray_edge.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors, &s.edge_records, &s.viewpoints]);
+        s.profile_draw = bind(&self.device, &self.profile_top.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors, &s.edge_records, &s.viewpoints]);
+        self.aa.bind_scene(&self.device, &self.camera, &s.inst, &s.survivors, &self.look.buffer, &s.edge_records, &s.viewpoints);
+        self.ids_dirty = true;
+        Ok(())
+    }
+
+    /// Update existing resident rows without replacing geometry or pick IDs.
+    fn update_instances(&mut self, ids: Vec<usize>, rows: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
+        self.ids_dirty = true;
+        let rows = rows.as_slice()?;
+        let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+        if rows.len() != ids.len() * 80 {
+            return Err(PyValueError::new_err("invalid instance rows"));
+        }
+        for row in rows.chunks_exact(80) {
+            if u32::from_le_bytes(row[64..68].try_into().unwrap()) >= s.p {
+                return Err(PyValueError::new_err("prototype id out of range"));
+            }
+        }
+        let max_rows = self.device.limits().max_storage_buffer_binding_size as usize / 80;
+        if ids.iter().any(|&id| id >= max_rows) {
+            return Err(PyValueError::new_err("instance rows exceed storage binding limit"));
+        }
+        let n = ids.iter().map(|i| i + 1).max().unwrap_or(0).max(s.n as usize);
+        if grown_capacity(s.capacity, n) > max_rows {
+            return Err(PyValueError::new_err("instance capacity exceeds storage binding limit"));
+        }
+        let structure = n != s.n as usize || ids.iter().zip(rows.chunks_exact(80)).any(|(&id, row)|
+            row[64..68] != s.rows[id*80+64..id*80+68]);
+        let old_n = s.n as usize;
+        s.rows.resize(n * 80, 0);
+        s.flags.resize(n, 1);
+        for row in s.rows[old_n*80..].chunks_exact_mut(80) {
+            row[72] = 1;
+        }
+        if n > s.capacity {
+            s.capacity = grown_capacity(s.capacity, n);
+            let mut padded = vec![0; s.capacity*80];
+            for row in padded.chunks_exact_mut(80) {
+                row[72] = 1;
+            }
+            padded[..s.rows.len()].copy_from_slice(&s.rows);
+            s.inst = buffer(&self.device, &padded, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
+            s.survivors = buffer(&self.device, &vec![0; s.capacity*4], wgpu::BufferUsages::STORAGE);
+            s.viewpoints = buffer(&self.device, &vec![0; s.capacity*16], wgpu::BufferUsages::STORAGE);
+            s.compute = bind_prototypes(&self.device, &self.compute.get_bind_group_layout(0),
+                &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors, &s.viewpoints], s.p);
+            s.draw = bind(&self.device, &self.draw.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
+            s.edge_draw = bind(&self.device, &self.edge.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors, &s.edge_records, &s.viewpoints]);
+            s.xray_draw = bind(&self.device, &self.xray.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
+            s.xray_edge_draw = bind(&self.device, &self.xray_edge.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors, &s.edge_records, &s.viewpoints]);
+            s.profile_draw = bind(&self.device, &self.profile_top.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors, &s.edge_records, &s.viewpoints]);
+            self.aa.bind_scene(&self.device, &self.camera, &s.inst, &s.survivors, &self.look.buffer, &s.edge_records, &s.viewpoints);
+            self.transparency.bind_scene(&self.device, &self.camera, &s.inst, &s.survivors, &self.look.buffer);
+        }
+        s.n = n as u32;
+        for (&id, row) in ids.iter().zip(rows.chunks_exact(80)) {
+            let mut value = row.to_vec();
+            let flags = u32::from_le_bytes(row[72..76].try_into().unwrap());
+            s.flags[id] = merge_instance_flags(s.flags[id], flags);
+            value[72..76].copy_from_slice(&s.flags[id].to_le_bytes());
+            value[76..80].copy_from_slice(&s.rows[id*80+76..id*80+80]);
+            s.rows[id*80..(id+1)*80].copy_from_slice(&value);
+        }
+        for (first, end) in row_runs(ids) {
+            self.queue.write_buffer(&s.inst, first as u64 * 80, &s.rows[first*80..end*80]);
+        }
+        if structure {
+            let mut counts = vec![0u32; s.p as usize];
+            for row in s.rows.chunks_exact(80) {
+                counts[u32::from_le_bytes(row[64..68].try_into().unwrap()) as usize] += 1;
+            }
+            let mut starts = vec![0u32; counts.len()];
+            for i in 1..counts.len() {
+                starts[i] = starts[i-1] + counts[i-1];
+            }
+            for (i, command) in s.template_data.chunks_exact_mut(20).enumerate() {
+                let offset = if i < s.p as usize { 16 } else { 12 };
+                command[offset..offset+4].copy_from_slice(&starts[i % starts.len()].to_le_bytes());
+            }
+            self.queue.write_buffer(&s.template, 0, &s.template_data);
+            let mut hard = s.template_data.clone();
+            for row in hard.chunks_exact_mut(20).skip(s.p as usize) { let count = row[16..20].to_vec(); row[..4].copy_from_slice(&count); }
+            self.queue.write_buffer(&s.hard_template, 0, &hard);
+        }
+        Ok(())
+    }
+
+    /// Tombstones retain row identities so stale picks cannot select a neighbour.
+    fn remove_instances(&mut self, ids: Vec<usize>) -> PyResult<()> {
+        self.ids_dirty = true;
+        let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+        if ids.iter().any(|&id| id >= s.n as usize) {
+            return Err(PyValueError::new_err("instance id out of range"));
+        }
+        for id in ids {
+            s.flags[id] = 1;
+            s.rows[id*80+72..id*80+76].copy_from_slice(&1u32.to_le_bytes());
+            self.queue.write_buffer(&s.inst, id as u64 * 80 + 72, &1u32.to_le_bytes());
+        }
+        Ok(())
+    }
+
     #[pyo3(signature = (selected_ids, hovered_id=None))]
     fn set_highlight(
         &mut self,
@@ -579,6 +834,7 @@ impl Renderer {
                     | if hovered_id == Some(i) { 4 } else { 0 };
                 if next != *flag {
                     *flag = next;
+                    s.rows[i*80+72..i*80+76].copy_from_slice(&next.to_le_bytes());
                     self.queue
                         .write_buffer(&s.inst, i as u64 * 80 + 72, &next.to_le_bytes());
                 }
@@ -588,11 +844,15 @@ impl Renderer {
     }
     fn set_overrides(&mut self, colors: Vec<u32>) -> PyResult<()> {
         self.ids_dirty = true;
-        if let Some(s) = &self.scene {
+        if let Some(s) = &mut self.scene {
             if colors.len() != s.n as usize {
                 return Err(PyValueError::new_err("one override per instance required"));
             }
             for (i, color) in colors.iter().enumerate() {
+                if s.rows[i*80+76..i*80+80] == color.to_le_bytes() {
+                    continue;
+                }
+                s.rows[i*80+76..i*80+80].copy_from_slice(&color.to_le_bytes());
                 self.queue
                     .write_buffer(&s.inst, i as u64 * 80 + 76, &color.to_le_bytes());
             }
@@ -1258,5 +1518,32 @@ mod id_schedule_tests {
         assert!(super::needs_id_pass(false, true, true, 0));
         assert!(super::needs_id_pass(true, false, true, 2));
         assert!(!super::needs_id_pass(true, false, false, 3));
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    #[test]
+    fn growth_doubles_and_never_shrinks() {
+        assert_eq!(grown_capacity(8, 9), 16);
+        assert_eq!(grown_capacity(16, 4), 16);
+        assert_eq!(grown_capacity(8, 33), 64);
+        assert_eq!(grown_capacity(0, 0), 1);
+    }
+
+    #[test]
+    fn writes_join_adjacent_rows_without_touching_gaps() {
+        assert_eq!(row_runs(vec![4, 1, 2, 2, 8]), vec![(1, 3), (4, 5), (8, 9)]);
+        assert!(row_runs(vec![]).is_empty());
+        assert_eq!(row_runs((0..1000).rev().collect()), vec![(0, 1000)]);
+    }
+
+    #[test]
+    fn row_updates_preserve_selection_and_hover() {
+        assert_eq!(merge_instance_flags(6, 1), 7);
+        assert_eq!(merge_instance_flags(7, 0), 6);
+        assert_eq!(merge_instance_flags(0, 6), 0);
     }
 }

@@ -1,7 +1,7 @@
 """Reuse exact snap rules with resident prototype candidates, never a GL bake.
 
-Preparation owns only immutable packed arrays and runs away from Qt. Camera
-changes do not invalidate the native prototype BVHs or placement transforms.
+Initial preparation owns immutable packed arrays and runs away from Qt. Edits
+reuse unchanged prototype BVHs and create local placement sets only when queried.
 """
 from types import SimpleNamespace
 import numpy as np
@@ -10,19 +10,85 @@ from core import _native
 from core.snap import compute_snap
 
 
+def _prototype(packed, code):
+    face, edge = packed.commands[code], packed.edge_commands[code]
+    positions = packed.vertices['pos']
+    start = int(face['base'])
+    tris = positions[start:start + int(face['count'])].astype(np.float64).reshape(-1, 3, 3)
+    start += int(face['count'])
+    edges = positions[start:start + int(edge['count'])].astype(np.float64).reshape(-1, 6)
+    return _native.available().InstanceProto(
+        np.ascontiguousarray(tris[:, 0]),
+        np.ascontiguousarray(tris[:, 1] - tris[:, 0]),
+        np.ascontiguousarray(tris[:, 2] - tris[:, 0]), edges)
+
+
+class ResidentInference:
+    """Keep immutable prototype BVHs; edited IDs get a tiny local placement set.
+
+    Native hover queries always name one picked row. Retaining the original
+    set avoids both rebuilding and destroying a document-sized BVH on input.
+    Only queried edited rows construct a replacement placement acceleration.
+    """
+    def __init__(self, base, protos, packed):
+        self.base = base
+        self.protos = protos
+        self.initial = packed.instances.copy()
+        self.bounds = [bound.copy() for bound in packed.bounds]
+        self.rows = {}
+        self.changed = set()
+        self.local = {}
+
+    def update(self, ids, packed, changed_codes=()):
+        for code in changed_codes:
+            while len(self.protos) <= code:
+                self.protos.append(None)
+                self.bounds.append(None)
+            self.protos[code] = _prototype(packed, code)
+            self.bounds[code] = packed.bounds[code].copy()
+            self.changed.add(code)
+            for row, (cached_code, _) in list(self.local.items()):
+                if cached_code == code:
+                    del self.local[row]
+        for row in ids:
+            row = int(row)
+            self.rows[row] = packed.instances[row].copy()
+            self.local.pop(row, None)
+
+    def _query(self, name, rows, *args):
+        if len(rows) != 1:
+            raise ValueError('resident inference requires one picked row')
+        row = int(rows[0])
+        value = self.rows.get(row)
+        if value is None:
+            value = self.initial[row]
+        code = int(value['info'][0])
+        if row not in self.rows and code not in self.changed:
+            return getattr(self.base, name)(rows, *args)
+        if row not in self.local:
+            matrix = value['world'].astype(np.float64).T
+            bounds = self.bounds[code][:, :3].astype(np.float64)
+            center, extent = bounds.mean(axis=0), (bounds[1]-bounds[0])*.5
+            wc = matrix[:3, :3] @ center + matrix[:3, 3]
+            we = abs(matrix[:3, :3]) @ extent
+            index = _native.available().InstanceSet(
+                [self.protos[code]], np.array([0], np.int64),
+                value['world'].astype(np.float64).reshape(1, 16),
+                np.ascontiguousarray((wc-we).reshape(1, 3)),
+                np.ascontiguousarray((wc+we).reshape(1, 3)))
+            self.local[row] = (code, index)
+        return getattr(self.local[row][1], name)(np.array([0], np.int64), *args)
+
+    def ray_cands(self, rows, *args):
+        return self._query('ray_cands', rows, *args)
+
+    def edges_near(self, rows, *args):
+        return self._query('edges_near', rows, *args)
+
+
 def prepare(packed):
     native = _native.available()
-    protos = []
-    positions = packed.vertices['pos']
-    for face, edge in zip(packed.commands, packed.edge_commands):
-        start = int(face['base'])
-        tris = positions[start:start + int(face['count'])].astype(np.float64).reshape(-1, 3, 3)
-        start += int(face['count'])
-        edges = positions[start:start + int(edge['count'])].astype(np.float64).reshape(-1, 6)
-        protos.append(native.InstanceProto(
-            np.ascontiguousarray(tris[:, 0]),
-            np.ascontiguousarray(tris[:, 1] - tris[:, 0]),
-            np.ascontiguousarray(tris[:, 2] - tris[:, 0]), edges))
+    protos = [_prototype(packed, code) for code in range(len(packed.commands))]
     mats = packed.instances['world'].astype(np.float64).reshape(-1, 16)
     ids = packed.instances['info'][:, 0].astype(np.int64)
     bounds = packed.bounds[ids, :, :3].astype(np.float64)
@@ -31,8 +97,9 @@ def prepare(packed):
     extent = (bounds[:, 1] - bounds[:, 0]) / 2
     wc = np.einsum('nij,nj->ni', matrix[:, :3, :3], center) + matrix[:, :3, 3]
     we = np.einsum('nij,nj->ni', abs(matrix[:, :3, :3]), extent)
-    return native.InstanceSet(protos, ids, mats, np.ascontiguousarray(wc-we),
+    base = native.InstanceSet(protos, ids, mats, np.ascontiguousarray(wc-we),
                               np.ascontiguousarray(wc+we))
+    return ResidentInference(base, protos, packed)
 
 
 def surface(index, row, origin, direction):
