@@ -1,0 +1,32 @@
+[
+  {
+    "seconds": 21.06799183296971,
+    "rss": 4453482496,
+    "timings": {
+      "handoff": 17.98863475001417,
+      "native": 2.85360174998641,
+      "finish": 0.050025374977849424,
+      "peak_build_rss_bytes": 4453482496
+    },
+    "vertices": 887876696,
+    "materials": 255552,
+    "hidden_vertices": 0,
+    "textures": 4,
+    "uptime": "16:06  up 8 days,  9:55, 2 users, load averages: 10.80 8.96 9.34"
+  },
+  {
+    "seconds": 22.520507083041593,
+    "rss": 6616875008,
+    "timings": {
+      "handoff": 19.283841875032522,
+      "native": 2.742755249957554,
+      "finish": 0.05131162505131215,
+      "peak_build_rss_bytes": 6616875008
+    },
+    "vertices": 887876696,
+    "materials": 255552,
+    "hidden_vertices": 0,
+    "textures": 4,
+    "uptime": "16:06  up 8 days,  9:56, 2 users, load averages: 12.96 9.63 9.57"
+  }
+]
