@@ -221,7 +221,10 @@ class RecordTools(LinkTools):
 
     def _tool_set_registry(self, value):
         value = json_value(value)
-        self._viewport.history.execute(SetRegistryCommand(value))
+        history = self._viewport.history
+        history.execute(SetRegistryCommand(value))
+        if history.last_rejected or history.last_error:
+            raise ValueError(history.last_rejected or history.last_error)
         return self._tool_query_registry()
 
     def _registry_upsert(self, section, key, value):

@@ -89,6 +89,11 @@ cuerpo nunca llega a leerse. Aun así, **detén el puente cuando no lo uses**.
 | `query_record` / `query_records` | Fichas, tipos resueltos, problemas de validación y grupos sin clasificar; paginación y totales. |
 | `query_vocabulary` / `query_registry` | Clases, propiedades comunes y vocabulario del registro del proyecto. |
 | `set_record` / `tag` / `untag` | Edita las fichas de varios grupos en un paso de undo; valida antes de aplicar. |
+| `query_structure` | Árbol ordenado, nodo activo, recetas efectivas y conteos de miembros. |
+| `set_structure` | Sustituye la sección con `value` o modifica campos por nodo con `patch`. Un nodo nulo se elimina. Sincroniza los miembros en el mismo paso de undo. |
+| `file` | Archiva `uids` en `node` y aplica su etiqueta y receta. |
+| `query_unsorted` | Lista paginada de objetos pendientes de archivar o revisar. |
+| `bootstrap_structure` | Propone un árbol a partir de las etiquetas. Devuelve los conflictos y sólo aplica con `apply=true`. |
 | `add_classification` / `remove_classification` | Combina o elimina clasificaciones por objeto en un paso de undo. |
 | `set_registry` / `add_classification_system` / `import_classification_codes` | Sustituye el registro, añade un espacio de clasificación o importa códigos CSV. |
 | `set_type` / `set_system` | Crea o sustituye tipos y sistemas del proyecto. |
@@ -245,6 +250,11 @@ uids frame first, and the response includes the camera used. MCP returns the
 image with camera metadata as an additional text content block.
 
 ## Classifying a model with an agent
+
+For a structured project, read `query_structure`, page through `query_unsorted`,
+then `file(uids, node)`. To migrate existing tags, preview `bootstrap_structure()`
+and inspect conflicts before `apply=true`. A null-class recipe preserves any
+existing record. A forced node deletion clears its local memberships.
 
 Start with `query_records(untagged=True)` and inspect each page using
 `query_entity(uid=...)` and `screenshot(uids=[...])`. Learn the available

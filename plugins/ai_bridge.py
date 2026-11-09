@@ -82,9 +82,10 @@ class _NoDialogs(QObject):
 from core.agent_inspection import InspectionTools
 from core.agent_records import RecordTools
 from core.agent_facets import FacetTools
+from core.agent_structure import StructureTools
 
 
-class _Bridge(QObject, InspectionTools, RecordTools, FacetTools):
+class _Bridge(QObject, InspectionTools, RecordTools, FacetTools, StructureTools):
     """The in-app half: accepts one agent connection and executes its tool
     calls on the Qt main thread."""
 
@@ -246,6 +247,7 @@ class _Bridge(QObject, InspectionTools, RecordTools, FacetTools):
             if entry is None:
                 raise ValueError(f"unknown tool {tool!r}")
             if (entry['mutates'] and tool not in ('set_active_file', 'open_project')
+                    and not (tool == 'bootstrap_structure' and not args.get('apply'))
                     and getattr(self._viewport.scene, 'worksession_read_only', False)):
                 raise ValueError('Choose this file in Worksession before editing it')
             from core.agent_tools import json_value
