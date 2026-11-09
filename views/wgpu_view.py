@@ -1,7 +1,7 @@
 """Native Metal input and presentation sharing the document camera and selection."""
 import time
 import numpy as np
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QEvent
 from PySide6.QtGui import QColor, QVector3D
 from PySide6.QtWidgets import QWidget
 from core.camera import OrbitCamera
@@ -585,6 +585,15 @@ class WgpuView(QWidget):
             self.source_viewport.notify_scene_changed()
             self.update()
 
+    def event(self, event):
+        if event.type() == QEvent.ShortcutOverride and hasattr(self, 'tools'):
+            self.tools.sync()
+            claims = getattr(self.tools.tool, 'claims_key', None)
+            if claims is not None and claims(event.key(), event.modifiers()):
+                event.accept()
+                return True
+        return super().event(event)
+
     def keyPressEvent(self, event):
         mode = self.tools.sync()
         if event.key() == Qt.Key_Escape:
@@ -612,6 +621,8 @@ class WgpuView(QWidget):
     def keyReleaseEvent(self, event):
         mode = self.tools.sync()
         release = getattr(self.tools.tool, 'on_key_release', None)
+        if mode == 'mesh' and event.isAutoRepeat() and callable(getattr(self.tools.tool, 'claims_key', None)):
+            return
         if mode == 'mesh' and release is not None and release(self.tools, event.key()):
             self.tools.update()
             return

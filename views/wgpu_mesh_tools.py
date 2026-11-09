@@ -231,6 +231,18 @@ class MeshToolAccess:
         Viewport._draw_dimensions(self, painter)
         Viewport._draw_text_labels(self, painter)
         Viewport._draw_geo_paths(self, painter)
+        Viewport._draw_guides(self, painter)
+        from views.viewport import shown_guides
+        from PySide6.QtCore import Qt, QPointF
+        from PySide6.QtGui import QPen
+        painter.setPen(QPen(QColor('#465a78'), 1, Qt.DashLine))
+        for guide in shown_guides(self.scene):
+            if guide.is_line:
+                segment = Viewport._guide_snap_segment(self, guide)
+                if segment is not None:
+                    pixels = self._segment_to_pixels(*segment)
+                    if pixels is not None:
+                        painter.drawLine(QPointF(*pixels[0]), QPointF(*pixels[1]))
         hook = getattr(self.tool, 'draw_overlay', None)
         if hook is not None:
             hook(self, painter)
