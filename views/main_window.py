@@ -3632,7 +3632,8 @@ class MainWindow(QMainWindow):
         self.viewport.set_active_tool(tool)
         if key == "tape" and not metal:
             tool.start_from_hover(self.viewport)
-        if metal and key not in ("select", "orbit", "pan", "zoom", "tape", "move"):
+        from views.wgpu_tools import TOOL_DISPATCH
+        if metal and type(tool).__name__ not in TOOL_DISPATCH:
             self.statusBar().showMessage(
                 tr("{name} is not yet available on the Metal renderer.",
                    name=tr(tool.name)), 4000)

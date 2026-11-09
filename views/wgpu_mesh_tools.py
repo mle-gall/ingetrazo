@@ -191,7 +191,24 @@ class MeshToolAccess:
     pick_image = pick_dimension
     pick_image_plane = pick_dimension
     _group_obb = pick_dimension
-    end_groups_preview = pick_dimension
+    def begin_groups_preview(self, groups):
+        selected = {g.uid for root in groups for g, _ in iter_placements(root)}
+        self.ids = np.asarray([row for uid in selected
+                               for row in self.view.uid_rows.get(uid, ())], np.int64)
+        self.original = self.view.packed.instances[self.ids].copy()
+
+    def set_groups_preview_matrix(self, matrix):
+        if self.original is None:
+            return
+        transform = np.asarray(matrix.data(), np.float32).reshape(4, 4).T
+        rows = self.original.copy()
+        rows['world'] = (transform @ rows['world'].transpose(0, 2, 1)).transpose(0, 2, 1)
+        self.write_rows(rows)
+
+    def end_groups_preview(self):
+        self.restore()
+        self.original = None
+
     image_plane_at = pick_dimension
 
     def _nearby_loose_edges(self, *args, **kwargs):
