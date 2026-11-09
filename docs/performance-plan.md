@@ -1283,3 +1283,40 @@ completed batches, 1,267 passed / 18 failed / 48 skipped / 1 deselected;
 all observed failures match the baseline, but the remainder is unverified.
 Ride default timed out without an image; edges-off wrote its image before
 a shutdown timeout. Its width-4 diagnostic exited normally.
+
+## R-look 3a — 2026-11-09: wgpu horizon ambient occlusion
+
+AO is now a depth-based post pass in `ao.rs` / `ao.wgsl`, porting the GL
+horizon integral, two plane-aware blur passes, depth-aware upsampling and bounced
+light fit. Shared style settings control enablement, Distance and intensity;
+X-ray/wireframe bypass AO. It composites before edges and overlays, with 1x and
+4x MSAA. Half resolution is the default; full resolution is available through
+the diagnostic style payload. AO-off retains the combined geometry pass. GL
+behaviour and source model files are unchanged.
+
+[Comparison images and pixel differences](benchmarks/wgpu-look-2026-11-09/r-look-3a/samples.md),
+[full report and commands](benchmarks/wgpu-look-2026-11-09/r-look-3a/README.md),
+and [cost methodology](benchmarks/wgpu-look-2026-11-09/r-look-3a/costs.md).
+The paired ride images isolate `Groupe#310` (264 placements); costs retain the
+complete 76,029-instance ride with a closer camera, 2000×1400 at 2× HiDPI.
+
+| AO | MSAA | CPU ms | GPU ms | Wall ms |
+|---|---|---:|---:|---:|
+| off | off | 20.66 | 21.17 | 20.88 |
+| half | off | 16.80 | 18.46 | 17.02 |
+| full | off | 18.04 | 22.03 | 19.80 |
+| off | on | 33.11 | 33.30 | 33.29 |
+| half | on | 37.26 | 38.26 | 37.37 |
+| full | on | 41.58 | 42.20 | 41.69 |
+
+Three rounds, 105 measured frames per configuration. These are contended whole
+frame samples, not isolated AO timings: the no-MSAA AO-off anomaly makes direct
+subtraction unreliable. Full resolution is 3.57/3.94 ms slower than half in these
+samples. The isolated ~3 ms AO budget remains unverified. AO-change RGB MAE versus
+GL is 0.458/255 (pusher car), 0.205/255 (marquee), 0.024/255 (ride section).
+
+Remaining differences: existing materials and axes, single-sample depth at MSAA
+silhouettes, and no foliage exclusion mask in the current wgpu material stream.
+Both native release builds succeeded; renderer Rust tests **8 passed**, focused
+Python payload tests **2 passed**. Full-suite results follow when the bounded run
+completes.

@@ -30,6 +30,10 @@ parser.add_argument('--mode', choices=('shaded', 'hidden_line', 'monochrome', 'w
 parser.add_argument('--pitch', type=float)
 parser.add_argument('--ao', choices=('off', 'half', 'full'), default='half')
 parser.add_argument('--section', action='store_true')
+parser.add_argument('--root-limit', type=int)
+parser.add_argument('--root-start', type=int, default=0)
+parser.add_argument('--metal-only', action='store_true')
+parser.add_argument('--matrix', action='store_true')
 parser.add_argument('--capture-only', action='store_true')
 parser.add_argument('--output', type=Path, default=out)
 parser.add_argument('--edges-off', action='store_true')
@@ -40,7 +44,7 @@ args = parser.parse_args()
 out = args.output
 out.mkdir(parents=True, exist_ok=True)
 source = args.model
-label = source.stem + '-ao-' + args.ao
+label = source.stem + ('-section' if args.root_limit else '') + ('-metal' if args.metal_only else '') + '-ao-' + args.ao
 if args.mode:
     label += '-' + args.mode
 if args.pitch is not None:
@@ -53,6 +57,10 @@ if args.highlight:
     label += '-' + args.highlight
 scene = Scene()
 load_into(scene, source)
+print("loaded", len(scene.groups), flush=True)
+if args.root_limit:
+    scene.groups = scene.groups[args.root_start:args.root_start+args.root_limit]
+    print("section roots", [g.name for g in scene.groups], flush=True)
 os.environ['INGETRAZO_AO'] = '0' if args.ao == 'off' else '1'
 if args.mode:
     scene.display_style.face_mode = args.mode
@@ -61,6 +69,7 @@ if args.edges_off:
 metal = WgpuView()
 metal.resize(1000, 700)
 metal.set_scene(scene)
+print("packed", len(metal.packed.instances), flush=True)
 if args.pitch is not None:
     metal.camera.pitch = math.radians(args.pitch)
 if args.section:
@@ -69,7 +78,8 @@ gl = Viewport()
 gl.resize(1000, 700)
 gl.scene = scene
 gl.camera = metal.camera
-gl.show()
+if not args.metal_only:
+    gl.show()
 metal.source_viewport = gl
 metal.show()
 
@@ -96,33 +106,45 @@ def capture():
         metal.renderer.set_style(payload)
         scale = metal.devicePixelRatioF()
         w, h = int(metal.width()*scale), int(metal.height()*scale)
-        reference = gl.render_image(w, h, overlays=False)
+        reference = QImage(w, h, QImage.Format_RGBA8888) if args.metal_only else gl.render_image(w, h, overlays=False)
+        if args.metal_only:
+            reference.fill(0)
         if reference is None:
             raise RuntimeError('GL render_image returned None')
         reference = reference.convertToFormat(QImage.Format_RGBA8888)
         data = bytes(metal.renderer.read_pixels())
         native = QImage(data, w, h, QImage.Format_RGBA8888).copy()
-        reference.save(str(out / f'{label}-gl.png'))
+        if not args.metal_only:
+            reference.save(str(out / f'{label}-gl.png'))
         native.save(str(out / f'{label}-wgpu.png'))
         pair = QImage(w*2, h, QImage.Format_RGB32)
         painter = QPainter(pair)
         painter.drawImage(0, 0, reference)
         painter.drawImage(w, 0, native)
         painter.end()
-        pair.save(str(out / f'{label}-comparison.png'))
+        if not args.metal_only:
+            pair.save(str(out / f'{label}-comparison.png'))
         a = np.frombuffer(reference.constBits(), np.uint8).reshape(h, w, 4)
         b = np.frombuffer(native.constBits(), np.uint8).reshape(h, w, 4)
-        result = {'scale': scale, 'size': [w,h], 'rgb_mae': float(np.abs(a[:,:,:3].astype(float)-b[:,:,:3]).mean()), 'frames': {}}
-        for aa in (() if args.capture_only else (False, True)):
+        result = {'scale': scale, 'size': [w,h], 'rgb_mae': None if args.metal_only else float(np.abs(a[:,:,:3].astype(float)-b[:,:,:3]).mean()), 'frames': {}}
+        configs = [] if args.capture_only else [(args.ao, aa) for aa in (False, True)]
+        if args.matrix:
+            configs = [(ao, aa) for aa in (False, True) for ao in ('off', 'half', 'full')]
+            configs = configs * 3
+        collected = {}
+        for ao, aa in configs:
+            payload['ambient_occlusion'] = ao != 'off'
+            payload['ao_resolution'] = 1 if ao == 'full' else 2
+            metal.renderer.set_style(payload)
             metal.renderer.set_antialias(aa)
-            samples = []
+            samples = collected.setdefault((ao, aa), [])
             for i in range(45):
                 begin = time.perf_counter()
                 cpu, gpu = metal.renderer.render()
                 wall = (time.perf_counter()-begin)*1000
                 if i >= 10:
                     samples.append((cpu, gpu, wall))
-            result['frames'][f'msaa={aa}'] = {
+            result['frames'][f'ao={ao},msaa={aa}'] = {
                 'cpu_median_ms': float(np.median([s[0] for s in samples])),
                 'gpu_median_ms': float(np.median([s[1] for s in samples if s[1] is not None])),
                 'wall_median_ms': float(np.median([s[2] for s in samples]))}
