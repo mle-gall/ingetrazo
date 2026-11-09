@@ -1,0 +1,710 @@
+=================================== FAILURES ===================================
+____________ test_ten_thousand_nodes_build_once_and_refresh_quickly ____________
+
+    def test_ten_thousand_nodes_build_once_and_refresh_quickly():
+        roots = _random_tree(10_000)
+        win, scene, panel = _window_with()
+        scene.groups.extend(roots)
+        t0 = time.perf_counter()
+        panel.refresh()
+        build = time.perf_counter() - t0
+        assert len(panel._items) == 10_000
+        t0 = time.perf_counter()
+        panel.refresh()
+        again = time.perf_counter() - t0
+>       print(f"\n10 000 nodes: build {build * 1000:.0f} ms, "
+              f"refresh {again * 1000:.0f} ms")
+E       OSError: [Errno 28] No space left on device
+
+tests/test_outliner.py:412: OSError
+_____________ test_the_padlock_locks_and_unlocks_in_one_undo_step ______________
+
+self = <contextlib._GeneratorContextManager object at 0x145aa2a50>, typ = None
+value = None, traceback = None
+
+    def __exit__(self, typ, value, traceback):
+        if typ is None:
+            try:
+>               next(self.gen)
+E               OSError: [Errno 28] No space left on device
+
+../../../../.pyenv/versions/3.13.12/lib/python3.13/contextlib.py:148: OSError
+=============================== warnings summary ===============================
+tests/test_a_shape_on_the_face_under_the_cursor.py: 12 warnings
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/tests/test_a_shape_on_the_face_under_the_cursor.py:93: DeprecationWarning: Function: 'QMouseEvent.QMouseEvent(QEvent.Type type, const QPointF &localPos, Qt.MouseButton button, QFlags<Qt.MouseButton> buttons, QFlags<Qt.KeyboardModifier> modifiers, const QPointingDevice *device)' is marked as deprecated, please check the documentation for more information.
+    vp._dispatch_tool_click(QMouseEvent(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== FAILED tests/test_outliner.py::test_ten_thousand_nodes_build_once_and_refresh_quickly
+FAILED tests/test_outliner.py::test_the_padlock_locks_and_unlocks_in_one_undo_step
+ERROR tests/test_outliner.py::test_the_padlock_locks_and_unlocks_in_one_undo_step
+ERROR tests/test_outliner.py::test_nothing_opens_through_a_locked_group - OSE...
+ERROR tests/test_outliner.py::test_nothing_opens_through_a_locked_group - OSE...
+ERROR tests/test_outliner.py::test_the_lock_is_saved_in_the_igz_and_kept_by_copies
+ERROR tests/test_outliner.py::test_the_lock_is_saved_in_the_igz_and_kept_by_copies
+ERROR tests/test_outliner.py::test_section_modes_in_the_core - OSError: [Errn...
+ERROR tests/test_outliner.py::test_section_modes_in_the_core - OSError: [Errn...
+ERROR tests/test_outliner.py::test_the_section_folder_lists_every_plane_with_its_mode
+ERROR tests/test_outliner.py::test_the_section_folder_lists_every_plane_with_its_mode
+ERROR tests/test_outliner.py::test_the_section_folder_keeps_its_name_when_the_tree_is_rebuilt
+ERROR tests/test_outliner.py::test_the_section_folder_keeps_its_name_when_the_tree_is_rebuilt
+ERROR tests/test_outliner.py::test_the_frame_goes_and_the_cut_stays - OSError...
+ERROR tests/test_outliner.py::test_the_frame_goes_and_the_cut_stays - OSError...
+ERROR tests/test_outliner.py::test_the_cut_goes_and_the_frame_stays_and_one_plane_cuts_at_a_time
+ERROR tests/test_outliner.py::test_the_cut_goes_and_the_frame_stays_and_one_plane_cuts_at_a_time
+ERROR tests/test_outliner.py::test_the_folder_row_drives_the_view_menu_switches
+ERROR tests/test_outliner.py::test_the_folder_row_drives_the_view_menu_switches
+ERROR tests/test_outliner.py::test_keyboard_on_a_plane_row - OSError: [Errno ...
+ERROR tests/test_outliner.py::test_keyboard_on_a_plane_row - OSError: [Errno ...
+ERROR tests/test_outliner.py::test_a_hidden_frame_is_saved_and_not_picked - O...
+ERROR tests/test_outliner.py::test_a_hidden_frame_is_saved_and_not_picked - O...
+ERROR tests/test_outliner.py::test_the_filter_finds_planes_by_name - OSError:...
+ERROR tests/test_outliner.py::test_the_filter_finds_planes_by_name - OSError:...
+ERROR tests/test_outliner.py::test_the_section_fill_switch_on_the_folder_and_the_cutting_plane
+ERROR tests/test_outliner.py::test_the_section_fill_switch_on_the_folder_and_the_cutting_plane
+ERROR tests/test_outliner.py::test_the_fill_cell_moves_with_the_cut - OSError...
+ERROR tests/test_outliner.py::test_the_fill_cell_moves_with_the_cut - OSError...
+ERROR tests/test_outliner.py::test_the_fill_colour_comes_from_the_styles_panel_picker
+ERROR tests/test_outliner.py::test_the_fill_colour_comes_from_the_styles_panel_picker
+ERROR tests/test_outliner.py::test_a_plane_takes_its_own_pattern_colour_and_spacing
+ERROR tests/test_outliner.py::test_a_plane_takes_its_own_pattern_colour_and_spacing
+ERROR tests/test_outliner.py::test_the_hatch_spacing_is_typed_as_a_length - O...
+ERROR tests/test_outliner.py::test_the_hatch_spacing_is_typed_as_a_length - O...
+ERROR tests/test_outliner.py::test_a_plane_is_renamed_in_one_undo_step - OSEr...
+ERROR tests/test_outliner.py::test_a_plane_is_renamed_in_one_undo_step - OSEr...
+ERROR tests/test_outliner.py::test_f2_on_a_plane_row_opens_its_name_dialog - ...
+ERROR tests/test_outliner.py::test_f2_on_a_plane_row_opens_its_name_dialog - ...
+ERROR tests/test_outliner.py::test_the_name_column_width_is_the_users_and_is_remembered
+ERROR tests/test_outliner.py::test_the_name_column_width_is_the_users_and_is_remembered
+ERROR tests/test_outliner.py::test_an_extension_names_its_groups_in_the_type_column
+ERROR tests/test_outliner.py::test_an_extension_names_its_groups_in_the_type_column
+ERROR tests/test_outliner.py::test_a_failing_kind_provider_is_skipped - OSErr...
+ERROR tests/test_outliner.py::test_a_failing_kind_provider_is_skipped - OSErr...
+ERROR tests/test_outliner.py::test_the_header_shows_and_hides_columns_and_remembers
+ERROR tests/test_outliner.py::test_the_header_shows_and_hides_columns_and_remembers
+ERROR tests/test_outliner.py::test_several_rows_go_to_a_layer_in_one_step - O...
+ERROR tests/test_outliner.py::test_several_rows_go_to_a_layer_in_one_step - O...
+ERROR tests/test_outliner.py::test_several_rows_painted_and_unpainted_in_one_step
+ERROR tests/test_outliner.py::test_several_rows_painted_and_unpainted_in_one_step
+ERROR tests/test_outliner.py::test_a_plan_of_a_group_is_a_cut_a_scene_and_a_sheet_in_one_step
+ERROR tests/test_outliner.py::test_a_plan_of_a_group_is_a_cut_a_scene_and_a_sheet_in_one_step
+ERROR tests/test_outliner.py::test_a_second_plan_gets_its_own_name_and_no_sheet_when_asked
+ERROR tests/test_outliner.py::test_a_second_plan_gets_its_own_name_and_no_sheet_when_asked
+ERROR tests/test_outliner.py::test_world_bounds_follow_the_matrices_down_the_tree
+ERROR tests/test_outliner.py::test_world_bounds_follow_the_matrices_down_the_tree
+ERROR tests/test_outliner.py::test_an_open_composer_learns_of_a_new_plan_sheet_and_of_its_undo
+ERROR tests/test_outliner.py::test_an_open_composer_learns_of_a_new_plan_sheet_and_of_its_undo
+ERROR tests/test_outliner.py::test_creating_a_plan_shows_where_it_went - OSEr...
+ERROR tests/test_outliner.py::test_creating_a_plan_shows_where_it_went - OSEr...
+ERROR tests/test_outliner.py::test_a_view_of_a_vertical_cut_looks_at_it_square_on
+ERROR tests/test_outliner.py::test_a_view_of_a_vertical_cut_looks_at_it_square_on
+ERROR tests/test_outliner.py::test_a_horizontal_cut_gives_a_plan - OSError: [...
+ERROR tests/test_outliner.py::test_a_horizontal_cut_gives_a_plan - OSError: [...
+ERROR tests/test_outliner.py::test_the_composer_says_a_frame_lost_its_scene
+ERROR tests/test_outliner.py::test_the_composer_says_a_frame_lost_its_scene
+ERROR tests/test_outliner.py::test_a_scene_dropped_on_a_sheet_is_placed_in_a_free_spot
+ERROR tests/test_outliner.py::test_a_scene_dropped_on_a_sheet_is_placed_in_a_free_spot
+ERROR tests/test_outliner.py::test_dragging_a_scene_onto_a_sheet_row_places_it
+ERROR tests/test_outliner.py::test_dragging_a_scene_onto_a_sheet_row_places_it
+ERROR tests/test_outliner.py::test_a_scene_on_a_new_sheet_and_sheets_reordered_in_one_step_each
+ERROR tests/test_outliner.py::test_a_scene_on_a_new_sheet_and_sheets_reordered_in_one_step_each
+ERROR tests/test_outliner.py::test_alt_arrows_move_a_sheet - OSError: [Errno ...
+ERROR tests/test_outliner.py::test_alt_arrows_move_a_sheet - OSError: [Errno ...
+ERROR tests/test_outliner.py::test_the_selected_sheets_export_to_one_pdf - OS...
+ERROR tests/test_outliner.py::test_the_selected_sheets_export_to_one_pdf - OS...
+ERROR tests/test_outliner.py::test_export_all_pdf_can_take_only_some_sheets
+ERROR tests/test_outliner.py::test_export_all_pdf_can_take_only_some_sheets
+ERROR tests/test_outliner.py::test_free_slot_fills_the_page_then_steps - OSEr...
+ERROR tests/test_outliner.py::test_free_slot_fills_the_page_then_steps - OSEr...
+ERROR tests/test_outliner.py::test_a_scene_dropped_on_the_page_lands_where_it_is_dropped
+ERROR tests/test_outliner.py::test_a_scene_dropped_on_the_page_lands_where_it_is_dropped
+ERROR tests/test_outliner.py::test_double_click_on_a_scene_places_it_in_a_free_spot
+ERROR tests/test_outliner.py::test_double_click_on_a_scene_places_it_in_a_free_spot
+ERROR tests/test_outliner.py::test_the_panel_drags_scenes_by_name - OSError: ...
+ERROR tests/test_outliner.py::test_the_panel_drags_scenes_by_name - OSError: ...
+ERROR tests/test_outliner.py::test_the_scale_fits_the_model_in_the_frame - OS...
+ERROR tests/test_outliner.py::test_the_scale_fits_the_model_in_the_frame - OS...
+ERROR tests/test_outliner.py::test_the_scene_pictures_do_not_rebuild_the_list_nor_touch_the_document
+ERROR tests/test_outliner.py::test_the_scene_pictures_do_not_rebuild_the_list_nor_touch_the_document
+ERROR tests/test_outliner.py::test_a_rename_to_the_same_name_does_nothing - O...
+ERROR tests/test_outliner.py::test_a_rename_to_the_same_name_does_nothing - O...
+ERROR tests/test_outliner.py::test_the_left_panel_folds_away_like_the_other_panel
+ERROR tests/test_outliner.py::test_the_left_panel_folds_away_like_the_other_panel
+ERROR tests/test_outliner.py::test_side_tabs_move_between_sides_reorder_and_are_remembered
+ERROR tests/test_outliner.py::test_side_tabs_move_between_sides_reorder_and_are_remembered
+ERROR tests/test_outliner.py::test_a_side_left_empty_folds_and_the_tabs_reset_to_the_factory_layout
+ERROR tests/test_outliner.py::test_a_side_left_empty_folds_and_the_tabs_reset_to_the_factory_layout
+ERROR tests/test_outliner.py::test_a_tab_dropped_on_the_other_side_moves_there
+ERROR tests/test_outliner.py::test_a_tab_dropped_on_the_other_side_moves_there
+ERROR tests/test_outliner.py::test_repeated_row_templates_keep_distinct_objects_and_children
+ERROR tests/test_outliner.py::test_repeated_row_templates_keep_distinct_objects_and_children
+ERROR tests/test_plugin_loader.py::test_good_plugin_discovered - OSError: [Er...
+ERROR tests/test_plugin_loader.py::test_good_plugin_discovered - OSError: [Er...
+ERROR tests/test_plugin_loader.py::test_package_plugin_discovered - OSError: ...
+ERROR tests/test_plugin_loader.py::test_package_plugin_discovered - OSError: ...
+ERROR tests/test_plugin_loader.py::test_import_leaves_sys_path_alone - OSErro...
+ERROR tests/test_plugin_loader.py::test_import_leaves_sys_path_alone - OSErro...
+ERROR tests/test_plugin_loader.py::test_missing_directory_is_fine - OSError: ...
+ERROR tests/test_plugin_loader.py::test_missing_directory_is_fine - OSError: ...
+ERROR tests/test_plugin_loader.py::test_default_dirs_shape - OSError: [Errno ...
+ERROR tests/test_plugin_loader.py::test_default_dirs_shape - OSError: [Errno ...
+ERROR tests/test_plugin_loader.py::test_broken_import_reported_not_raised - O...
+ERROR tests/test_plugin_loader.py::test_broken_import_reported_not_raised - O...
+ERROR tests/test_plugin_loader.py::test_broken_constructor_reported_not_raised
+ERROR tests/test_plugin_loader.py::test_broken_constructor_reported_not_raised
+ERROR tests/test_plugin_loader.py::test_one_bad_plugin_does_not_sink_the_good_one
+ERROR tests/test_plugin_loader.py::test_one_bad_plugin_does_not_sink_the_good_one
+ERROR tests/test_plugin_loader.py::test_imported_builtin_tool_not_reregistered
+ERROR tests/test_plugin_loader.py::test_imported_builtin_tool_not_reregistered
+ERROR tests/test_plugin_loader.py::test_abstract_subclass_skipped - OSError: ...
+ERROR tests/test_plugin_loader.py::test_abstract_subclass_skipped - OSError: ...
+ERROR tests/test_plugin_loader.py::test_duplicate_stem_first_dir_wins - OSErr...
+ERROR tests/test_plugin_loader.py::test_duplicate_stem_first_dir_wins - OSErr...
+ERROR tests/test_plugin_loader.py::test_menu_lists_tools_and_disabled_errors
+ERROR tests/test_plugin_loader.py::test_menu_lists_tools_and_disabled_errors
+ERROR tests/test_plugin_loader.py::test_menu_placeholder_when_no_plugins - OS...
+ERROR tests/test_plugin_loader.py::test_menu_placeholder_when_no_plugins - OS...
+ERROR tests/test_plugin_loader.py::test_plugin_cannot_steal_a_builtin_shortcut
+batch 1/32: 2 failed, 170 passed, 1 skipped, 12 warnings, 128 errors in 246.35s (0:04:06)
+batch 2/32: 123 passed, 17 skipped, 2 warnings in 54.28s
+=================================== FAILURES ===================================
+_____ test_an_extensions_toolbar_added_after_start_up_shows_names_in_bold ______
+
+tmp_path = PosixPath('/private/var/folders/zy/1s11p6w53_jctswhjtc0w6zh0000gn/T/pytest-of-legallmaxence/pytest-779/test_an_extensions_toolbar_add0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x141fcc6e0>
+
+    def test_an_extensions_toolbar_added_after_start_up_shows_names_in_bold(
+            tmp_path, monkeypatch):
+        """As the extensions build theirs: a toolbar of their own, added once
+        the window is up, with «Name — sentence» tooltips or a status tip."""
+        from PySide6.QtCore import QSettings
+        from PySide6.QtGui import QKeySequence
+        import PySide6.QtCore as qc
+        import views.main_window as mw
+        from views.tooltips import WrappingToolTips
+        path = tmp_path / "prefs.ini"
+        factory = lambda *a: QSettings(str(path), QSettings.IniFormat)  # noqa: E731
+        monkeypatch.setattr(qc, "QSettings", factory)
+        monkeypatch.setattr(mw, "QSettings", factory)
+        shown = []
+        orig = QToolTip.showText
+        QToolTip.showText = staticmethod(lambda pos, text, *a: shown.append(text))
+        win = mw.MainWindow()
+        try:
+            tb = win.addToolBar("Plugin bar")
+            one_line = tb.addAction("Extruder")
+            one_line.setToolTip("Extruder — extruye cada cara a su propio grupo")
+            status_only = tb.addAction("Summon Faces")
+            status_only.setStatusTip("Crea caras a partir de las aristas.")
+            status_only.setShortcut(QKeySequence("Ctrl+Shift+J"))
+            also_main = win.toolbars["main"].addAction("Late tool")
+            also_main.setToolTip("Late tool: added by an update")
+            f = WrappingToolTips()
+            ev = QHelpEvent(QEvent.ToolTip, QPoint(1, 1), QPoint(10, 10))
+            for bar, act, bold, under in (
+                    (tb, one_line, "<b>Extruder</b><br>",
+                     "Extruye cada cara a su propio grupo"),
+                    (tb, status_only, "<b>Summon Faces</b>  (Ctrl+Shift+J)<br>",
+                     "Crea caras a partir de las aristas."),
+                    (win.toolbars["main"], also_main, "<b>Late tool</b><br>",
+                     "Added by an update")):
+                btn = bar.widgetForAction(act)
+                assert f.eventFilter(btn, ev) is True
+>               assert bold in shown[-1] and under in shown[-1], shown[-1]
+E               AssertionError: <p style='white-space:normal'><b>Summon Faces</b>  (⇧⌘J)<br>Crea caras a partir de las aristas.</p>
+E               assert ('<b>Summon Faces</b>  (Ctrl+Shift+J)<br>' in "<p style='white-space:normal'><b>Summon Faces</b>  (⇧⌘J)<br>Crea caras a partir de las aristas.</p>")
+
+tests/test_tooltips_wrap.py:215: AssertionError
+----------------------------- Captured stderr call -----------------------------
+QOpenGLWidget is not supported on this platform.
+QMainWindow::saveState(): 'objectName' not set for QToolBar 0x7c7c557c00 'Plugin bar'
+=========================== FAILED tests/test_tooltips_wrap.py::test_an_extensions_toolbar_added_after_start_up_shows_names_in_bold
+batch 3/32: 1 failed, 217 passed, 7 skipped in 87.89s (0:01:27)
+batch 4/32: 153 passed, 3 skipped in 79.77s (0:01:19)
+=================================== FAILURES ===================================
+__________________ test_every_language_has_every_message[ar] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/ar.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[de] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/de.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[id] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/id.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[it] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/it.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[ja] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/ja.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[ko] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/ko.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[lo] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/lo.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[pl] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/pl.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+_________________ test_every_language_has_every_message[pt-BR] _________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/pt-BR.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[ru] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/ru.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[th] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/th.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[uk] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/uk.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+__________________ test_every_language_has_every_message[vi] ___________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/vi.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+_________________ test_every_language_has_every_message[zh-CN] _________________
+
+path = PosixPath('/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8d410e12/i18n/zh-CN.json')
+
+    @pytest.mark.parametrize("path", [p for p in _FILES
+                                      if p.stem not in ("en", "es")],
+                             ids=lambda p: p.stem)
+    def test_every_language_has_every_message(path):
+        """A message added in Spanish and English but in no other catalog reads
+        in English there with no warning: 21 strings of Join Segments and Zoom
+        Window sat untranslated in French and Polish until a review of the
+        language PRs happened on them (17-10)."""
+        source = json.loads((_I18N_DIR / "es.json").read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in source if k not in data]
+>       assert not missing, f"{len(missing)} messages missing: {missing[:3]}"
+E       AssertionError: 1 messages missing: ['Edge Style']
+E       assert not ['Edge Style']
+
+tests/test_translation_files.py:53: AssertionError
+=========================== FAILED tests/test_translation_files.py::test_every_language_has_every_message[ar]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[de]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[id]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[it]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[ja]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[ko]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[lo]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[pl]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[pt-BR]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[ru]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[th]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[uk]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[vi]
+FAILED tests/test_translation_files.py::test_every_language_has_every_message[zh-CN]
+batch 5/32: 14 failed, 440 passed, 9 skipped, 800 deselected in 117.48s (0:01:57)
+batch 6/32: 114 passed, 7 skipped in 41.74s
+batch 7/32: 399 passed, 1 skipped in 169.57s (0:02:49)
+batch 8/32: 221 passed, 1 skipped, 16 warnings in 97.63s (0:01:37)
+=================================== FAILURES ===================================
+_______________ test_hidden_panels_let_the_previous_document_go ________________
+
+win = <views.main_window.MainWindow(0x7a0d41ad80) at 0x13bbbfc80>
+
+    def test_hidden_panels_let_the_previous_document_go(win):
+        """Waiting to be shown, the «In model» list and the Browser kept their
+        rows — and each row holds its group, so after New or Open the whole
+        previous document stayed in memory (+130 MB on the Plaza,
+        release_check 10-10)."""
+        import gc
+        from PySide6.QtGui import QVector3D as V
+        from core.group import Group
+        from core.mesh import Mesh
+        m = Mesh()
+        m.add_face([V(0, 0, 0), V(1, 0, 0), V(1, 1, 0), V(0, 1, 0)])
+        g = Group(m, "previous-document-marker")
+        g.component = True
+        vp = win.viewport
+        vp.scene.groups.append(g)
+        vp.scene.version += 1
+        panel = win.tray.components
+        browser = win.project_browser.outliner
+        panel.refresh_in_model()
+        browser.refresh()
+        assert browser._groups                      # the rows hold the group
+        panel.hide()
+        browser.hide()
+        del g, m
+        win._saved_version = vp.scene.version       # no «discard?» question
+        win._on_new()
+        _app.processEvents()
+        gc.collect()
+        alive = [o for o in gc.get_objects() if isinstance(o, Group)
+                 and o.name == "previous-document-marker"]
+>       assert alive == []
+E       AssertionError: assert [Group('previ...ces, 4 edges)] == []
+E         
+E         Left contains one more item: Group('previous-document-marker': 1 faces, 4 edges)
+E         Use -v to get more diff
+
+tests/test_panel_refresh_deferred.py:152: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+QOpenGLWidget is not supported on this platform.
+This plugin does not support propagateSizeHints()
+This plugin does not support createPlatformOpenGLContext!
+QOpenGLWidget: Failed to create context
+This plugin does not support createPlatformOpenGLContext!
+QOpenGLWidget: Failed to create context
+----------------------------- Captured stderr call -----------------------------
+QWidget::setMinimumSize: (tray_project_browser/ProjectBrowser) Negative sizes (240,-1) are not possible
+This plugin does not support createPlatformOpenGLContext!
+QOpenGLWidget: Failed to create context
+=========================== FAILED tests/test_panel_refresh_deferred.py::test_hidden_panels_let_the_previous_document_go
+batch 9/32: 1 failed, 151 passed, 2 skipped in 54.47s
+batch 10/32: 243 passed, 17 skipped in 31.97s
+batch 11/32: 209 passed in 81.95s (0:01:21)
+=================================== FAILURES ===================================
+___________________ test_world_under_cursor_uses_cached_pick ___________________
+
+    def test_world_under_cursor_uses_cached_pick():
+        # Zoom-to-cursor's pick rides the cached NumPy triangles (fast wheel
+        # bursts must not re-triangulate the model per event). Nearest hit wins;
+        # empty scene falls back to the ground plane.
+        from PySide6.QtGui import QVector3D
+        from views.viewport import Viewport
+    
+        scene = Scene()
+        scene.mesh.add_face([QVector3D(-2, 0, -2), QVector3D(2, 0, -2),
+                             QVector3D(2, 0, 2), QVector3D(-2, 0, 2)])   # wall y=0
+        scene.mesh.add_face([QVector3D(-2, 3, -2), QVector3D(2, 3, -2),
+                             QVector3D(2, 3, 2), QVector3D(-2, 3, 2)])   # wall y=3
+    
+        class _Cam:
+            target = QVector3D(0, 0, 0)
+            def eye(self):
+                return QVector3D(0.0, -10.0, 0.0)
+    
+        class _VP:
+            # Occlusion reaches into the pick index, which pulls in a handful of
+            # viewport helpers; bind whatever it asks for rather than listing them.
+            def __getattr__(self, name):
+                import inspect
+                raw = inspect.getattr_static(Viewport, name, None)
+                if raw is None:
+                    raise AttributeError(name)
+                # Plain functions bind to the stub; staticmethods are taken as-is.
+                bound = (raw.__get__(self) if inspect.isfunction(raw)
+                         else getattr(Viewport, name))
+                setattr(self, name, bound)
+                return bound
+    
+        vp = _VP()
+        vp.scene = scene
+        vp.camera = _Cam()
+        vp._pixel_to_ray = lambda x, y: (QVector3D(0, -10, 0), QVector3D(0, 1, 0))
+        vp._pick_index = Viewport._pick_index.__get__(vp)
+        vp._placements = Viewport._placements.__get__(vp)
+        vp._expand_placements = Viewport._expand_placements.__get__(vp)
+        vp._ray_hits = Viewport._ray_hits.__get__(vp)
+        under = Viewport._world_under_cursor.__get__(vp)
+    
+        hit = under(0, 0)
+        assert abs(hit.y() - 0.0) < 1e-6          # nearest wall, not the far one
+        scene.mesh.clear()
+        scene.version += 1                        # cache refresh on scene change
+        vp._pixel_to_ray = lambda x, y: (QVector3D(0, 0, 10),
+                                         QVector3D(0, 0, -1))
+        ground = under(0, 0)
+>       assert abs(ground.z()) < 1e-6             # falls back to the ground plane
+                   ^^^^^^^^
+E       AttributeError: 'NoneType' object has no attribute 'z'
+
+tests/test_dimensions.py:367: AttributeError
+=========================== FAILED tests/test_dimensions.py::test_world_under_cursor_uses_cached_pick - A...
+batch 12/32: 1 failed, 263 passed, 4 skipped in 27.57s
+batch 13/32: 294 passed, 3 skipped in 34.96s
+batch 14/32: 216 passed in 91.83s (0:01:31)
+batch 15/32: 125 passed, 2 skipped in 42.20s
+batch 16/32: 222 passed, 7 skipped, 2 warnings in 46.21s
+batch 17/32: 164 passed, 2 warnings in 31.91s
+batch 18/32: 256 passed, 9 skipped in 39.09s
+batch 19/32: 243 passed, 1 skipped in 36.69s
+batch 20/32: 243 passed, 9 skipped, 1 deselected, 2 xfailed in 51.97s
+batch 21/32: 154 passed, 6 skipped, 3 warnings in 37.54s
+batch 22/32: 218 passed, 1 deselected, 2 warnings in 43.20s
+batch 23/32: 140 passed, 1 skipped in 23.54s
+batch 24/32: 257 passed, 2 skipped, 1 deselected, 2 warnings in 45.21s
+batch 25/32: 199 passed, 2 deselected, 2 warnings in 24.35s
+batch 26/32: 263 passed in 42.41s
+batch 27/32: 219 passed, 5 skipped, 8 warnings in 22.14s
+=================================== FAILURES ===================================
+_________ test_long_author_tags_and_license_wrap_within_preview_width __________
+
+tmp_path = PosixPath('/private/var/folders/zy/1s11p6w53_jctswhjtc0w6zh0000gn/T/pytest-of-legallmaxence/pytest-815/test_long_author_tags_and_lice0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x13b6d6180>
+
+    def test_long_author_tags_and_license_wrap_within_preview_width(
+            tmp_path, monkeypatch):
+        app = QApplication.instance() or QApplication([])
+        extension = manager.Extension(**{
+            **_extension(b"long-details").__dict__,
+            "author": "A very long extension author name that should wrap "
+                      "rather than push the card layout",
+            "license": "A long custom license name that should wrap below tags",
+            "tags": ("architecture-and-urban-planning",
+                     "productivity-workflow", "data-import-export"),
+        })
+        from views import extension_manager_dialog as dialog_module
+        _stub_catalog(monkeypatch, dialog_module, [extension])
+        monkeypatch.setattr(manager, "user_plugins_dir", lambda: tmp_path)
+        dialog = dialog_module.ExtensionManagerDialog()
+        try:
+            _wait_for_catalog(dialog, app)
+            dialog.show()
+            app.processEvents()
+            row = dialog._pages["browse"]["grid"].itemAt(0).widget()
+            author = next(label for label in row.findChildren(QLabel)
+                          if label.text().startswith("by A very long"))
+            license_label = next(label for label in row.findChildren(QLabel)
+                                 if label.text().startswith("License: A long"))
+            assert author.wordWrap()
+            assert license_label.wordWrap()
+            assert author.width() <= dialog_module._IMAGE_SIZE[0]
+            assert license_label.width() <= dialog_module._IMAGE_SIZE[0]
+            assert author.height() > author.fontMetrics().height()
+            assert license_label.height() > license_label.fontMetrics().height()
+            assert row.width() <= dialog_module._ROW_MAX_WIDTH
+            tags_layout = next(layout for layout in row.findChildren(
+                dialog_module.FlowLayout))
+            image_details = tags_layout.parentWidget()
+            assert _card_rule(row, image_details) == "background: transparent;"
+>           assert tags_layout.heightForWidth(dialog_module._IMAGE_SIZE[0]) \
+                > max(tags_layout.itemAt(index).sizeHint().height()
+                      for index in range(tags_layout.count()))
+E                     assert 40 > 40
+E                      +  where 40 = heightForWidth(256)
+E                      +    where heightForWidth = <views.tray.FlowLayout(0x7950ba9900) at 0x13b698a00>.heightForWidth
+E                      +  and   40 = max(<generator object test_long_author_tags_and_license_wrap_within_preview_width.<locals>.<genexpr> at 0x13b4ab5a0>)
+
+tests/test_extension_manager.py:512: AssertionError
+=========================== FAILED tests/test_extension_manager.py::test_long_author_tags_and_license_wrap_within_preview_width
+batch 28/32: 1 failed, 335 passed, 1 skipped in 45.51s
+batch 29/32: 262 passed, 10 skipped in 32.15s
+batch 30/32: 222 passed, 9 skipped in 44.87s
+batch 31/32: 146 passed, 6 skipped, 5 warnings in 34.69s
+batch 32/32: 198 passed, 2 skipped in 21.35s
+20 failed, 7079 passed, 142 skipped, 2 xfailed, 128 errors, 805 deselected, 56 warnings in 1908s (32 batches)

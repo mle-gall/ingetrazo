@@ -4,7 +4,7 @@ use wgpu::util::DeviceExt;
 
 pub struct Style {
     pub buffer: wgpu::Buffer,
-    pub data: [[f32; 4]; 6],
+    pub data: [[f32; 4]; 7],
 }
 impl Style {
     pub fn new(d: &wgpu::Device) -> Self {
@@ -15,6 +15,7 @@ impl Style {
             [0.9, 0.91, 0.92, 1.],
             [0.925, 0.935, 0.945, 2.],
             [0.815, 0.820, 0.815, 0.],
+            [1., 1., 0., 4.],
         ];
         let buffer = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("display style"),
@@ -53,6 +54,18 @@ impl Style {
                         ));
                     }
                     next[i][..3].copy_from_slice(&rgb);
+                }
+            }
+            for (index, name) in [(0, "profiles"), (2, "back_edges")] {
+                if let Some(v) = d.get_item(name)? { next[6][index] = if v.extract::<bool>()? { 1. } else { 0. }; }
+            }
+            for (index, name) in [(1, "profile_width"), (3, "dash_width")] {
+                if let Some(v) = d.get_item(name)? {
+                    let width: f32 = v.extract()?;
+                    if !width.is_finite() || !(0.0..=64.0).contains(&width) {
+                        return Err(PyValueError::new_err("profile/dash width must be in [0,64]"));
+                    }
+                    next[6][index] = width;
                 }
             }
             if let Some(v) = d.get_item("edge_width")? {

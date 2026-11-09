@@ -36,7 +36,7 @@ impl Antialias {
             label: Some("4x MSAA shading"),
             source: wgpu::ShaderSource::Wgsl(concat!(include_str!("shading.wgsl"), "\n", include_str!("edges.wgsl")).into()),
         });
-        let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
+        let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4,3=>Float32x3,4=>Float32x3];
         let pipelines = (0..4)
             .map(|k| {
                 let edge = k >= 2;
@@ -49,7 +49,7 @@ impl Antialias {
                         entry_point: Some(if edge { "edge_vs" } else { "vs" }),
                         compilation_options: Default::default(),
                         buffers: &[wgpu::VertexBufferLayout {
-                            array_stride: 28,
+                            array_stride: 52,
                             step_mode: wgpu::VertexStepMode::Vertex,
                             attributes: &attrs,
                         }],
@@ -205,6 +205,7 @@ mod tests {
         };
         let (device, _) = pollster::block_on(adapter.request_device(&Default::default(), None)).unwrap();
         let style = crate::style::Style::new(&device);
+        let _xray = crate::xray::Xray::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb, 64, 64);
         let _passes = super::Antialias::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb,
             &style.buffer, 64, 64);
     }

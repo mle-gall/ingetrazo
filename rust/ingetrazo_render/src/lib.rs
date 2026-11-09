@@ -5,6 +5,7 @@ mod style;
 mod background;
 mod antialias;
 mod edges;
+mod xray;
 use numpy::PyReadonlyArray1;
 use pyo3::{exceptions::PyValueError, prelude::*};
 use raw_window_handle::{
@@ -38,6 +39,7 @@ struct Scene {
     edge_draw: wgpu::BindGroup,
     xray_draw: wgpu::BindGroup,
     xray_edge_draw: wgpu::BindGroup,
+    profile_draw: wgpu::BindGroup,
     n: u32,
     p: u32,
 }
@@ -45,6 +47,7 @@ struct Scene {
 struct Renderer {
     antialias: bool,
     aa: antialias::Antialias,
+    transparency: xray::Xray,
     look: style::Style,
     background: background::Background,
     look_groups: Vec<wgpu::BindGroup>,
@@ -56,6 +59,7 @@ struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     depth: wgpu::Texture,
+    offscreen: wgpu::Texture,
     ids: wgpu::Texture,
     camera: wgpu::Buffer,
     compute: wgpu::ComputePipeline,
@@ -63,6 +67,7 @@ struct Renderer {
     edge: wgpu::RenderPipeline,
     xray: wgpu::RenderPipeline,
     xray_edge: wgpu::RenderPipeline,
+    profile_top: wgpu::RenderPipeline,
     scene: Option<Scene>,
     multi: bool,
     style: u32,
@@ -73,6 +78,7 @@ struct Renderer {
     last_gpu: Option<f64>,
     last_cpu: f64,
     last_acquire: f64,
+    frame_stages: [f64; 5],
     read: wgpu::Buffer,
     #[pyo3(get)]
     gpu_memory: u64,
@@ -214,17 +220,17 @@ impl Renderer {
             label: Some("draw"),
             source: wgpu::ShaderSource::Wgsl(concat!(include_str!("shading.wgsl"), "\n", include_str!("edges.wgsl")).into()),
         });
-        let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
+        let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4,3=>Float32x3,4=>Float32x3];
         let pipeline = |topology, fragment, compare, write, bias, samples| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: None,
                 layout: None,
                 vertex: wgpu::VertexState {
                     module: &vs,
-                    entry_point: Some(if fragment == "edge_fs" { "edge_vs" } else { "vs" }),
+                    entry_point: Some(if fragment == "edge_fs" || fragment == "hidden_edge_fs" || fragment == "profile_fs" { "edge_vs" } else { "vs" }),
                     compilation_options: Default::default(),
                     buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: 28,
+                        array_stride: 52,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &attrs,
                     }],
@@ -237,7 +243,7 @@ impl Renderer {
                         Some(wgpu::ColorTargetState {
                             format,
                             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
+                            write_mask: if fragment == "depth_fs" { wgpu::ColorWrites::empty() } else { wgpu::ColorWrites::ALL },
                         }),
                         (samples == 1).then_some(wgpu::ColorTargetState {
                             format: wgpu::TextureFormat::R32Uint,
@@ -275,9 +281,9 @@ impl Renderer {
         );
         let xray = pipeline(
             wgpu::PrimitiveTopology::TriangleList,
-            "fs",
+            "depth_fs",
             wgpu::CompareFunction::Less,
-            false,
+            true,
             Default::default(),
             1,
         );
@@ -296,12 +302,14 @@ impl Renderer {
         );
         let xray_edge = pipeline(
             wgpu::PrimitiveTopology::TriangleList,
-            "edge_fs",
-            wgpu::CompareFunction::Always,
+            "hidden_edge_fs",
+            wgpu::CompareFunction::Greater,
             false,
             bias,
             1,
         );
+        let profile_top = pipeline(wgpu::PrimitiveTopology::TriangleList, "profile_fs",
+            wgpu::CompareFunction::Always, false, bias, 1);
         let queries = features.contains(wgpu::Features::TIMESTAMP_QUERY).then(|| {
             device.create_query_set(&wgpu::QuerySetDescriptor {
                 label: None,
@@ -321,16 +329,18 @@ impl Renderer {
         );
         let look = style::Style::new(&device);
         let background = background::Background::new(&device, format, &look.buffer, 1);
-        let look_groups = [&draw, &xray, &edge, &xray_edge].iter().map(|p|
+        let look_groups = [&draw, &xray, &edge, &xray_edge, &profile_top].iter().map(|p|
             bind(&device, &p.get_bind_group_layout(1), &[&look.buffer])).collect();
         Ok(Self {
             antialias: true,
             aa: antialias::Antialias::new(&device, format, &look.buffer, w, h),
             look, background, look_groups,
+            transparency: xray::Xray::new(&device, format, w, h),
             capture_next: false,
             captured: None,
             overlay: overlay::Overlay::new(&device, format),
             depth: texture(&device, w, h, wgpu::TextureFormat::Depth32Float),
+            offscreen: texture(&device, w, h, format),
             ids: texture(&device, w, h, wgpu::TextureFormat::R32Uint),
             timings: (0..4)
                 .map(|_| TimingSlot {
@@ -345,6 +355,7 @@ impl Renderer {
             last_gpu: None,
             last_cpu: 0.,
             last_acquire: 0.,
+            frame_stages: [0.; 5],
             surface,
             device,
             queue,
@@ -355,6 +366,7 @@ impl Renderer {
             edge,
             xray,
             xray_edge,
+            profile_top,
             scene: None,
             style: 0,
             edges: true,
@@ -481,6 +493,8 @@ impl Renderer {
             &self.xray_edge.get_bind_group_layout(0),
             &[&self.camera, &inst, &survivors],
         );
+        let profile_draw = bind(&self.device, &self.profile_top.get_bind_group_layout(0), &[&self.camera, &inst, &survivors]);
+        self.transparency.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer);
         self.aa.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer);
         self.gpu_memory =
             (v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 416)
@@ -500,6 +514,7 @@ impl Renderer {
             edge_draw,
             xray_draw,
             xray_edge_draw,
+            profile_draw,
             n: n as u32,
             p: count as u32,
         });
@@ -556,7 +571,7 @@ impl Renderer {
     fn set_antialias(&mut self, enabled: bool) { self.antialias = enabled; }
     fn read_pixels(&mut self) -> PyResult<Vec<u8>> {
         self.capture_next = true;
-        self.render()?;
+        self.render(true)?;
         Ok(self.captured.take().unwrap_or_default())
     }
     fn set_edges(&mut self, enabled: bool) {
@@ -593,7 +608,9 @@ impl Renderer {
         self.config.width = ((w as f64 * scale) as u32).max(1);
         self.config.height = ((h as f64 * scale) as u32).max(1);
         self.surface.configure(&self.device, &self.config);
+        self.transparency.resize(&self.device, self.config.width, self.config.height);
         self.aa.resize(&self.device, self.config.width, self.config.height);
+        self.offscreen = texture(&self.device, self.config.width, self.config.height, self.config.format);
         self.depth = texture(
             &self.device,
             self.config.width,
@@ -607,7 +624,8 @@ impl Renderer {
             wgpu::TextureFormat::R32Uint,
         );
     }
-    fn render(&mut self) -> PyResult<(f64, Option<f64>)> {
+    #[pyo3(signature = (present=true))]
+    fn render(&mut self, present: bool) -> PyResult<(f64, Option<f64>)> {
         let start = Instant::now();
         // Poll completion only; never wait for a timestamp in the render path.
         self.device.poll(wgpu::Maintain::Poll);
@@ -634,12 +652,13 @@ impl Renderer {
             .scene
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("set_scene first"))?;
-        let frame = self
-            .surface
-            .get_current_texture()
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        self.last_acquire = start.elapsed().as_secs_f64() * 1000.;
-        let color = frame.texture.create_view(&Default::default());
+        let polled = Instant::now();
+        let frame = if present { Some(self.surface.get_current_texture()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?) } else { None };
+        let target = frame.as_ref().map(|f| &f.texture).unwrap_or(&self.offscreen);
+        let acquired = Instant::now();
+        self.last_acquire = acquired.duration_since(polled).as_secs_f64() * 1000.;
+        let color = target.create_view(&Default::default());
         let depth = self.depth.create_view(&Default::default());
         let ids = self.ids.create_view(&Default::default());
         let mut e = self.device.create_command_encoder(&Default::default());
@@ -661,6 +680,7 @@ impl Renderer {
             pass.set_bind_group(0, &s.compute, &[]);
             pass.dispatch_workgroups(s.n.div_ceil(64), 1, 1);
         }
+        if self.style == 1 { self.transparency.draw(&mut e, &color, s, self.multi); }
         {
             let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
@@ -696,7 +716,7 @@ impl Renderer {
                     .map(|q| wgpu::RenderPassTimestampWrites {
                         query_set: q,
                         beginning_of_pass_write_index: Some(2),
-                        end_of_pass_write_index: if self.antialias { None } else { Some(3) },
+                        end_of_pass_write_index: if self.antialias && self.style != 1 && self.look.data[6][2] == 0. { None } else { Some(3) },
                     }),
                 occlusion_query_set: None,
             });
@@ -727,32 +747,27 @@ impl Renderer {
                 }
             }
             if self.edges || self.style == 4 {
-                pass.set_pipeline(if self.style == 1 {
-                    &self.xray_edge
-                } else {
-                    &self.edge
-                });
-                pass.set_bind_group(1, &self.look_groups[if self.style == 1 { 3 } else { 2 }], &[]);
-                // Auto-layout pipelines have separate bind-group identities.
-                pass.set_bind_group(
-                    0,
-                    if self.style == 1 {
-                        &s.xray_edge_draw
+                for hidden in [true, false] {
+                    if hidden && self.style != 1 && self.look.data[6][2] == 0. { continue; }
+                    pass.set_pipeline(if hidden { &self.xray_edge } else { &self.edge });
+                    pass.set_bind_group(0, if hidden { &s.xray_edge_draw } else { &s.edge_draw }, &[]);
+                    pass.set_bind_group(1, &self.look_groups[if hidden { 3 } else { 2 }], &[]);
+                    if self.multi {
+                        pass.multi_draw_indexed_indirect(&s.commands, s.p as u64 * 20, s.p);
                     } else {
-                        &s.edge_draw
-                    },
-                    &[],
-                );
-                if self.multi {
-                    pass.multi_draw_indexed_indirect(&s.commands, s.p as u64 * 20, s.p);
-                } else {
-                    for k in s.p..s.p * 2 {
-                        pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
+                        for k in s.p..s.p * 2 { pass.draw_indexed_indirect(&s.commands, k as u64 * 20); }
                     }
+                }
+                if self.style == 1 && self.look.data[6][0] > 0. {
+                    pass.set_pipeline(&self.profile_top);
+                    pass.set_bind_group(0, &s.profile_draw, &[]);
+                    pass.set_bind_group(1, &self.look_groups[4], &[]);
+                    if self.multi { pass.multi_draw_indexed_indirect(&s.commands, s.p as u64*20, s.p); }
+                    else { for k in s.p..s.p*2 { pass.draw_indexed_indirect(&s.commands, k as u64*20); } }
                 }
             }
         }
-        if self.antialias {
+        if self.antialias && self.style != 1 && self.look.data[6][2] == 0. {
             self.aa.draw(&mut e, &color, s, self.style, self.edges, self.multi, self.queries.as_ref());
         }
         self.overlay
@@ -771,7 +786,7 @@ impl Renderer {
             });
             e.copy_texture_to_buffer(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &frame.texture,
+                    texture: target,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
@@ -792,7 +807,10 @@ impl Renderer {
             );
             read
         });
-        self.queue.submit([e.finish()]);
+        let command = e.finish();
+        let encoded = Instant::now();
+        self.queue.submit([command]);
+        let submitted = Instant::now();
         if let Some(read) = capture {
             let (tx, rx) = std::sync::mpsc::channel();
             read.slice(..).map_async(wgpu::MapMode::Read, move |r| {
@@ -821,7 +839,11 @@ impl Renderer {
             self.captured = Some(rgba);
             self.capture_next = false;
         }
-        frame.present();
+        let before_present = Instant::now();
+        if let Some(frame) = frame { frame.present(); }
+        self.frame_stages = [polled.duration_since(start), acquired.duration_since(polled),
+            encoded.duration_since(acquired), submitted.duration_since(encoded), before_present.elapsed()]
+            .map(|d| d.as_secs_f64()*1000.);
         let cpu = start.elapsed().as_secs_f64() * 1000.;
         if let (Some(_), Some(k)) = (&self.queries, timing_slot) {
             let (tx, rx) = std::sync::mpsc::channel();
@@ -836,6 +858,8 @@ impl Renderer {
         self.last_cpu = cpu;
         Ok((cpu, self.last_gpu))
     }
+    /// Poll/readback, acquire, encode, submit, present, in milliseconds.
+    fn frame_stage_timings(&self) -> Vec<f64> { self.frame_stages.to_vec() }
     fn request_capture(&mut self) {
         self.capture_next = true;
     }

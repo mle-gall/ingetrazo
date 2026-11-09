@@ -1,0 +1,63 @@
+{
+  "scale": 2.0,
+  "size": [
+    2000,
+    1400
+  ],
+  "rgb_mae": 1.05984,
+  "frames": {
+    "msaa=False,edges=False": {
+      "stages_ms": {
+        "poll": 0.0047090000000000005,
+        "acquire": 5.752333,
+        "encode": 2.2015,
+        "submit": 0.14612499999999998,
+        "present": 0.023917
+      },
+      "cpu_median_ms": 8.050125,
+      "gpu_median_ms": 9.974417,
+      "wall_median_ms": 8.387124980799854
+    },
+    "msaa=False,edges=True": {
+      "stages_ms": {
+        "poll": 0.00625,
+        "acquire": 0.108542,
+        "encode": 12.547875,
+        "submit": 0.18604099999999998,
+        "present": 0.027250000000000003
+      },
+      "cpu_median_ms": 27.741584,
+      "gpu_median_ms": 29.015458,
+      "wall_median_ms": 28.13983301166445
+    },
+    "msaa=True,edges=False": {
+      "stages_ms": {
+        "poll": 0.004791,
+        "acquire": 40.784667,
+        "encode": 3.9884999999999997,
+        "submit": 0.147292,
+        "present": 0.0255
+      },
+      "cpu_median_ms": 44.997292,
+      "gpu_median_ms": 43.509042,
+      "wall_median_ms": 45.251999981701374
+    },
+    "msaa=True,edges=True": {
+      "stages_ms": {
+        "poll": 0.005458,
+        "acquire": 113.744834,
+        "encode": 8.841833000000001,
+        "submit": 0.175041,
+        "present": 0.027958
+      },
+      "cpu_median_ms": 122.037375,
+      "gpu_median_ms": 119.827333,
+      "wall_median_ms": 122.25908297114074
+    }
+  },
+  "offscreen_msaa_edges_on": {
+    "cpu_median_ms": 15.197667,
+    "gpu_median_ms": 109.641292,
+    "wall_median_ms": 15.21899993531406
+  }
+}

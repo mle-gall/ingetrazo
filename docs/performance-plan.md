@@ -1465,3 +1465,21 @@ Plan-building size check with `face_count` before considering another limit stud
 The baseline profiles used a frozen worktree-local copy of `core` at `706aee71`;
 other source files and the read-only ride input were identical. Discarded interim
 implementation runs and the interrupted tray timing are not included above.
+
+## R-look 3c — 2026-11-09
+
+GPU adjacency-based profiles and dashed back edges now share the edge-quad upload
+path. X-ray has order-independent faces at GL's 0.6 opacity, face depth for washed
+hidden edges, and soft profiles on top. Frame timings separate polling, acquisition,
+encoding, submission and presentation. Python reuses camera matrices and avoids
+unchanged style uploads.
+
+The apparent 13 ms CPU floor is chiefly Metal drawable acquisition: the final
+2000×1400 one-triangle control costs 0.40 ms CPU offscreen, versus
+9.31 ms waiting for a drawable on screen. This does not claim a corresponding
+on-screen frame-rate gain. Matched baseline/3c captures and CPU/GPU/wall tables cover
+the marquee, pusher car and ride. Profile geometry adds substantial GPU cost on the
+ride. X-ray/back edges currently use single-sample rendering; authored hidden-edge
+metadata is absent from the existing upload. Complete GL parity is not claimed.
+
+[Comparison images, before/after cost table, commands and limitations](benchmarks/wgpu-look-2026-11-09/r-look-3c/README.md).

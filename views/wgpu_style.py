@@ -6,10 +6,12 @@ Unsupported controls remain explicit in the payload for subsequent passes.
 from core.style import Style, effective_back_color
 
 
-def style_payload(scene, override=None, *, horizon=2.0):
+def style_payload(scene, override=None, *, horizon=2.0, scale=1.0):
     """Return a fresh native payload, respecting the viewport override."""
     style = override or getattr(scene, 'display_style', None) or Style()
     result = style.to_dict()
     result['back_color'] = effective_back_color(style, scene)
     result['horizon'] = float(horizon)
+    result['profile_width'] = float(getattr(style, 'profile_width', 1.0))
+    result['dash_width'] = 4.0 * max(1.0, float(scale))
     return result

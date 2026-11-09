@@ -30,3 +30,14 @@ def test_override_back_tint_and_horizon():
     assert style_payload(scene, override)['back_color'] == (.7, .8, .9)
     result['front_color'][0] = 0
     assert override.front_color == (.4, .5, .6)
+
+
+def test_profile_width_and_dash_defaults():
+    style = Style(profiles=True, back_edges=True, edge_color=(.2, .3, .4))
+    style.profile_width = 3.0
+    payload = style_payload(SimpleNamespace(display_style=style))
+    assert payload['profile_width'] == 3.0
+    assert payload['edge_color'] == [.2, .3, .4]
+    assert payload['dash_width'] == 4.0
+    assert style_payload(SimpleNamespace(display_style=style), scale=2)['dash_width'] == 8.0
+    assert style_payload(SimpleNamespace(display_style=Style()))['profile_width'] == 1.0
