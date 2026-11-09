@@ -1,0 +1,9 @@
+{
+  "section=False,msaa=False,ao=False,profiles=False.png": 0,
+  "section=True,msaa=False,ao=False,profiles=True.png": 0,
+  "section=False,msaa=False,ao=True,profiles=True.png": 0,
+  "section=True,msaa=True,ao=True,profiles=True.png": 11176,
+  "section=False,msaa=False,ao=False,profiles=True.png": 0,
+  "section=False,msaa=True,ao=True,profiles=True.png": 0,
+  "section=False,msaa=True,ao=False,profiles=True.png": 0
+}

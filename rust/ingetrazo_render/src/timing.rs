@@ -1,8 +1,8 @@
 //! Diagnostic timestamps preserve the existing render-pass boundaries.
 use std::collections::BTreeMap;
-pub const NAMES: [&str; 17] = ["background", "culling", "faces", "edge_quads",
+pub const NAMES: [&str; 18] = ["background", "culling", "faces", "edge_quads",
     "profile_top", "ao_inputs", "ao_kernel", "ao_blur_x", "ao_blur_y",
-    "ao_upsample_composite", "antialias", "antialias_edges", "xray_accumulation", "xray_composite", "overlay", "frame", "section_caps"];
+    "ao_upsample_composite", "antialias", "antialias_edges", "xray_accumulation", "xray_composite", "overlay", "frame", "section_caps", "id"];
 pub const COUNT: u32 = 4 + NAMES.len() as u32 * 2;
 pub const BYTES: usize = COUNT as usize * 8;
 pub fn index(name: &str) -> u32 {
