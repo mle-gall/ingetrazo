@@ -602,7 +602,9 @@ class PushPullTool(Tool):
         # once, then stretched — walls merging and old edges going live, as
         # the commit will leave them. A free face (nothing to merge with) and
         # a Ctrl-copy show the sweep as an overlay — see _build_light_faces.
-        if self._prism_cap and not self._keep_base:
+        if getattr(viewport, 'mesh_outline_preview', False):
+            self._show_light_preview(viewport)
+        elif self._prism_cap and not self._keep_base:
             self._show_prism_preview(viewport)
         elif self._attached and not self._keep_base:
             self._show_staged_preview(viewport)
@@ -1628,8 +1630,9 @@ class PushPullTool(Tool):
         cache = getattr(self, "_infer_cache", None)
         if cache is None:
             cache = []
-            meshes = ([vp.scene.mesh]
-                      + [g.mesh for g in getattr(vp.scene, "groups", [])])
+            candidates = getattr(vp, "inference_meshes", None)
+            meshes = (candidates(sx, sy) if candidates is not None else
+                      [vp.scene.mesh] + [g.mesh for g in getattr(vp.scene, "groups", [])])
             seen = set()
             for mesh in meshes:
                 if id(mesh) in seen:      # shared prototypes: project once

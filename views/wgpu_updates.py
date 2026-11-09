@@ -29,6 +29,7 @@ class InstanceUpdates:
         self.removed = []
         self.version = scene.content_version
         self.pending = set()
+        self.pending_meshes = set()
         self.pending_removed = set()
         self.journal_valid = True
         self.unsubscribe = None
@@ -59,10 +60,20 @@ class InstanceUpdates:
 
         def after(command, phase, ran):
             from core.history import (MoveGroupCommand, CompoundCommand, SetRecordCommand,
-                                      SetRegistryCommand, InsertGroupCommand, DeleteGroupCommand)
+                                      SetRegistryCommand, InsertGroupCommand, DeleteGroupCommand,
+                                      SnapshotMutation, MoveVerticesCommand, AddEdgeCommand,
+                                      AddFaceCommand, EraseSelectionCommand)
             def visit(command):
                 if isinstance(command, CompoundCommand):
                     return all(visit(c) for c in command.commands)
+                if isinstance(command, (SnapshotMutation, MoveVerticesCommand,
+                                        AddEdgeCommand, AddFaceCommand, EraseSelectionCommand)):
+                    mesh = command._target(self.scene) if isinstance(command, SnapshotMutation) else self.scene.mesh
+                    old = self.meshes.get(id(mesh))
+                    if old is None or old[2] < 0:
+                        return False
+                    self.pending_meshes.add(id(mesh))
+                    return True
                 if isinstance(command, (InsertGroupCommand, DeleteGroupCommand)) and command._owner is self.scene.groups:
                     adding = isinstance(command, InsertGroupCommand) != (phase == 'undo')
                     if adding:
@@ -96,6 +107,10 @@ class InstanceUpdates:
             hidden = not state(root)[0]
             placements.extend((g, matrix, hidden) for g, matrix in iter_placements(root))
         seen, ids, values, changed = (self.active if local else set()), [], [], {}
+        if local:
+            changed.update((key, self.meshes[key]) for key in self.pending_meshes
+                           if self.meshes[key][0]._mut_serial != self.meshes[key][1])
+        self.pending_meshes.clear()
         additions = []
         for group, matrix, hidden in placements:
             mesh = group.mesh if group is not None else scene.loose_mesh

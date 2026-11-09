@@ -12,7 +12,7 @@ from tools.base import ToolContext
 from tools.tape import TapeMeasureTool
 from views.wgpu_overlay import Primitive
 
-TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move'}
+TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh', 'EraserTool': 'mesh'}
 
 
 def move_command(groups, delta):
@@ -20,7 +20,10 @@ def move_command(groups, delta):
     return commands[0] if len(commands) == 1 else CompoundCommand(commands)
 
 
-class NativeTools:
+from views.wgpu_mesh_tools import MeshToolAccess
+
+
+class NativeTools(MeshToolAccess):
     def __init__(self, view):
         self.view = view
         self.tool = None
@@ -42,6 +45,10 @@ class NativeTools:
         self.cancel()
         self.tool = tool
         self.mode = TOOL_DISPATCH.get(type(tool).__name__, 'select' if tool is None else 'inert')
+        if self.mode == 'move':
+            selection = self.view.scene.selection
+            if not selection or not all(isinstance(g, Group) for g in selection):
+                self.mode = 'mesh'
         if self.mode == 'tape':
             self.tool.on_cancel(self)
         if self.mode == 'inert':
@@ -54,6 +61,8 @@ class NativeTools:
                  else view._world_under_cursor(event.position().x(), event.position().y()))
         if point is None:
             return None
+        if self.tool is not None:
+            self.tool.snap_kind = getattr(view.last_snap, "kind", None)
         return ToolContext(self, point, event.position(), event.modifiers(), view.last_snap)
 
     def click(self, event):
@@ -61,9 +70,16 @@ class NativeTools:
         ctx = self.context(event)
         if ctx is None:
             return
-        if mode == 'tape':
+        if mode == 'mesh':
+            self.tool.on_hover(ctx)
             self.tool.on_click(ctx)
-            self.start_point = self.tool.start_point
+            self.start_point = getattr(self.tool, 'start_point', None)
+            self.update()
+            self.view.overlay_primitives = []
+            self.mesh_feedback()
+        elif mode == 'tape':
+            self.tool.on_click(ctx)
+            self.start_point = getattr(self.tool, 'start_point', None)
             self.measurements()
         elif mode == 'move':
             if self.start_point is None:
@@ -99,6 +115,11 @@ class NativeTools:
         if ctx is None:
             return
         self.hover_point = ctx.world
+        if mode == 'mesh':
+            self.tool.on_hover(ctx)
+            self.start_point = getattr(self.tool, 'start_point', None)
+            self.mesh_feedback()
+            return
         if mode == 'tape':
             self.tool.on_hover(ctx)
             self.measurements()
@@ -128,6 +149,28 @@ class NativeTools:
                 self.view.overlay_primitives.append(Primitive('text', (pixel,), text=text))
 
     def key(self, event):
+        if self.mode == 'mesh':
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                from views.viewport import Viewport
+                value = Viewport._parse_value_buffer(
+                    self.value_buffer, comma_lists=getattr(self.tool, "vcb_comma_lists", False))
+                if value is not None:
+                    self.tool.on_value(self, value)
+                self.value_buffer = ''
+                self.start_point = getattr(self.tool, 'start_point', None)
+                self.view.overlay_primitives = []
+                self.update()
+                return True
+            text = event.text()
+            if text and not (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)) and (text[0].isdigit() or text in '.-+,; /\"\'' or
+                    (self.value_buffer and text.lower() in ('m', 'c', 'f', 't', 'i', 'n'))):
+                self.value_buffer += text
+                self.measurementChanged.emit(self.value_buffer)
+                return True
+            if event.key() == Qt.Key_Backspace and self.value_buffer:
+                self.value_buffer = self.value_buffer[:-1]
+                return True
+            return self.tool.on_key(self, event.key(), event.modifiers())
         if self.mode != 'move' or self.start_point is None:
             return False
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
@@ -166,6 +209,9 @@ class NativeTools:
 
     def cancel(self):
         self.restore()
+        if self.mode == 'mesh' and self.tool is not None:
+            self.tool.on_cancel(self)
+            self._mesh_hover = None
         if isinstance(self.tool, TapeMeasureTool):
             self.tool.on_cancel(self)
         self.original = None
@@ -188,6 +234,14 @@ class NativeTools:
         self.view.source_viewport.flash_status(*args)
 
     def update(self):
+        if self.mode == 'mesh':
+            self.view.set_scene(self.scene)
+            revision = self.history.revision
+            if revision != getattr(self, '_notified_revision', revision):
+                notify = getattr(self.view.source_viewport, 'notify_scene_changed', None)
+                if notify is not None:
+                    notify()
+            self._notified_revision = revision
         self.view.update()
 
     # R2b measures points, not guide creation from GL edge picking.

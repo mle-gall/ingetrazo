@@ -133,7 +133,7 @@ def test_new_prototype_preserves_resident_ids():
 
 
 def test_dispatch_is_explicit():
-    assert TOOL_DISPATCH == {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move'}
+    assert TOOL_DISPATCH == {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh', 'EraserTool': 'mesh'}
     assert TOOL_DISPATCH.get('RotateTool', 'inert') == 'inert'
 
 
@@ -361,3 +361,26 @@ def test_drag_preview_batches_rows_without_rendering_ids():
     assert len(renderer.calls[0][1][1]) == 1000 * 80
     assert np.all(packed.instances['world'][native.ids, 3, 0] == 7)
     assert np.all(packed.instances['world'][1::2, 3, 0] == 0)
+
+
+def test_mesh_history_journal_does_not_walk_placements(monkeypatch):
+    from core.history import History, SnapshotMutation
+    scene, updates = fixture_scene()
+    scene.begin_group_edit(scene.groups[0])
+    updates.apply(*updates.diff(scene))
+    history = History(scene)
+    updates.observe(history)
+    mesh = scene.mesh
+    history.execute(SnapshotMutation(lambda s: s.mesh.move_vertex(
+        s.mesh.vertices[0], QVector3D(0, 0, 1))))
+    monkeypatch.setattr('views.wgpu_updates.iter_placements',
+                        lambda *a: (_ for _ in ()).throw(AssertionError('placement scan')))
+    updates.apply(*updates.diff(scene))
+    assert len(updates.changed) == 1
+    assert updates.changed[0][0] is mesh
+    history.undo()
+    updates.apply(*updates.diff(scene))
+    assert len(updates.changed) == 1
+    history.redo()
+    updates.apply(*updates.diff(scene))
+    assert len(updates.changed) == 1

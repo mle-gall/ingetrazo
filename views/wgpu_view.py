@@ -174,7 +174,18 @@ class WgpuView(QWidget):
             self.renderer = ingetrazo_render.Renderer(int(self.winId()), self.width(), self.height(), self.devicePixelRatioF())
         if len(self.packed.instances):
             self.packed.upload(self.renderer)
-            self._frame_style = None
+        else:
+            # The renderer ABI requires one row. A hidden scratch row lets
+            # an empty document show the first tool rubber band.
+            from core.mesh import Mesh
+            from core.group import Group
+            from core.scene import Scene
+            mesh = Mesh()
+            mesh.add_edge(QVector3D(), QVector3D(1, 0, 0))
+            scratch = pack_scene(Scene(groups=[Group(mesh)]))
+            scratch.instances['info'][:, 2] = 1
+            scratch.upload(self.renderer)
+        self._frame_style = None
         self.upload_seconds = time.perf_counter()-start
         self._scene_dirty = False
         self.update()
@@ -191,7 +202,7 @@ class WgpuView(QWidget):
         self.update()
 
     def draw_frame(self):
-        if self.renderer is None or not len(self.packed.instances):
+        if self.renderer is None:
             return None
         start = time.perf_counter()
         self.tools.sync()
@@ -289,9 +300,12 @@ class WgpuView(QWidget):
         self.last_snap = None
         self.overlay_primitives = []
         source = self.source_viewport
+        if self.tools.sync() == 'mesh':
+            self.tools.work_point(x, y)
         tool = getattr(source, 'active_tool', None)
         inference = getattr(source, 'inference', None)
         options = dict(start_point=self.tools.start_point,
+                       chain_first_point=getattr(tool, 'chain_first_point', None),
                        acquired_point=getattr(inference, '_acquired_point', None),
                        acquired_points=getattr(inference, '_encouraged', None),
                        axis_lock=getattr(inference, 'axis_lock', None),
@@ -305,7 +319,7 @@ class WgpuView(QWidget):
                            self._project_to_lock_line(start, direction, x, y))
         if self.hovered_row is not None and self.inference_index is not None:
             self.last_snap = snap(self.inference_index, self.hovered_row, self, x, y, **options)
-        elif self.tools.sync() in ('tape', 'move'):
+        elif self.tools.sync() in ('tape', 'move', 'mesh'):
             from core.snap import compute_snap
             from types import SimpleNamespace
             origin, direction = self._pixel_to_ray(x, y)
@@ -314,6 +328,8 @@ class WgpuView(QWidget):
             denominator = QVector3D.dotProduct(direction, normal)
             if abs(denominator) > 1e-9:
                 point = origin + direction * (QVector3D.dotProduct(plane-origin, normal)/denominator)
+                if self.tools.mode == 'mesh':
+                    point = self.tools.work_point(x, y) or point
                 self.last_snap = compute_snap(point, (x, y), SimpleNamespace(edges=[]),
                                               self._world_to_pixel, 12., **options)
         if inference is not None and self.last_snap is not None:
@@ -370,7 +386,7 @@ class WgpuView(QWidget):
         self._drag_nav = event.button() == Qt.MiddleButton or bool(
             getattr(self.source_viewport, 'nav_mode', None))
         mode = self.tools.sync()
-        if not self._drag_nav and event.button() == Qt.LeftButton and mode in ('tape', 'move'):
+        if not self._drag_nav and event.button() == Qt.LeftButton and mode in ('tape', 'move', 'mesh'):
             self.hover(self.press.x(), self.press.y(), event.modifiers())
             self.tools.click(event)
         if self._drag_nav:
@@ -396,7 +412,7 @@ class WgpuView(QWidget):
             else:
                 dy = -delta.y() if getattr(self.source_viewport, '_invert_orbit_y', False) else delta.y()
                 self.camera.orbit_about(self._pivot, delta.x(), dy, self.height())
-        elif self.tools.sync() in ('tape', 'move'):
+        elif self.tools.sync() in ('tape', 'move', 'mesh'):
             self.hover(event.position().x(), event.position().y(), event.modifiers())
             self.tools.hover(event)
         elif event.buttons() & Qt.LeftButton and self.tools.mode == 'select':
@@ -418,19 +434,42 @@ class WgpuView(QWidget):
             if (event.position()-self.press).manhattanLength() < 3:
                 row = self.pick_row(event.position().x(), event.position().y())
                 rows = [] if row is None else [row]
+                resolved = self.resolve(row)
+                if resolved is not None and (resolved[0] is self.scene.edit_group or
+                        (resolved[0] is None and self.scene.edit_group is None)):
+                    entity = (self.tools.pick_visible_edge(event.position().x(), event.position().y())
+                              or self.tools.pick_face(event.position().x(), event.position().y()))
+                    mode = ('toggle' if event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)
+                            else 'add' if event.modifiers() & Qt.ShiftModifier else 'replace')
+                    self.scene.select([] if entity is None else [entity], mode=mode)
+                    self.last = None
+                    self.update()
+                    return
             else:
                 rows = self.rect_rows(self.press.x(), self.press.y(), event.position().x(), event.position().y())
             self.select_rows(rows, event.modifiers())
             self.selection_ms = (time.perf_counter()-start)*1000
+        if self.tools.mode == 'mesh':
+            self.tools.tool.on_release(self.tools)
+            self.tools.update()
+            self.overlay_primitives = []
+            self.tools.mesh_feedback()
         self.last = None
-        self.overlay_primitives = []
+        if self.tools.mode == 'select':
+            self.overlay_primitives = []
         self.update()
 
     def mouseDoubleClickEvent(self, event):
         mode = self.tools.sync()
-        if mode in ('tape', 'move'):
+        if mode in ('tape', 'move', 'mesh'):
             self.hover(event.position().x(), event.position().y(), event.modifiers())
-            self.tools.click(event)
+            if mode == 'mesh':
+                ctx = self.tools.context(event)
+                if ctx is not None:
+                    self.tools.tool.on_double_click(ctx)
+                    self.tools.update()
+            else:
+                self.tools.click(event)
             return
         if mode != 'select':
             return
@@ -443,7 +482,7 @@ class WgpuView(QWidget):
 
     def keyPressEvent(self, event):
         mode = self.tools.sync()
-        if event.key() == Qt.Key_Escape and mode in ('tape', 'move'):
+        if event.key() == Qt.Key_Escape and mode in ('tape', 'move', 'mesh'):
             self.tools.cancel()
         elif event.key() == Qt.Key_Escape:
             if self.scene.edit_group is not None and self.source_viewport is not None:
@@ -463,7 +502,12 @@ class WgpuView(QWidget):
         self.update()
 
     def keyReleaseEvent(self, event):
-        if self.tools.sync() == 'inert':
+        mode = self.tools.sync()
+        release = getattr(self.tools.tool, 'on_key_release', None)
+        if mode == 'mesh' and release is not None and release(self.tools, event.key()):
+            self.tools.update()
+            return
+        if mode == 'inert':
             event.ignore()
             return
         if self.source_viewport is not None:
