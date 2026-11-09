@@ -127,6 +127,7 @@ welcome arch with all its rebar (also attached to every release as
 - **Dimensions & leader texts** — static annotations with hidden-line
   occlusion and styles; texts select by their glyphs, move with the anchor
   pinned, and edit on double-click. Both come in from `.skp` files.
+- **Structure panel** — file groups under project nodes to derive their tags and BIM records.
 - **Side tray** — Entity info, Layers, Scenes, Materials (213 RAL colours and
   a textured library at real size), **Components** (scale figures, furniture,
   trees, vehicles, your own face-me PNGs), Dimension style.

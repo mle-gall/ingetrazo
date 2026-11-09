@@ -127,32 +127,6 @@ def test_bridge_saved_views_and_paging():
     assert scene.entity_selectable(other)
 
 
-def test_dock_missing_values_and_or_choices():
-    from types import SimpleNamespace
-    from PySide6.QtWidgets import QMainWindow
-    from views.navigator import NavigatorDock
-    scene, parent, child, other = model()
-    window = QMainWindow()
-    window.viewport = SimpleNamespace(scene=scene, history=History(scene), update=lambda: None)
-    dock = NavigatorDock(window)
-    dock.index = facets.build(scene)
-    dock.checked = {'class': {None}}
-    dock.refilter()
-    assert dock.result_uids == [parent.uid, other.uid]
-    dock.checked = {'name': {'Launch', 'Pier 1'}}
-    dock.refilter()
-    assert dock.result_uids == [parent.uid, child.uid]
-    dock.isolate()
-    dock.show_all()
-    assert dock.result_uids == [parent.uid, child.uid, other.uid]
-    assert window.viewport.view_filter is None
-    dock.previous_view()
-    assert dock.result_uids == [parent.uid, child.uid]
-    assert window.viewport.view_filter == {parent.uid, child.uid}
-    dock.close()
-    window.close()
-
-
 def test_filtered_ifc_profile_exports_only_matching_group(tmp_path):
     from PySide6.QtGui import QVector3D
     from formats.ifc import save_ifc
@@ -170,28 +144,6 @@ def test_filtered_ifc_profile_exports_only_matching_group(tmp_path):
     text = path.read_text()
     assert text.count('IFCSLAB(') == 1
     assert "'Keep'" in text and "'Omit'" not in text
-
-
-def test_result_selection_opens_the_placement_context(monkeypatch):
-    from types import SimpleNamespace
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QMainWindow
-    from views.navigator import NavigatorDock
-    scene, parent, child, other = model()
-    window = QMainWindow()
-    window.viewport = SimpleNamespace(scene=scene, update=lambda: None)
-    dock = NavigatorDock(window)
-    dock.index = facets.build(scene)
-    dock.checked = {'class': {'IfcColumn'}}
-    dock.refilter()
-    paths = []
-    monkeypatch.setattr('views.outliner.open_to', lambda vp, path: paths.append(path) or True)
-    item = dock.results.topLevelItem(0)
-    item.setSelected(True)
-    assert paths[-1] == [parent]
-    assert scene.selection == {child}
-    dock.close()
-    window.close()
 
 
 def test_previous_view_does_not_revive_another_documents_colour():

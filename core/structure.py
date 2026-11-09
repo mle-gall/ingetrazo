@@ -256,7 +256,7 @@ def unfile(scene, uids):
     return SetStructureNodeCommand(_targets(scene, uids), None)
 
 
-def _memberships(scene, registry):
+def _mount_index(registry):
     # A source's stable node keys belong to its own namespace. Older documents
     # have only mirrored tags; those provide virtual membership without a write.
     mounts, sources, tags = {}, {}, {}
@@ -269,12 +269,23 @@ def _memberships(scene, registry):
                 tags[src, node['source_tag']] = key
             elif node.get('mount'):
                 mounts[src] = key
+    return mounts, sources, tags
+
+
+def _membership(group, source, mount_index):
+    key = node_of(group)
+    if not source:
+        return key
+    mounts, sources, tags = mount_index
+    if links.is_linked(group):
+        return mounts.get(source)
+    return sources.get((source, key), tags.get((source, group.layer)))
+
+
+def _memberships(scene, registry):
+    mount_index = _mount_index(registry)
     for g, src, root in _placements(scene):
-        key = node_of(g)
-        if src:
-            key = (mounts.get(src) if links.is_linked(g) else
-                   sources.get((src, key), tags.get((src, g.layer))))
-        yield g, src, root, key
+        yield g, src, root, _membership(g, src, mount_index)
 
 
 def members(scene, key, recursive=True):
@@ -315,18 +326,29 @@ def _resync(scene, registry, keys):
 def unsorted(scene):
     registry = bim_registry.get(scene)
     recipes = {k: resolve(registry, k) for k in _nodes(registry)}
-    result = []
-    for g, src, root, k in _memberships(scene, registry):
-        if src:
-            continue
-        if k not in recipes:
-            if root or k is not None:
-                result.append(g.uid)
-        elif g.ifc:
-            recipe = recipes[k]
-            if g.ifc.get('class') not in recipe.get('classes_allowed', [recipe.get('class')]):
-                result.append(g.uid)
-    return result
+    return [g.uid for g, src, root, k in _memberships(scene, registry)
+            if _is_unsorted(g, src, root, k, recipes)]
+
+
+def _is_unsorted(group, source, root, key, recipes):
+    if source:
+        return False
+    if key not in recipes:
+        return root or key is not None
+    recipe = recipes[key]
+    return bool(group.ifc and group.ifc.get('class') not in
+                recipe.get('classes_allowed', [recipe.get('class')]))
+
+
+def _has_status(record):
+    for name, props in record.get('psets', {}).items():
+        if name.endswith('Common'):
+            value = props.get('Status')
+            if isinstance(value, dict):
+                value = value.get('value')
+            if value:
+                return True
+    return False
 
 
 def completeness(scene, registry):
@@ -340,9 +362,7 @@ def completeness(scene, registry):
         if key not in nodes:
             continue
         rec = group.ifc or {}
-        statuses = [props['Status'] for p, props in rec.get('psets', {}).items()
-                    if p.endswith('Common') and 'Status' in props]
-        status = any(v.get('value') if isinstance(v, dict) else v for v in statuses)
+        status = _has_status(rec)
         hits = requirement_hits(group, registry, requirements)
         for k in lineages[key]:
             row = stats[k]

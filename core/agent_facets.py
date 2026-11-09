@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Shared Navigator actions for the bridge and the dock."""
+"""Shared viewport display for structure filing, saved scenes and facet tools."""
 from copy import deepcopy
 from core import facets, bim_registry
 from core.history import SetRegistryCommand
@@ -50,17 +50,15 @@ def set_display(viewport, filter=None, color_by=None, *, isolate=True, key=None,
         from core.group import Group
         viewport.scene.selection.difference_update([
             g for g in viewport.scene.selection if isinstance(g, Group) and g.uid not in allowed])
-    inherited = {}
-    for uid, row in index.items():
-        if tint and uid in tint:
-            inherited[uid] = tint[uid]
-        elif row['path_uids'] and row['path_uids'][-1] in inherited:
-            inherited[uid] = inherited[row['path_uids'][-1]]
-    viewport.view_tint = inherited or None
+    if tint and color_by != 'structure':
+        for uid, row in index.items():
+            if uid not in tint and row['path_uids'] and row['path_uids'][-1] in tint:
+                tint[uid] = tint[row['path_uids'][-1]]
+    viewport.view_tint = tint or None
     viewport._navigator_revision = getattr(viewport, '_navigator_revision', 0) + 1
     viewport._epoch_memo = None
     viewport.scene.bump_view()
-    viewport.update()
+    getattr(viewport, "notify_scene_changed", viewport.update)()
     return uids
 
 

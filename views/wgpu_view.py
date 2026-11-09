@@ -356,7 +356,12 @@ class WgpuView(QWidget):
                 self.renderer.set_style(payload)
                 self._frame_style = payload
             tint = getattr(self.source_viewport, 'view_tint', None) or {}
-            signature = tuple(sorted(tint.items()))
+            # Structure colours can cover the whole ride. set_display already
+            # versions each replacement, including a restored previous view.
+            if getattr(self.source_viewport, '_view_color', None) == 'structure':
+                signature = ('structure', self.source_viewport._navigator_revision)
+            else:
+                signature = tuple(sorted(tint.items()))
             if signature != getattr(self, '_tint_signature', None):
                 colors = []
                 for uid, group in zip(self.packed.uids, self.packed.groups):

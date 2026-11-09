@@ -130,23 +130,25 @@ registry vocabulary), `file` (uids → node, one undo step),
 An agent classifies by choosing nodes; `set_record`/`tag` stay for the
 exceptions.
 
-## Panel (Phase 2) — replaces the Navigator dock
+## Panel (Phase 2, shipped 2026-11-10)
 
-- One tree with counts, the active node highlighted; click = select
-  members, double-click = isolate, right-click = colour by node, show/hide.
-- **Unsorted** at the bottom with its count; drag rows from the Outliner or
-  the viewport selection onto a node to file them.
-- Recipe editor on a node: class picker from the project vocabulary,
-  classifications, system, Status default.
-- Problems badge per node from `completeness`.
-- The Layers panel's folders mirror the tree; editing a filed element's tag
-  in Entity Info offers "re-file under…".
+The **Structure** tab opens alongside Properties. Click a node to select its
+members or double-click to isolate them. The context menu restores the previous
+display, colours members by root node, and manages nodes and recipes. Counts
+include descendants. Problems count missing records, missing Status on records,
+and classes outside the recipe. Linked mounts are read-only.
+
+Drop Outliner groups or rows from **Unsorted** onto a node, or use **File
+selection here**. Unsorted loads 200 placements per page. **Propose structure
+from tags…** previews the filings and conflicts. Applying the proposal, editing
+a recipe and resyncing, or re-filing a selection each takes one undo step.
+Entity Info shows the node path and offers re-filing when a filed object's tag
+changes.
 
 ## Modeling integration (Phase 3)
 
 The **active node** replaces the active tag: new groups, Insert, Link, Paste
-and 3D text are filed under it on creation (GL and Metal paths alike). Entity
-Info shows the node path. Scenes may remember an active node.
+and 3D text are filed under it on creation (GL and Metal paths alike). Scenes may remember an active node.
 
 ## Templates and IDS (Phase 4)
 
@@ -167,8 +169,8 @@ stairs mount under their links. Conflicts to expect: the `_To review` layers
 1. **Engine + tools** (this note's data model, `core/structure.py`,
    `agent_structure`, registry validation, `bootstrap`): tests on a synthetic
    scene and on a headless load of the ride; a `bootstrap` report for the ride.
-2. **Panel** replacing `NavigatorDock`; the facet index stays for queries.
-3. **Modeling integration**: active node on creation, Entity Info, re-file.
+2. **Panel** shipped in the Structure dock. The facet index serves queries and saved displays.
+3. **Modeling integration**: active node on creation.
 4. **Templates and IDS.**
 
 Out of scope: any change to the IFC exporter (it reads records as today) and

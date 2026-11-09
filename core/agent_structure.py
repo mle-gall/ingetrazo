@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Agents use the same filing transactions as the future structure panel."""
+"""Agents use the same filing transactions as the structure panel."""
 from collections import Counter
 from copy import deepcopy
 
