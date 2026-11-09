@@ -29,6 +29,10 @@ def measure():
         result = dict(prototypes=len(view.packed.bounds), vertices=len(view.packed.vertices),
                       material_bytes=view.packed.materials.nbytes, resident_bytes=view.renderer.gpu_memory,
                       size=[int(view.width()*view.devicePixelRatioF()), int(view.height()*view.devicePixelRatioF())], frames={})
+        if len(view.packed.vertices) < 1_000_000:
+            view.packed.upload(view.renderer)
+            assert view.renderer.gpu_memory == result['resident_bytes'], 're-upload changed memory accounting'
+            result['reupload_memory_verified'] = True
         for aa in (False, True):
             view.renderer.set_antialias(aa)
             samples=[]
