@@ -2935,7 +2935,7 @@ Native denotes routed, not exhaustive parity acceptance.
 | flip | FlipTool | native | _world_to_pixel |
 | followme | FollowMeTool | native | pick_edge, pick_face, rubber_band_lines |
 | fillet | FilletTool | native | rubber_band_lines |
-| texture_position | TexturePositionTool | inert with note — after the crate work | shared viewport / tool base |
+| texture_position | TexturePositionTool | native | shared viewport / tool base |
 | paint | PaintTool | native | pick_face_any |
 | dimension | DimensionTool | native | rubber_band_lines |
 | eraser | EraserTool | native | pick_dimension, pick_edge, pick_geopath, pick_guide, rubber_band_lines |
@@ -3142,3 +3142,39 @@ Remaining acceptance gaps:
   is checked; a reverse Navigator result-selection contract is not established.
 - Section and texture_position remain explicitly inert. No network write,
   push, issue, comment or pull request was performed.
+
+## 2026-11-09 — Texture positioning on Metal
+
+Native routing now uses TexturePositionTool's GL gestures and History commands:
+red/texture translation, green scale/rotation (15-degree snap, Ctrl free), blue
+scale/shear, lifted pins, menu reset/flip/rotate/undo, and Enter commit. The same
+QPainter overlay draws the four tile-corner pins, grid and rotation instrument
+into Metal's RGBA overlay even when no dimensions or text labels exist. Escape
+retains GL semantics: restore a changed mapping first, then leave and clear pins.
+The yellow perspective pin remains informational, as in GL's affine tool.
+
+Preview bakes only the edited prototype with an attribute override, leaving face
+attrs, mutation serials and History untouched. It uploads the resulting sparse
+material stream using the existing renderer API and resident atlas IDs. No Rust
+changes. A bake/upload over 30 ms switches subsequent drag steps to the pin/grid
+overlay, with the texture updated on release. Commit restores the transient
+stream before executing the shared command. Texture/back-material History events
+journal their target prototype independently of geometry mutation serials, so
+commit, undo and redo replace only that prototype.
+
+Read-only pusher car measurement (`python -m tools.texture_position_measure
+~/code/ingetrazo-bench/pusher_car_rust.igz`, local texture cache, AO disabled):
+1,253 placements, first textured prototype `Groupe#167`, 50 faces, ten updates.
+Bake plus material upload **3.12–4.98 ms**; live texture preview stays enabled.
+Including render and synchronous pick completion: **8.69–21.44 ms** after the
+first **41.28 ms** frame. This samples one textured prototype, not every face or
+camera configuration. The benchmark enforces no timing assertions.
+
+Both native crates built with the isolated Python 3.13 environment and release
+profiles; render used `extension-module` and `CARGO_PROFILE_RELEASE_STRIP=none`.
+Focused validation: `python -m pytest -q tests/test_texture_position_tool.py
+ tests/test_wgpu_*.py`: **170 passed** (34 existing QImage deprecation warnings).
+Tests compare native mouse dispatch and GL commits for all
+three editable pins with/without Ctrl, check targeted commit/undo/redo, back-side
+mapping, deferred preview on release, and transparent overlay after Escape.
+Coverage is regenerated from the registry; only Section remains non-native.
