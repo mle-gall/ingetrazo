@@ -6,6 +6,7 @@ import sys
 import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ['INGETRAZO_RUST'] = '1'
+os.environ['INGETRAZO_AO'] = '0'
 import numpy as np
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QMatrix4x4
@@ -115,7 +116,7 @@ from tools.move import MoveTool
 source = SimpleNamespace(scene=scene, _horizon_ndc_y=lambda mvp: 0., camera=view.camera, active_tool=MoveTool(), history=history,
     view_tint={}, inference=None, linear_inference_mode='all',
     flash_status=lambda *a: None, measurementChanged=SimpleNamespace(emit=lambda *a: None),
-    _measurement_text=lambda: '', _effective_style=lambda: SimpleNamespace(face_mode='shaded', edges=True))
+    _measurement_text=lambda: '', _effective_style=lambda: scene.display_style)
 view.source_viewport = source
 selected = [g for g in view.packed.groups if g is not None and not g.children][:1000]
 scene.select(selected)
