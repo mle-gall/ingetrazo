@@ -12,7 +12,7 @@ from tools.base import ToolContext
 from tools.tape import TapeMeasureTool
 from views.wgpu_overlay import Primitive
 
-TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh', 'EraserTool': 'mesh', 'RotateTool': 'mesh', 'ScaleTool': 'mesh', 'OffsetTool': 'mesh', 'CircleTool': 'mesh', 'PolygonTool': 'mesh', 'ArcTool': 'mesh'}
+TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh', 'EraserTool': 'mesh', 'RotateTool': 'mesh', 'ScaleTool': 'mesh', 'OffsetTool': 'mesh', 'CircleTool': 'mesh', 'PolygonTool': 'mesh', 'ArcTool': 'mesh', 'PaintTool': 'mesh'}
 
 
 def move_command(groups, delta):

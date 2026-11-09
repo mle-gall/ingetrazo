@@ -131,3 +131,27 @@ def test_radial_commands_match_direct(tool_type, points):
     assert geometry(scene.mesh) == after
     native.cancel()
     assert not native.view.overlay_primitives
+
+from tools.paint import PaintTool
+
+
+def test_paint_face_history_restores_material():
+    scene, history, native, _ = prepare(PaintTool())
+    face = scene.mesh.add_face([QVector3D(), QVector3D(2, 0, 0),
+                                QVector3D(0, 2, 0)])
+    native.pick_face_any = lambda *args: (face, None)
+    native.pick_face_placement = lambda *args: (face, None)
+    native._pixel_to_ray = lambda *args: (QVector3D(1, 1, 10), QVector3D(0, 0, -1))
+    native.update()
+    before = dict(face.attrs)
+    click(native, (1, 1, 0))
+    assert history.undo_stack
+    assert tuple(face.attrs.get('color')) == PaintTool.current_color
+    history.undo()
+    native.update()
+    assert face.attrs == before
+    history.redo()
+    native.update()
+    assert tuple(face.attrs.get('color')) == PaintTool.current_color
+    native.cancel()
+    assert not native.view.overlay_primitives

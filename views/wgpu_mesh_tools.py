@@ -156,7 +156,7 @@ class MeshToolAccess:
         hit = surface(self.view.inference_index, row, origin, direction)
         return hit is not None and (hit-origin).length() + 1e-4 < (point-origin).length()
 
-    def set_hover(self, entity):
+    def set_hover(self, entity, placement=None):
         self._mesh_hover = entity
 
     def set_suppressed_faces(self, faces):
