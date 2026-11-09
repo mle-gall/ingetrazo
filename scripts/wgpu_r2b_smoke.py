@@ -26,12 +26,13 @@ for i in range(3):
     scene.version += 1
     view.set_scene(scene)
     view.draw_frame()
-new = Mesh()
-new.add_edge(QVector3D(), QVector3D(1,1,1))
-scene.groups.append(Group(new))
-scene.version += 1
-view.set_scene(scene)
-view.draw_frame()
+for height in (1, 2, 3, 4):
+    new = Mesh()
+    new.add_edge(QVector3D(), QVector3D(1,1,height))
+    scene.groups.append(Group(new))
+    scene.version += 1
+    view.set_scene(scene)
+    view.draw_frame()
 mesh.move_vertex(mesh.vertices[0], QVector3D(0,0,.1))
 scene.version += 1
 view.set_scene(scene)

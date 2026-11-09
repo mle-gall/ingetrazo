@@ -10,7 +10,7 @@ import numpy as np
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QMatrix4x4
 from core.scene import Scene
-from core.history import History, MoveGroupCommand, TagGroupsCommand
+from core.history import History, MoveGroupCommand, TagGroupsCommand, InsertGroupCommand
 from PySide6.QtGui import QVector3D
 from core.group import Group
 from formats.igz import load_into
@@ -25,7 +25,11 @@ view.set_scene(scene)
 view.show()
 app.processEvents()
 view._inference_future.result()
-view.draw_frame()
+for _ in range(20):
+    view.draw_frame()
+    app.processEvents()
+    time.sleep(.016)
+view.pick_row(0, 0)
 history = History(scene)
 view._instance_updates.observe(history)
 
@@ -73,9 +77,8 @@ result['record_calls'] = dict(renderer.calls)
 renderer.calls.clear()
 added = Group(next(group.mesh for group in view.packed.groups if group is not None))
 added.xform = QMatrix4x4()
-scene.groups.append(added)
-scene.version += 1
 start = time.perf_counter()
+history.execute(InsertGroupCommand(added))
 view.set_scene(scene)
 result['add_update_ms'] = (time.perf_counter()-start)*1000
 result['add_calls'] = dict(renderer.calls)
@@ -129,15 +132,24 @@ if pixel is not None:
     event = SimpleNamespace(position=lambda: QPointF(*pixel), modifiers=lambda: Qt.NoModifier)
     view.hover(*pixel)
     view.tools.click(event)
+    # Present pickup (including the zero-distance label) before dragging.
+    view.draw_frame()
+    view.pick_row(0, 0)
     result['drag_placements'] = len(view.tools.ids)
     drag_frames = []
     for i in range(30):
         pixel = (pixel[0] + (1 if i % 2 else -1), pixel[1])
         start = time.perf_counter()
         view.hover(*pixel)
+        hovered = time.perf_counter()
         view.tools.hover(event)
+        previewed = time.perf_counter()
         frame = view.draw_frame()
-        drag_frames.append({'wall_ms': (time.perf_counter()-start)*1000, 'gpu_ms': frame[1]})
+        drag_frames.append({'wall_ms': (time.perf_counter()-start)*1000, 'gpu_ms': frame[1],
+                            'hover_ms': (hovered-start)*1000,
+                            'preview_ms': (previewed-hovered)*1000,
+                            'frame_ms': (time.perf_counter()-previewed)*1000,
+                            'overlay_ms': view.overlay_ms})
         time.sleep(.016)
     result['dispatched_drag_frames'] = drag_frames
     view.tools.cancel()
