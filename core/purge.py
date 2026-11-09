@@ -24,22 +24,21 @@ from core.layers import DEFAULT_LAYER, layer_of
 
 
 def iter_groups(groups):
-    """Every group in ``groups``, nested placements included, each once.
+    """Distinct placements in document order, including hidden groups.
 
-    ``core.group.iter_placements`` is the canonical descent — unfiltered,
-    which is what a sweep needs: a hidden group's layer is still in use, and
-    so is a face-me billboard's (``Scene.placements`` drops both, on purpose,
-    because it answers "what do I draw"). Instances share prototype meshes by
-    identity, so ``seen`` keeps one from being counted twice.
+    Only identity and membership matter here. A shared subtree need only be
+    visited once, and composing every placement's world matrix is unnecessary.
     """
-    from core.group import iter_placements
-    seen: set[int] = set()
-    for g in groups or ():
-        for pg, _m in iter_placements(g):
-            if id(pg) in seen:
-                continue
-            seen.add(id(pg))
-            yield pg
+    stack = list(groups or ())
+    stack.reverse()
+    seen = set()
+    while stack:
+        group = stack.pop()
+        if id(group) in seen:
+            continue
+        seen.add(id(group))
+        yield group
+        stack.extend(reversed(getattr(group, "children", None) or ()))
 
 
 def _document_groups(scene) -> list:
@@ -89,32 +88,69 @@ def layer_carriers(scene):
         yield photo
 
 
-def layer_counts(scene, *, photo: bool = True) -> dict[str, int]:
-    """How many of :func:`layer_carriers` carry each layer name — without
-    building a lazy mesh. Reading ``mesh.faces`` of a group the loader left
-    unbuilt builds it: the Layers panel counting on every open built all
-    888 of plaza's group meshes (95 MB more, release_check 0.5.11). A lazy
-    mesh is counted from what it was read from: each edge's layer from its
-    plan, each face's from the attribute table of its source."""
-    from collections import Counter
-
+def _count_edges(src, tally):
+    """Count the same welded keys as lazy_mesh.plan, including ring-only edges."""
     import numpy as np
+    from core.lazy_mesh import weld
 
-    from core import lazy_mesh
+    vertices, inverse = weld(src["pos"])
 
-    tally: Counter = Counter()          # raw names; None folds in at the end
-    for mesh in iter_meshes(scene):
-        plan = lazy_mesh.plan_of(mesh)
-        if plan is None:
+    def keys(a, b):
+        return np.minimum(a, b) * len(vertices) + np.maximum(a, b)
+
+    a, b = inverse[src["edges"]].T
+    keep = a != b
+    explicit = keys(a[keep], b[keep])
+    corners = inverse[src["rings"]]
+    boundary = np.empty(0, dtype=np.int64)
+    if len(corners):
+        ends = np.cumsum(src["sizes"])
+        following = np.roll(corners, -1)
+        following[ends - 1] = corners[ends - src["sizes"]]
+        boundary = keys(corners, following)
+    total = len(np.unique(np.concatenate((explicit, boundary))))
+    layers = src["layers"]
+    if layers is not None and src["flags"] is not None:
+        labels = layers[keep]
+        named = labels >= 0
+        # Last assigned (nonnegative) layer wins for a repeated edge.
+        _, last = np.unique(explicit[named][::-1], return_index=True)
+        names = src["meta"].get("edge_layers") or ()
+        for i, n in enumerate(np.bincount(labels[named][::-1][last])):
+            if n:
+                tally[names[i]] += int(n)
+        total -= len(last)
+    if total:
+        tally[None] += total
+
+
+def layer_counts(scene, *, photo: bool = True) -> dict[str, int]:
+    """Count every layer carrier, yielding the same counts as the panel."""
+    return next(counts for counts in layer_count_steps(scene, photo=photo)
+                if counts is not None)
+
+
+def layer_count_steps(scene, *, photo=True):
+    """Yield between meshes and group batches, then publish one complete tally."""
+    from collections import Counter
+    import numpy as np
+    tally = Counter()
+    seen = set()
+
+    def count_mesh(mesh):
+        if mesh is None or id(mesh) in seen:
+            return
+        seen.add(id(mesh))
+        src = mesh.__dict__.get("_deferred_source")
+        if src is None:
             tally.update(layer_of(f) for f in mesh.faces)
             tally.update(layer_of(e) for e in mesh.edges)
-            continue
-        tally.update(plan.layer)
-        src = mesh.__dict__["_deferred_source"]
+            return
+        _count_edges(src, tally)
         face_attr = src.get("face_attr")
         if face_attr is None:
-            tally[None] += plan.nfaces
-            continue
+            tally[None] += len(src["counts"])
+            return
         # One pass over the face → attribute-row index (14 M faces on the
         # plant of #158: a Python loop per face was 0.5 s on every edit).
         table = src["meta"].get("face_attrs") or []
@@ -124,6 +160,15 @@ def layer_counts(scene, *, photo: bool = True) -> dict[str, int]:
         for raw, n in zip(table, per_row.tolist()):
             if n:
                 tally[(raw or {}).get("layer")] += n
+    count_mesh(scene.loose_mesh)
+    yield None
+    for i, group in enumerate(iter_groups(_document_groups(scene))):
+        tally[layer_of(group)] += 1
+        if id(group.mesh) not in seen:
+            count_mesh(group.mesh)
+            yield None
+        elif i % 256 == 0:
+            yield None
     counts: dict[str, int] = {}
 
     def add(name, n=1):
@@ -132,14 +177,12 @@ def layer_counts(scene, *, photo: bool = True) -> dict[str, int]:
 
     for name, n in tally.items():
         add(name, n)
-    for ent in iter_groups(_document_groups(scene)):
-        add(layer_of(ent))
     for ent in _annotations(scene):
         add(layer_of(ent))
     survey = getattr(scene, "photo_mesh", None) if photo else None
     if survey is not None:
         add(layer_of(survey))
-    return counts
+    yield counts
 
 
 def used_layers(scene) -> set[str]:

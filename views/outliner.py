@@ -1231,7 +1231,7 @@ class OutlinerPanel(QWidget):
             timer = self._refresh_timer = QTimer(self)
             timer.setSingleShot(True)
             timer.timeout.connect(
-                lambda: self.refresh(rows_if_changed=True))
+                lambda: self.refresh(rows_if_changed=True, deferred=True))
         timer.start(300)
 
     def showEvent(self, ev) -> None:
@@ -1263,7 +1263,14 @@ class OutlinerPanel(QWidget):
             return path.name
         return getattr(w, "_import_name", None) or tr("Untitled")
 
-    def refresh(self, rows_if_changed: bool = False) -> None:
+    def refresh(self, rows_if_changed: bool = False, *, deferred=False) -> None:
+        from views.panel_refresh import refresh_steps
+        scene = self._scene()
+        version = scene.version
+        refresh_steps(self, self._refresh_steps(rows_if_changed), deferred=deferred,
+                      current=lambda: self._scene() is scene and scene.version == version)
+
+    def _refresh_steps(self, rows_if_changed):
         """Bring the tree up to date: rows rebuilt only when groups came or
         went, otherwise updated in place — a refresh follows every edit and
         every click, and a rebuild would lose the scroll and the branches
@@ -1280,6 +1287,7 @@ class OutlinerPanel(QWidget):
             getattr(self._window, "_outliner_kinds", None) or ())
         scene = self._scene()
         shape = self._rows_shape(scene)
+        yield
         struct = shape[0]               # _rows_shape already walked it
         # A click changes the view, not the rows: with the content and the
         # open path as they were, every row reads as it did (21 406 rows
@@ -1315,14 +1323,15 @@ class OutlinerPanel(QWidget):
                     and hist is not None
                     and getattr(hist, "groups_cv", {}).get("rows")
                     == rows_key[0])
-        patched = False
+        patched = rebuilt = False
         if shape != self._shape:
             order_same = (self._shape is not None
                           and shape[1:] == self._shape[1:])
             patched = (groups_only and order_same and not self._heads
                        and self._patch_rows(scene, struct))
             if not patched:
-                self._rebuild(scene)
+                yield from self._rebuild(scene)
+                rebuilt = True
             self._shape = shape
             self._struct_shape = struct
         # Nor does a Move (History.rows_cv) — unless an extension's kind
@@ -1335,7 +1344,7 @@ class OutlinerPanel(QWidget):
             if ctx_only:
                 self._update_some_rows(scene, set(old_key[3])
                                        | set(rows_key[3]))
-            elif not patched:
+            elif not patched and not rebuilt:
                 self._update_rows(scene)
             if hist is not None:
                 hist.rows_cv = rows_key[0]
@@ -1393,72 +1402,78 @@ class OutlinerPanel(QWidget):
         if self.summary.text() != text:
             self.summary.setText(text)
 
-    def _rebuild(self, scene) -> None:
+    def _rebuild(self, scene):
         """Rows for every group, each born with its texts and icons: one
         constructor call does what a setText per column would, and the
         cache it fills tells ``_update_rows`` there is nothing left to do."""
         expanded = {self._groups[key].uid
                     for key, item in self._items.items() if item.isExpanded()}
-        expanded |= self.__dict__.pop("_kept_expanded", set())
+        expanded |= self.__dict__.get("_kept_expanded", set())
         for key, item in self._heads.items():
             if item.isExpanded():
                 self._heads_closed.discard(key)
             else:
                 self._heads_closed.add(key)
         scroll = self.tree.verticalScrollBar().value()
-        counts = self._counts = outliner.instance_counts(scene.groups)
+        counts = outliner.instance_counts(scene.groups)
         opened = {id(g) for g in outliner.open_path(scene)}
+        items = {}
+        groups = {}
+        states = {}
+        root = QTreeWidgetItem([self._document_name(), "", "", "", ""])
+        root.setIcon(COL_NAME, node_icon("document"))
+        root.setFlags(Qt.ItemIsEnabled | Qt.ItemIsDropEnabled)
+        font = QFont(root.font(COL_NAME))
+        font.setBold(True)
+        root.setFont(COL_NAME, font)
+        heads = self._make_heads(scene, root)
+        editable = Qt.ItemIsEditable
+        # Imported assemblies contain many rows with identical roles,
+        # icons and tooltips. Copy those Qt values once instead of
+        # issuing dozens of setters for every hidden child row.
+        templates = {}
+        from core.materials import material_sig
+        around = inherited_states(scene.groups)
+        yield
+        for i, (g, parent, _depth) in enumerate(self._display_walk(scene)):
+            key = id(g)
+            state = self._row_state(g, counts, opened,
+                                    around.get(key, (None, None)))
+            template_key = (state[1:], material_sig(g.material))
+            template = templates.get(template_key)
+            if template is not None:
+                item = template.clone()
+                item.setText(COL_NAME, state[0])
+                item.setData(COL_NAME, Qt.UserRole, g)
+            else:
+                item = QTreeWidgetItem([state[0], "", "", state[1],
+                                        state[2], state[7], state[8],
+                                        state[9]])
+                item.setData(COL_NAME, Qt.UserRole, g)
+                item.setFlags(item.flags() | editable)
+                self._paint(item, None, state)
+                if len(templates) < 512:
+                    # Store a detached leaf: cloning an attached row
+                    # later would also copy its descendants.
+                    templates[template_key] = item.clone()
+            if parent is not None:
+                holder = items[id(parent)]
+            else:
+                holder = heads.get(("layer", state[2]), root)
+            holder.addChild(item)
+            items[key] = item
+            groups[key] = g
+            states[key] = state
+            if i % 128 == 0:
+                yield
         self._updating = True
         self.tree.blockSignals(True)
         try:
             self.tree.clear()
-            self._items = {}
-            self._groups = {}
-            self._state = {}
-            root = self._root = QTreeWidgetItem(["", "", "", "", ""])
-            root.setIcon(COL_NAME, node_icon("document"))
-            root.setFlags(Qt.ItemIsEnabled | Qt.ItemIsDropEnabled)
-            font = QFont(root.font(COL_NAME))
-            font.setBold(True)
-            root.setFont(COL_NAME, font)
+            self.__dict__.pop("_kept_expanded", None)
+            self._items, self._groups, self._state = items, groups, states
+            self._counts, self._root, self._heads = counts, root, heads
             self.tree.addTopLevelItem(root)
-            self._heads = self._make_heads(scene, root)
-            editable = Qt.ItemIsEditable
-            # Imported assemblies contain many rows with identical roles,
-            # icons and tooltips. Copy those Qt values once instead of
-            # issuing dozens of setters for every hidden child row.
-            templates = {}
-            from core.materials import material_sig
-            around = inherited_states(scene.groups)
-            for g, parent, _depth in self._display_walk(scene):
-                key = id(g)
-                state = self._row_state(g, counts, opened,
-                                        around.get(key, (None, None)))
-                template_key = (state[1:], material_sig(g.material))
-                template = templates.get(template_key)
-                if template is not None:
-                    item = template.clone()
-                    item.setText(COL_NAME, state[0])
-                    item.setData(COL_NAME, Qt.UserRole, g)
-                else:
-                    item = QTreeWidgetItem([state[0], "", "", state[1],
-                                            state[2], state[7], state[8],
-                                            state[9]])
-                    item.setData(COL_NAME, Qt.UserRole, g)
-                    item.setFlags(item.flags() | editable)
-                    self._paint(item, None, state)
-                    if len(templates) < 512:
-                        # Store a detached leaf: cloning an attached row
-                        # later would also copy its descendants.
-                        templates[template_key] = item.clone()
-                if parent is not None:
-                    holder = self._items[id(parent)]
-                else:
-                    holder = self._heads.get(("layer", state[2]), root)
-                holder.addChild(item)
-                self._items[key] = item
-                self._groups[key] = g
-                self._state[key] = state
             root.setExpanded(True)
             for key, head in self._heads.items():
                 head.setExpanded(key not in self._heads_closed)

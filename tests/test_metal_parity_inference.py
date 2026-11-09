@@ -213,3 +213,33 @@ def test_explicit_axis_lock_without_geometry():
                 project_onto_line=lambda s, d: QVector3D(2, 0, 0))
     assert result.kind == 'axis' and result.axis == 'x'
     assert result.point == QVector3D(2, 0, 0)
+
+
+def test_interleaved_deferred_arcs_fit_once_in_source_order(monkeypatch):
+    import views.wgpu_inference as inference
+    scene = Scene()
+    mesh = Mesh()
+    pts = np.array([(1, 0, 0), (0, 1, 0), (-1, 0, 0),
+                    (5, 0, 0), (4, 1, 0), (3, 0, 0)], np.float32)
+    pairs = np.array([(0, 1), (3, 4), (1, 2), (4, 5)])
+    for a, b in pairs:
+        mesh.add_edge(QVector3D(*pts[a]), QVector3D(*pts[b]))
+    scene.groups = [Group(mesh), Group(mesh)]
+    packed = pack_scene(scene)
+    mesh.__dict__['_deferred_source'] = dict(
+        pos=pts, edges=pairs, curves=np.array([9, 2, 9, 2]),
+        flags=None, layers=None)
+    calls = []
+    original = inference._curve_features
+    def fit(curves):
+        calls.append(1)
+        return original(curves)
+    monkeypatch.setattr(inference, '_curve_features', fit)
+    index = prepare(packed, scene)
+    assert not calls
+    code = int(packed.instances['info'][0, 0])
+    centers, tangents = index.features[code]
+    np.testing.assert_allclose(centers, [[0, 0, 0], [4, 0, 0]], atol=1e-6)
+    assert len(tangents) == 4
+    assert tangent_direction(index, packed, 1, QVector3D(*pts[0])) is not None
+    assert calls == [1]

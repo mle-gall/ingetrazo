@@ -675,7 +675,7 @@ class LayersPanel(QWidget):
 
         self._count_timer = QTimer(self)
         self._count_timer.setSingleShot(True)
-        self._count_timer.timeout.connect(self.update_counts)
+        self._count_timer.timeout.connect(self._count_slice)
         # Back in the drawing, the rows picked here let go: a highlighted
         # row left behind reads as a layer still being worked on.
         QApplication.instance().focusChanged.connect(self._on_focus_changed)
@@ -743,6 +743,7 @@ class LayersPanel(QWidget):
                 self.tree.addTopLevelItem(item)
         active = L.active_layer(scene)
         self._alone = self.isolated_layers()         # whose target is filled
+        folder_layers = {name: [] for name in folders}
         for order, ly in enumerate(scene.layers):
             item = _Row([ly.name])
             item.setData(COL_NAME, Qt.UserRole, (KIND_LAYER, ly.name))
@@ -755,8 +756,11 @@ class LayersPanel(QWidget):
                 parent.addChild(item)
             else:
                 self.tree.addTopLevelItem(item)
+            while parent is not None:
+                folder_layers[self._key(parent)[1]].append(ly)
+                parent = parent.parent()
         for name, item in folders.items():
-            self._paint_folder_row(item)
+            self._paint_folder_row(item, folder_layers[name])
             item.setExpanded(name not in self._collapsed)
         self._mark_selection()
         for it in self._all_items():
@@ -1007,11 +1011,11 @@ class LayersPanel(QWidget):
         if ly.name in self._counts:
             self._set_count(item, self._counts[ly.name])
 
-    def _paint_folder_row(self, item) -> None:
+    def _paint_folder_row(self, item, layers=None) -> None:
         scene = self._scene()
-        layers = [scene.layer(n)
-                  for n in L.layers_in_folder(scene, self._key(item)[1])]
-        layers = [ly for ly in layers if ly is not None]
+        if layers is None:
+            layers = [scene.layer(n) for n in L.layers_in_folder(scene, self._key(item)[1])]
+            layers = [ly for ly in layers if ly is not None]
         shown = any(ly.visible for ly in layers) or not layers
         locked = bool(layers) and all(ly.locked for ly in layers)
         item.setIcon(COL_EYE, node_icon("eye" if shown else "eye_off"))
@@ -1041,6 +1045,29 @@ class LayersPanel(QWidget):
         scene = self._scene()
         self._counted_version = scene.content_version
         counts = layer_counts(scene)
+        self._count_job = None
+        self._show_counts(counts)
+
+    def _count_slice(self):
+        from time import monotonic
+        from core.purge import layer_count_steps
+        scene = self._scene()
+        key = (id(scene), scene.content_version)
+        job = getattr(self, "_count_job", None)
+        if job is None or job[0] != key:
+            job = self._count_job = (key, layer_count_steps(scene))
+        deadline = monotonic() + 0.030
+        for counts in job[1]:
+            if counts is not None:
+                self._count_job = None
+                self._counted_version = scene.content_version
+                self._show_counts(counts)
+                return
+            if monotonic() >= deadline:
+                self._count_timer.start(10)
+                return
+
+    def _show_counts(self, counts):
         self._counts = counts
         self._updating = True
         for it in self._all_items():

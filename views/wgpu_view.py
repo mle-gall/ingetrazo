@@ -219,7 +219,22 @@ class WgpuView(QWidget):
         if previous is not None:
             previous.cancel()
         self.inference_index = None
-        self._inference_future = self._inference_worker.submit(prepare, self._inference_snapshot(), self.scene)
+        packed = self._inference_snapshot()
+        scene = self.scene
+        mvp = self.camera.projection_matrix() * self.camera.view_matrix()
+        width, height = self.width(), self.height()
+
+        def build():
+            index = prepare(packed, scene)
+            if len(packed.instances):
+                from views.wgpu_inference import screen_boxes
+                # Use the immutable placement and camera snapshots. A resize,
+                # orbit or edit before publication invalidates the usual key.
+                screen_boxes(index, packed, mvp, width, height)
+            return index
+
+        self._inference_future = self._inference_worker.submit(build)
+
     def _inference_snapshot(self):
         from dataclasses import replace
         return replace(self.packed, instances=self.packed.instances.copy(),

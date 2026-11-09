@@ -6511,7 +6511,7 @@ class MainWindow(WorksessionMixin, QMainWindow):
     #: Panel caches keyed by the scene's content version: two projects can
     #: be at the same number, so a switch forgets them all.
     _VERSION_CACHES = ("_in_model_cv", "_counted_version", "_drawn_signature",
-                       "_swatch_sig",
+                       "_swatch_sig", "_pending_refresh", "_count_job",
                        # …and what Materials remembers of each mesh: it held
                        # a closed project's 2 722 meshes (the SPR, ~2.5 GB).
                        "_worn_by_mesh")
