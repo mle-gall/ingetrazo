@@ -51,6 +51,13 @@ def test_only_rows_on_screen_are_drawn(monkeypatch):
         _settle()
         lst = panel._in_model
         assert lst.count() == 120
+        # The Components section sits below the fold of the Properties
+        # tray at the default window size: a list the user cannot see
+        # draws no pictures at all (the hidden Parts panel's cut list cost
+        # 48 s per click on the ride model). Scroll it into view first.
+        assert not drawn, "a section scrolled out of view draws nothing"
+        win.tray.widget().ensureWidgetVisible(lst, 0, 0)
+        _settle()
         assert drawn, "the rows on screen get their picture"
         assert len(drawn) < 60, "rows off screen wait to be scrolled to"
         first = set(drawn)
