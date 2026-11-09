@@ -109,20 +109,13 @@ struct Renderer {
     #[pyo3(get)]
     adapter: String,
 }
-fn row_runs(mut ids: Vec<usize>) -> Vec<(usize, usize)> {
-    ids.sort_unstable();
-    ids.dedup();
-    let mut runs: Vec<(usize, usize)> = Vec::new();
-    for id in ids {
-        if let Some(last) = runs.last_mut() {
-            if last.1 == id {
-                last.1 += 1;
-                continue;
-            }
-        }
-        runs.push((id, id + 1));
+fn row_runs(ids: Vec<usize>) -> Vec<(usize, usize)> {
+    // The CPU mirror includes flags and overrides for untouched rows. Uploading
+    // the enclosing range batches scattered selections into one queue write.
+    match (ids.iter().min(), ids.iter().max()) {
+        (Some(&first), Some(&last)) => vec![(first, last + 1)],
+        _ => Vec::new(),
     }
-    runs
 }
 
 fn grown_capacity(current: usize, needed: usize) -> usize {
@@ -573,7 +566,7 @@ impl Renderer {
         }
         let hard_template = capacity_buffer(&self.device, &hard_cmd, prototype_capacity * 40, wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
         let survivors = buffer(&self.device, &vec![0; capacity * 4], wgpu::BufferUsages::STORAGE);
-        let viewpoints = buffer(&self.device, &vec![0; capacity * 16], wgpu::BufferUsages::STORAGE);
+        let viewpoints = buffer(&self.device, &vec![0; capacity * 80], wgpu::BufferUsages::STORAGE);
         let compute = bind_prototypes(
             &self.device,
             &self.compute.get_bind_group_layout(0),
@@ -728,6 +721,7 @@ impl Renderer {
     /// Update existing resident rows without replacing geometry or pick IDs.
     fn update_instances(&mut self, ids: Vec<usize>, rows: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
         self.ids_dirty = true;
+        self.stable_frames = 0;
         let rows = rows.as_slice()?;
         let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
         if rows.len() != ids.len() * 80 {
@@ -763,7 +757,7 @@ impl Renderer {
             padded[..s.rows.len()].copy_from_slice(&s.rows);
             s.inst = buffer(&self.device, &padded, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
             s.survivors = buffer(&self.device, &vec![0; s.capacity*4], wgpu::BufferUsages::STORAGE);
-            s.viewpoints = buffer(&self.device, &vec![0; s.capacity*16], wgpu::BufferUsages::STORAGE);
+            s.viewpoints = buffer(&self.device, &vec![0; s.capacity*80], wgpu::BufferUsages::STORAGE);
             s.compute = bind_prototypes(&self.device, &self.compute.get_bind_group_layout(0),
                 &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors, &s.viewpoints], s.p);
             s.draw = bind(&self.device, &self.draw.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
@@ -1072,7 +1066,7 @@ impl Renderer {
         let ao_active = self.ao.active(self.style);
         for edge_only in [false, true] {
             if edge_only && !ao_active { break; }
-            if draw_ids || ao_active {
+            if (draw_ids || ao_active) && (!msaa || !edge_only) {
             let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[
@@ -1112,22 +1106,22 @@ impl Renderer {
                     }),
                 occlusion_query_set: None,
             });
-            pass.set_pipeline(if self.style == 1 {
+            pass.set_pipeline(if self.style == 1 || msaa {
                 &self.xray
             } else {
                 &self.draw
             });
             pass.set_bind_group(
                 0,
-                if self.style == 1 {
+                if self.style == 1 || msaa {
                     &s.xray_draw
                 } else {
                     &s.draw
                 },
                 &[],
             );
-            pass.set_bind_group(1, &self.look_groups[if self.style == 1 { 1 } else { 0 }], &[]);
-            pass.set_bind_group(2, &self.texture_groups[usize::from(self.style == 1)], &[]);
+            pass.set_bind_group(1, &self.look_groups[if self.style == 1 || msaa { 1 } else { 0 }], &[]);
+            pass.set_bind_group(2, &self.texture_groups[usize::from(self.style == 1 || msaa)], &[]);
             pass.set_vertex_buffer(0, s.vertex.slice(..));
             pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
             if !edge_only && self.style != 4 {
@@ -1139,7 +1133,7 @@ impl Renderer {
                     }
                 }
             }
-            if (edge_only || !ao_active) && (self.edges || self.style == 4) {
+            if !msaa && (edge_only || !ao_active) && (self.edges || self.style == 4) {
                 for hidden in [true, false] {
                     if hidden && self.style != 1 && self.look.data[6][2] == 0. { continue; }
                     pass.set_pipeline(if hidden { &self.xray_edge } else { &self.edge });
@@ -1289,11 +1283,66 @@ impl Renderer {
         (self.last_cpu, self.last_gpu, self.last_acquire)
     }
     fn ensure_ids(&mut self) -> PyResult<()> {
-        if self.ids_dirty {
+        if !self.ids_dirty { return Ok(()); }
+        // Wireframe IDs include edge-only geometry; retain its existing semantics.
+        if self.style == 4 {
             self.pick_pending = true;
             let result = self.render(false);
             self.pick_pending = false;
             result?;
+        } else {
+            let s = self.scene.as_ref().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(&s.hard_template, 0, &s.commands, 0, s.p as u64 * 40);
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                pass.set_pipeline(&self.compute);
+                pass.set_bind_group(0, &s.compute, &[]);
+                pass.dispatch_workgroups(s.n.div_ceil(64), 1, 1);
+            }
+            let color = self.offscreen.create_view(&Default::default());
+            let ids = self.ids.create_view(&Default::default());
+            let depth = self.depth.create_view(&Default::default());
+            {
+                // Depth-only color writes retain texture alpha rejection, but no
+                // background, edges, AO, multisampling, overlay or presentation.
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("pick IDs"),
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment { view: &color, resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } }),
+                        Some(wgpu::RenderPassColorAttachment { view: &ids, resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store } }),
+                    ],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth, stencil_ops: None,
+                        depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.), store: wgpu::StoreOp::Store }),
+                    }),
+                    timestamp_writes: None, occlusion_query_set: None,
+                });
+                pass.set_pipeline(&self.xray);
+                pass.set_bind_group(0, &s.xray_draw, &[]);
+                pass.set_bind_group(1, &self.look_groups[1], &[]);
+                pass.set_bind_group(2, &self.texture_groups[1], &[]);
+                pass.set_vertex_buffer(0, s.vertex.slice(..));
+                pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
+                if self.multi { pass.multi_draw_indexed_indirect(&s.commands, 0, s.p); }
+                else { for k in 0..s.p { pass.draw_indexed_indirect(&s.commands, k as u64 * 20); } }
+                // Loose line prototypes have no faces to identify. Keep those
+                // pickable without replaying the edges of shaded prototypes.
+                if self.edges {
+                    pass.set_pipeline(&self.edge);
+                    pass.set_bind_group(0, &s.edge_draw, &[]);
+                    pass.set_bind_group(1, &self.look_groups[2], &[]);
+                    for k in 0..s.p as usize {
+                        if s.template_data[k*20..k*20+4] == [0; 4] {
+                            pass.draw_indirect(&s.commands, (s.p as usize+k) as u64 * 20);
+                        }
+                    }
+                }
+            }
+            self.queue.submit(Some(encoder.finish()));
+            self.ids_dirty = false;
         }
         Ok(())
     }
@@ -1586,8 +1635,8 @@ mod update_tests {
     }
 
     #[test]
-    fn writes_join_adjacent_rows_without_touching_gaps() {
-        assert_eq!(row_runs(vec![4, 1, 2, 2, 8]), vec![(1, 3), (4, 5), (8, 9)]);
+    fn scattered_updates_use_one_enclosing_write() {
+        assert_eq!(row_runs(vec![4, 1, 2, 2, 8]), vec![(1, 9)]);
         assert!(row_runs(vec![]).is_empty());
         assert_eq!(row_runs((0..1000).rev().collect()), vec![(0, 1000)]);
     }

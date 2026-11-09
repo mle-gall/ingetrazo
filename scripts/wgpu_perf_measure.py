@@ -1,0 +1,63 @@
+"""Paced native performance matrix; run with an external 290-second timeout."""
+import json
+import os
+from pathlib import Path
+import sys
+import time
+import numpy as np
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+os.environ['INGETRAZO_RUST'] = '1'
+os.environ['INGETRAZO_TEXTURE_CACHE'] = str(Path('.look-tmp/textures').resolve())
+from PySide6.QtWidgets import QApplication
+from core.scene import Scene
+from formats.igz import load_into
+from views.wgpu_view import WgpuView
+from views.wgpu_style import style_payload
+app = QApplication([])
+scene = Scene()
+load_into(scene, Path(sys.argv[1]))
+view = WgpuView()
+view.resize(1000, 700)
+view.set_scene(scene)
+view.show()
+app.processEvents()
+view.draw_frame()
+view._inference_future.result()
+result = {'size': [int(view.width()*view.devicePixelRatioF()), int(view.height()*view.devicePixelRatioF())],
+          'adapter': view.renderer.adapter, 'frames': {}, 'warmup': 10, 'samples': 20, 'sleep_seconds': .12}
+payload = style_payload(scene, scale=view.devicePixelRatioF())
+for aa, ao, edges, profiles in [(aa, ao, True, False) for aa in (False, True) for ao in ('off','half','full')] + [(False,'off',False,False),(False,'off',True,True)]:
+    payload.update(ambient_occlusion=ao != 'off', ao_resolution=1 if ao == 'full' else 2,
+                   edges=edges, profiles=profiles)
+    view.renderer.set_style(payload)
+    view.renderer.set_edges(edges)
+    view.renderer.set_antialias(aa)
+    samples = []
+    for i in range(30):
+        start = time.perf_counter()
+        cpu, gpu = view.renderer.render(False)
+        if i >= 10:
+            samples.append([cpu,gpu,(time.perf_counter()-start)*1000])
+        time.sleep(.12)
+    result['frames'][f'msaa={aa},ao={ao},edges={edges},profiles={profiles}'] = {'median': np.median(samples,axis=0).tolist(), 'samples': samples}
+view.renderer.set_antialias(False)
+payload.update(ambient_occlusion=False, edges=True, profiles=False)
+view.renderer.set_style(payload)
+for label in ('cold','settled'):
+    samples=[]
+    for i in range(5):
+        view.camera.yaw += .01
+        view.draw_frame()
+        if label == 'settled':
+            time.sleep(.08)
+            view.draw_frame()
+            time.sleep(.12)
+        start=time.perf_counter()
+        view.renderer.pick(1000,700)
+        samples.append((time.perf_counter()-start)*1000)
+    result[label+'_pick_ms']=samples
+out=Path(sys.argv[2])
+out.parent.mkdir(parents=True,exist_ok=True)
+out.write_text(json.dumps(result,indent=2))
+print(json.dumps(result),flush=True)
+view.close()

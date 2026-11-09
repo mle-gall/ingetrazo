@@ -274,3 +274,21 @@ mod view_direction_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod placement_cache_tests {
+    #[test]
+    fn cached_clip_transform_preserves_mirrors_and_near_plane_crossings() {
+        use glam::{Mat4, Vec3};
+        let projection = Mat4::perspective_rh(1., 1.4, 0.1, 100.);
+        for scale in [Vec3::ONE, Vec3::new(-2., 3., 0.5)] {
+            let world = Mat4::from_scale_rotation_translation(scale,
+                glam::Quat::from_rotation_y(0.3), Vec3::new(0., 0., -0.1));
+            let cached = projection * world;
+            for point in [Vec3::ZERO, Vec3::X, Vec3::Z, -Vec3::Z] {
+                let expected = projection * (world * point.extend(1.));
+                assert!((cached * point.extend(1.) - expected).abs().max_element() < 1e-5);
+            }
+        }
+    }
+}

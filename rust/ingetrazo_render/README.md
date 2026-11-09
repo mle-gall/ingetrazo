@@ -271,3 +271,19 @@ This leaves the 80-byte instance and 48-byte edge records unchanged. A singular
 placement stores w=2 and uses the projected-area fallback. Profiles are tested
 with two normal dot products in the vertex shader; matrix inversion occurs
 once per visible placement in culling, not six times per edge.
+
+## Perf placement cache (2026-11-09)
+
+The cull-to-edge binding now contains 80 bytes per resident placement: the
+existing local camera vector at offset 0 and a column-major clip-from-local
+matrix at offset 16. Culling writes both only for survivors. All compact-edge
+passes read that cached matrix, avoiding a matrix product at each quad corner.
+The instance and compact edge upload ABIs remain 80 and 48 bytes respectively.
+
+Cold filled-mode picks now submit a separate cull plus full-resolution face
+ID/depth pass, retaining material-alpha rejection. They do not submit color,
+AO, edges, overlays or presentation. Wireframe keeps its edge-inclusive path.
+The queue can still contain an earlier display frame: this is not an isolated
+GPU queue or a guarantee of sub-20-ms end-to-end latency. MSAA's single-sample
+AO input pass suppresses color writes and edge replay; resolved edges are
+rendered only by the MSAA pass.
