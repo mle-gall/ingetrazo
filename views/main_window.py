@@ -3619,17 +3619,23 @@ class MainWindow(QMainWindow):
 
     # ---- Tool routing -------------------------------------------------------
     def _activate_tool(self, key: str) -> None:
-        if getattr(self._doc, "_renderer_wgpu", False):
-            self.viewport.set_active_tool(None)
-            return
+        # Under the Metal view the tool still becomes the viewport's active
+        # tool: the native view reads it from there and routes what it
+        # supports (R2b: Select, navigation, Tape, Move), the rest stays
+        # inert with a status note. Only the GL-only hover pickup is skipped.
+        metal = bool(getattr(self._doc, "_renderer_wgpu", False))
         if self._tool_filter is not None and key not in self._tool_filter:
             self.statusBar().showMessage(
                 tr("{name} is not available here.", name=tr(self._tools[key].name)), 3000)
             return
         tool = self._tools[key]
         self.viewport.set_active_tool(tool)
-        if key == "tape":
+        if key == "tape" and not metal:
             tool.start_from_hover(self.viewport)
+        if metal and key not in ("select", "orbit", "pan", "zoom", "tape", "move"):
+            self.statusBar().showMessage(
+                tr("{name} is not yet available on the Metal renderer.",
+                   name=tr(tool.name)), 4000)
         action = self._tool_actions.get(key)
         if action is not None:
             action.setChecked(True)
