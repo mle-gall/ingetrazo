@@ -6,8 +6,8 @@ fn facing(p: vec4f, q: vec4f, r: vec4f) -> f32 {
 }
 // Each endpoint carries its opposite endpoint, so expansion remains constant
 // in physical pixels under perspective and nonuniform instance transforms.
-// Scalar arrays keep this storage record tightly packed at 40 bytes.
-struct Edge { a: array<f32,3>, b: array<f32,3>, normals: array<u32,4> }
+// Scalar arrays keep this storage record tightly packed at 48 bytes.
+struct Edge { a: array<f32,3>, b: array<f32,3>, normals: array<f32,6> }
 @group(0) @binding(3) var<storage, read> edges: array<Edge>;
 @vertex fn edge_vs(@builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32) -> Out {
  let first = vertex / 6u;
@@ -20,10 +20,11 @@ struct Edge { a: array<f32,3>, b: array<f32,3>, normals: array<u32,4> }
  let b0 = vec3f(edge.b[0],edge.b[1],edge.b[2]);
  let pos = select(a0,b0,end);
  let other = select(b0,a0,end);
- let n0 = vec3f(unpack2x16snorm(edge.normals[0]),unpack2x16snorm(edge.normals[1]).x);
- let tail = unpack2x16snorm(edge.normals[3]);
- let n1 = vec3f(unpack2x16snorm(edge.normals[2]),tail.x);
- let corner = vec4f(select(0.,1.,side_bit),select(0.,1.,end),tail.y,0.);
+ let packed_normal = vec3f(edge.normals[0],edge.normals[1],edge.normals[2]);
+ let soft = dot(packed_normal,packed_normal) > 2.;
+ let n0 = packed_normal * select(1.,0.5,soft);
+ let n1 = vec3f(edge.normals[3],edge.normals[4],edge.normals[5]);
+ let corner = vec4f(select(0.,1.,side_bit),select(0.,1.,end),select(0.,1.,soft),0.);
  let world = inst[id].world;
  let transform = camera.vp * world;
  var a = transform * vec4f(pos, 1.);

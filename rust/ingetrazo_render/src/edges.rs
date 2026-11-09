@@ -1,4 +1,4 @@
-//! Pack 40-byte edge records; preserve the 28-byte Python face ABI.
+//! Pack 48-byte edge records; preserve the 28-byte Python face ABI.
 pub fn expand(
     vertices: &[u8],
     indices: &[u8],
@@ -16,7 +16,7 @@ pub fn expand(
         if c.count % 2 != 0 {
             return Err("edge command must contain endpoint pairs");
         }
-        let first = v.len() / 40;
+        let first = v.len() / 48;
         let mut pairs = Vec::new();
         let mut hard = std::collections::HashSet::new();
         for pair in indices[c.first as usize * 4..(c.first + c.count) as usize * 4].chunks_exact(8)
@@ -34,7 +34,7 @@ pub fn expand(
         }
         let hard_count = pairs.len();
         for (k, n) in &adjacency {
-            if !hard.contains(k)
+            if n[0] != [0.; 3] && !hard.contains(k)
                 && (n[1] == [0.; 3] || glam::Vec3::from(n[0]).dot(glam::Vec3::from(n[1])) < 0.99999)
             {
                 pairs.push((k[..12].to_vec(), k[12..].to_vec(), true));
@@ -45,13 +45,11 @@ pub fn expand(
             v.extend_from_slice(&a);
             v.extend_from_slice(&b);
             let normals = adjacency.get(&key(&a, &b)).copied().unwrap_or([[0.; 3]; 2]);
-            for (i, normal) in normals.iter().enumerate() {
-                for x in normal {
-                    v.extend_from_slice(&((x.clamp(-1., 1.) * 32767.).round() as i16).to_le_bytes());
-                }
-                v.extend_from_slice(&(if i == 1 && soft { 32767i16 } else { 0 }).to_le_bytes());
-            }
-
+            // A power-of-two normal scale encodes the profile-only flag without
+            // quantization. Decoding by 0.5 restores the original float bits.
+            let n0 = normals[0].map(|x| if soft { x * 2. } else { x });
+            v.extend_from_slice(bytemuck::cast_slice(&n0));
+            v.extend_from_slice(bytemuck::cast_slice(&normals[1]));
         }
         c.first = u32::try_from(first * 6).map_err(|_| "edge buffer too large")?;
         c.count = u32::try_from(count * 6).map_err(|_| "edge buffer too large")?;
@@ -59,7 +57,7 @@ pub fn expand(
         c.start = u32::try_from(hard_count * 6).map_err(|_| "edge buffer too large")?;
         row.copy_from_slice(bytemuck::bytes_of(&c));
     }
-    if v.is_empty() { v.resize(40, 0); } // Valid storage binding for face-only scenes.
+    if v.is_empty() { v.resize(48, 0); } // Valid storage binding for face-only scenes.
     Ok((v, ix, cmd))
 }
 
@@ -89,7 +87,7 @@ mod tests {
         let (v, ix, cmd) =
             super::expand(&vertices, &indices, bytemuck::cast_slice(&commands), 1).unwrap();
         assert_eq!(&cmd[..20], bytemuck::bytes_of(&commands[0]));
-        assert_eq!(v.len(), 40);
+        assert_eq!(v.len(), 48);
         assert_eq!(ix.len(), 2 * 4);
         let edge: crate::Command = bytemuck::pod_read_unaligned(&cmd[20..]);
         assert_eq!((edge.first, edge.count, edge.base), (0, 6, 0));
@@ -221,12 +219,12 @@ mod compact_tests {
         // Reversed duplicate hard edge is represented once.
         let (v, _, cmd) = super::expand(&vertices, bytemuck::cast_slice(&[0u32,1,2,0,1,1,0]),
             bytemuck::cast_slice(&commands), 1).unwrap();
-        assert_eq!(v.len(), 3*40);
+        assert_eq!(v.len(), 3*48);
         let edge: crate::Command = bytemuck::pod_read_unaligned(&cmd[20..]);
         assert_eq!((edge.count,edge.base,edge.start), (18,7,6));
-        assert_eq!(i16::from_le_bytes(v[28..30].try_into().unwrap()),32767);
-        assert_eq!(i16::from_le_bytes(v[38..40].try_into().unwrap()),0);
-        assert_eq!(i16::from_le_bytes(v[78..80].try_into().unwrap()),32767);
+        assert_eq!(f32::from_le_bytes(v[32..36].try_into().unwrap()),1.);
+        assert_eq!(f32::from_le_bytes(v[44..48].try_into().unwrap()),0.);
+        assert_eq!(f32::from_le_bytes(v[80..84].try_into().unwrap()),2.);
     }
 
     #[test]
@@ -234,17 +232,15 @@ mod compact_tests {
         let command = crate::Command { count: 0, instances: 0, first: 0, base: 0, start: 0 };
         let (records, indices, commands) = super::expand(&[], &[],
             bytemuck::cast_slice(&[command, command]), 1).unwrap();
-        assert_eq!(records.len(), 40);
+        assert_eq!(records.len(), 48);
         assert_eq!(indices.len(), 0);
         assert_eq!(commands.len(), 40);
     }
 
     #[test]
-    fn normal_quantization_preserves_facing_away_from_tangency() {
-        let view = glam::Vec3::new(0.2, 0.3, 1.).normalize();
-        for normal in [glam::Vec3::Z, -glam::Vec3::Z, glam::Vec3::X] {
-            let decoded = normal.map(|v| (v * 32767.).round() / 32767.);
-            assert_eq!(normal.dot(view) > 0., decoded.dot(view) > 0.);
+    fn flag_scale_preserves_normal_bits() {
+        for normal in [glam::Vec3::Z, -glam::Vec3::Z, glam::Vec3::new(1.,2.,3.).normalize()] {
+            assert_eq!((normal * 2. * 0.5).to_array(), normal.to_array());
         }
     }
 }

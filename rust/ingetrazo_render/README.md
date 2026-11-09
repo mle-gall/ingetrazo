@@ -219,20 +219,25 @@ also 28 bytes in every pass (including MSAA and weighted X-ray). Texture lookup
 continues through the existing sparse material table; no material index or
 adjacency is added to faces. The uploaded index buffer is unchanged.
 
-Edges use one 40-byte storage record per unique hard edge or non-coplanar
+Edges use one 48-byte storage record per unique hard edge or non-coplanar
 profile candidate, grouped by prototype. Little-endian offsets:
 
 | Offset | Type | Meaning |
 | --- | --- | --- |
 | 0 | float32[3] | endpoint A |
 | 12 | float32[3] | endpoint B |
-| 24 | snorm16[4] | adjacent normal 0, zero padding |
-| 32 | snorm16[4] | adjacent normal 1, soft/profile-only flag (0 or 32767) |
+| 24 | float32[3] | adjacent normal 0, doubled for profile-only edges |
+| 36 | float32[3] | adjacent normal 1 |
 
 Zero normal 1 marks a boundary. Source hidden/soft flags have already been
 filtered by the unchanged bake ABI; the soft flag here marks synthesized
 profile candidates. Back/hidden-edge dashes remain style/depth decisions.
-Normals have maximum component quantization error 1/65534.
+Normal 0 has unit length for hard edges and length two for profile-only
+candidates. The shader tests squared length > 2 and multiplies by 0.5 to
+recover the original normal exactly. This power-of-two flag encoding keeps
+float32 classification precision within the 48-byte record budget. Degenerate
+zero normals occur only on hard edges; synthesized candidates have a nonzero
+first adjacency normal.
 
 Commands remain 20-byte rows: P indexed face commands followed by P edge rows.
 Edge rows are **non-indexed indirect** arguments in the first 16 bytes:
