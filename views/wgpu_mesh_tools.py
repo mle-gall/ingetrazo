@@ -36,6 +36,10 @@ class MeshToolAccess:
         self._last_work_plane = plane
         return self._ray_hit_plane((x, y), plane)
 
+    def _segment_to_pixels(self, a, b):
+        pa, pb = self._world_to_pixel(a), self._world_to_pixel(b)
+        return (pa, pb) if pa is not None and pb is not None else None
+
     def _pixel_to_ray(self, x, y):
         return self.view._pixel_to_ray(x, y)
 

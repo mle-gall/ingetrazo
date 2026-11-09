@@ -77,3 +77,28 @@ def test_scale_handles_numeric_commit_and_cancel():
     history.redo()
     native.update()
     assert geometry(scene.mesh) == after
+
+from tools.offset import OffsetTool
+
+
+def test_offset_numeric_undo_and_cancel():
+    scene, history, native, _ = prepare(OffsetTool())
+    face = scene.mesh.add_face([QVector3D(), QVector3D(4, 0, 0),
+                                QVector3D(4, 4, 0), QVector3D(0, 4, 0)])
+    native.pick_face = lambda *args: face
+    native.pick_edge = lambda *args: None
+    native._pixel_to_ray = lambda *args: (QVector3D(2, 1, 10), QVector3D(0, 0, -1))
+    native.update()
+    before = geometry(scene.mesh)
+    click(native, (2, 1, 0))
+    native.tool.on_value(native, .5)
+    assert history.undo_stack
+    after = geometry(scene.mesh)
+    history.undo()
+    native.update()
+    assert geometry(scene.mesh) == before
+    history.redo()
+    native.update()
+    assert geometry(scene.mesh) == after
+    native.cancel()
+    assert not native.view.overlay_primitives
