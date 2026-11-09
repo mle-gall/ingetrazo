@@ -518,7 +518,7 @@ impl Renderer {
         self.aa.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer);
         self.gpu_memory =
             (v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 416)
-                as u64 + self.textures.bytes;
+                as u64 + self.textures.bytes + self.textures.materials.size();
         self.ids_dirty = true;
         self.scene = Some(Scene {
             inst,
