@@ -4368,13 +4368,20 @@ class ScenesPanel(QWidget):
         from core.saved_views import shown_state
         before = shown_state(scene)
         view.apply(scene, self._window.viewport.camera)
+        if (getattr(view, 'navigator_view', None) is None
+                and (getattr(scene, '_navigator_allowed', None) is not None
+                     or getattr(self._window.viewport, 'view_tint', None)
+                     or getattr(self._window.viewport, 'active_view_key', None))):
+            from core.agent_facets import set_display
+            set_display(self._window.viewport, remember=False)
         if getattr(view, 'navigator_view', None) is not None:
             from core import bim_registry
             from core.agent_facets import set_display
             saved = bim_registry.get(scene).get('views', {}).get(view.navigator_view)
             if saved is not None:
                 set_display(self._window.viewport, saved['filter'], saved.get('color_by'),
-                            isolate=saved.get('isolate', False), key=view.navigator_view)
+                            isolate=saved.get('isolate', False), key=view.navigator_view,
+                            exact=saved.get('exact', False))
 
         # A scene that only moves the camera changes nothing the caches
         # keyed on ``scene.version`` hold: bumping it re-synced every edge
@@ -4396,6 +4403,10 @@ class ScenesPanel(QWidget):
             self._touch()
         else:
             self._window.viewport.update()
+        doc = getattr(self._window, '_doc', None)
+        if getattr(doc, '_renderer_wgpu', False):
+            doc.stand_in.set_scene(scene)
+            doc.stand_in.update()
         dock = getattr(self._window, "layers_dock", None)
         if dock is not None:
             dock.panel.refresh()
