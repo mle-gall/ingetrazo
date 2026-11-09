@@ -217,3 +217,65 @@ def test_followme_preselected_path_undo():
     assert geometry(scene.mesh) == after
     native.cancel()
     assert not native.view.overlay_primitives
+
+
+def test_container_paint_updates_instance_without_bake():
+    from core.group import Group
+    from core.mesh import Mesh
+    from views.wgpu_scene import pack_scene
+    from views.wgpu_updates import InstanceUpdates
+    scene, history, native, _ = prepare(PaintTool())
+    mesh = Mesh()
+    face = mesh.add_face([QVector3D(), QVector3D(2, 0, 0), QVector3D(0, 2, 0)])
+    group = Group(mesh)
+    scene.groups.append(group)
+    packed = pack_scene(scene)
+    updates = InstanceUpdates(scene, packed)
+    updates.observe(history)
+    native.pick_face_any = lambda *a: (face, group)
+    native.pick_face_placement = lambda *a: (face, group)
+    native.pick_group = lambda *a: group
+    native._pixel_to_ray = lambda *a: (QVector3D(1, 1, 10), QVector3D(0, 0, -1))
+    original = packed.instances.copy()
+    click(native, (1, 1, 0))
+    delta = updates.diff(scene)
+    assert not updates.changed
+    assert len(delta[0]) == 1
+    updates.apply(*delta)
+    assert (packed.instances['info'][:, 1] != original['info'][:, 1]).any()
+    history.undo()
+    updates.apply(*updates.diff(scene))
+    assert (packed.instances['info'][:, 1] == original['info'][:, 1]).all()
+
+
+def test_rotate_placement_preview_cancels_without_document_mutation():
+    import numpy as np
+    from core.group import Group
+    from core.mesh import Mesh
+    from PySide6.QtGui import QMatrix4x4
+    from views.wgpu_scene import pack_scene
+    scene, history, native, _ = prepare(RotateTool())
+    mesh = Mesh()
+    mesh.add_face([QVector3D(), QVector3D(2, 0, 0), QVector3D(0, 2, 0)])
+    group = Group(mesh)
+    group.xform = QMatrix4x4()
+    scene.groups.append(group)
+    scene.select([group])
+    native.view.packed = pack_scene(scene)
+    native.view.uid_rows = {group.uid: [0]}
+    native.view.renderer = None
+    original = native.view.packed.instances.copy()
+    before = tuple(group.xform.data())
+    click(native, (0, 0, 0))
+    native.tool.on_release(native)
+    click(native, (2, 0, 0))
+    native.tool.on_release(native)
+    native.view.last_snap = SimpleNamespace(point=QVector3D(0, 2, 0),
+                                            kind='endpoint', context=None)
+    native.hover(event())
+    assert tuple(group.xform.data()) == before
+    assert not np.array_equal(native.view.packed.instances, original)
+    native.cancel()
+    assert np.array_equal(native.view.packed.instances, original)
+    assert not history.undo_stack
+    assert not native.view.overlay_primitives

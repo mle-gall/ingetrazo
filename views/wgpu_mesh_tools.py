@@ -1,6 +1,6 @@
 """Document-tool facade for native mesh editing; no GL picking or drawing."""
 import numpy as np
-from PySide6.QtGui import QVector3D, QMatrix4x4
+from PySide6.QtGui import QColor, QVector3D, QMatrix4x4
 from views.wgpu_overlay import Primitive
 from core.group import iter_placements
 
@@ -180,6 +180,11 @@ class MeshToolAccess:
 
     def mesh_feedback(self):
         lines = list(self.tool.rubber_band_lines())
+        # Sweep faces also need a visible envelope, beyond the path itself.
+        for face in getattr(self.tool, 'preview_faces', lambda: [])():
+            points = list(getattr(face, 'vertices', face))
+            lines.extend(zip(points, points[1:] + points[:1]))
+
         state = getattr(self.tool, 'scale_box_state', lambda: None)()
         if state:
             lines.extend(state['segments'])
@@ -198,11 +203,15 @@ class MeshToolAccess:
                 lines.extend(zip(points, points[1:] + points[:1]))
             elif hasattr(entity, 'a'):
                 lines.append((entity.a, entity.b))
+        rgba = getattr(self.tool, 'wireframe_color', None)
+        color = QColor.fromRgbF(*rgba).name() if rgba else '#00dfff'
+        if type(self.tool).__name__ == 'EraserTool':
+            color = '#ff5555'
         for a, b in lines:
             pa, pb = self._world_to_pixel(a), self._world_to_pixel(b)
             if pa is not None and pb is not None:
                 self.view.overlay_primitives.append(Primitive(
-                    'polyline', (pa, pb), '#ff5555' if type(self.tool).__name__ == 'EraserTool' else '#00dfff'))
+                    'polyline', (pa, pb), color))
         label = self.tool.value_label() if hasattr(self.tool, 'value_label') else None
         if label is not None:
             text, point = label

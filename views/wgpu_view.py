@@ -469,7 +469,7 @@ class WgpuView(QWidget):
         elif self.tools.sync() in ('tape', 'move', 'mesh'):
             self.hover(event.position().x(), event.position().y(), event.modifiers())
             self.tools.hover(event)
-        elif event.buttons() & Qt.LeftButton and self.tools.mode == 'select':
+        elif event.buttons() & Qt.LeftButton and (self.tools.mode == 'select' or mode == 'zoom_window'):
             from views.wgpu_overlay import Primitive
             self.overlay_primitives = [Primitive('rectangle',
                 ((self.press.x(), self.press.y()), (self.last.x(), self.last.y())))]
@@ -485,6 +485,16 @@ class WgpuView(QWidget):
                 Viewport._zoom_to_box(self, self.press, event.position())
         elif event.button() == Qt.LeftButton and self.tools.sync() == 'select':
             start = time.perf_counter()
+            annotation = (self.tools.pick_text_label(event.position().x(), event.position().y())
+                          or self.tools.pick_dimension(event.position().x(), event.position().y()))
+            if annotation is not None and (event.position()-self.press).manhattanLength() < 3:
+                selection_mode = ('toggle' if event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)
+                                  else 'add' if event.modifiers() & Qt.ShiftModifier else 'replace')
+                self.scene.select([annotation], mode=selection_mode)
+                self.source_viewport.notify_scene_changed()
+                self.last = None
+                self.update()
+                return
             if (event.position()-self.press).manhattanLength() < 3:
                 row = self.pick_row(event.position().x(), event.position().y())
                 rows = [] if row is None else [row]
@@ -496,6 +506,7 @@ class WgpuView(QWidget):
                     mode = ('toggle' if event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)
                             else 'add' if event.modifiers() & Qt.ShiftModifier else 'replace')
                     self.scene.select([] if entity is None else [entity], mode=mode)
+                    self.source_viewport.notify_scene_changed()
                     self.last = None
                     self.update()
                     return
@@ -509,7 +520,7 @@ class WgpuView(QWidget):
             self.overlay_primitives = []
             self.tools.mesh_feedback()
         self.last = None
-        if self.tools.mode == 'select':
+        if self.tools.mode == 'select' or mode == 'zoom_window':
             self.overlay_primitives = []
         self.update()
 
