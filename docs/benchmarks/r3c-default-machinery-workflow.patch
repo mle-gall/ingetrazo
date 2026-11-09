@@ -1,0 +1,15 @@
+diff --git a/.github/workflows/release-macos.yml b/.github/workflows/release-macos.yml
+index 7f7cf0d6..842d2ac0 100644
+--- a/.github/workflows/release-macos.yml
++++ b/.github/workflows/release-macos.yml
+@@ -55,6 +55,10 @@ jobs:
+           python -m pip install maturin
+           maturin build --release -m rust/ingetrazo_core/Cargo.toml -o "$RUNNER_TEMP/wheels"
+           python -m pip install "$RUNNER_TEMP"/wheels/ingetrazo_core-*.whl
++          # Keep required symbols (rust-lang/rust#157750).
++          CARGO_PROFILE_RELEASE_STRIP=none maturin build --release --features extension-module -m rust/ingetrazo_render/Cargo.toml -o "$RUNNER_TEMP/wheels"
++          python -m pip install "$RUNNER_TEMP"/wheels/ingetrazo_render-*.whl
++          python -c "import ingetrazo_render"
+           INGETRAZO_RUST=1 python -c "import core._native as n; assert n.native is not None; print('engine:', n.engine())"
+ 
+       # DWG on macOS (#101): LibreDWG publishes no Mac binaries, so build
