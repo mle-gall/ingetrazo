@@ -155,3 +155,39 @@ def test_paint_face_history_restores_material():
     assert tuple(face.attrs.get('color')) == PaintTool.current_color
     native.cancel()
     assert not native.view.overlay_primitives
+
+from tools.dimension import DimensionTool
+from tools.text import TextTool
+
+
+@pytest.mark.parametrize('tool_type,points,collection', [
+    (DimensionTool, [(0, 0, 0), (2, 0, 0), (1, 1, 0)], 'dimensions'),
+    (TextTool, [(0, 0, 0), (2, 0, 0)], 'text_labels'),
+])
+def test_annotation_history_and_cancel(tool_type, points, collection, monkeypatch):
+    monkeypatch.setattr('views.prompts.get_multiline_text', lambda *a: ('Label', True))
+    scene, history, native, _ = prepare(tool_type())
+    native.window = lambda: None
+    for point in points:
+        click(native, point)
+    assert len(getattr(scene, collection)) == 1
+    history.undo()
+    native.update()
+    assert not getattr(scene, collection)
+    history.redo()
+    native.update()
+    assert len(getattr(scene, collection)) == 1
+    native.cancel()
+    assert not native.view.overlay_primitives
+
+def test_annotations_rasterize_without_gl(monkeypatch):
+    from core.dimension import Dimension
+    from core.textlabel import TextLabel
+    from views.wgpu_overlay import rasterize, pixels
+    scene, _, native, _ = prepare(DimensionTool())
+    scene.dimensions.append(Dimension(QVector3D(10, 10, 0), QVector3D(70, 10, 0),
+                                      QVector3D(0, 20, 0)))
+    scene.text_labels.append(TextLabel(QVector3D(10, 10, 0), QVector3D(30, 40, 0), 'Label'))
+    native._is_occluded = lambda p: False
+    image = rasterize([], 100, 100, 1., native.draw_annotations)
+    assert pixels(image).reshape(-1, 4)[:, 3].any()

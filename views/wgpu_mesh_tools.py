@@ -7,6 +7,21 @@ from core.group import iter_placements
 
 class MeshToolAccess:
     mesh_outline_preview = True
+    _OCCLUSION_STEP_PX = 12.
+    _OCCLUSION_MAX_SAMPLES = 128
+    _OCCLUSION_SPLIT = 8
+    _OCCLUSION_ROUNDS = 2
+
+    @staticmethod
+    def _text_block_x(*args):
+        from views.viewport import Viewport
+        return Viewport._text_block_x(*args)
+
+    @staticmethod
+    def _format_dim_value(*args):
+        from views.viewport import Viewport
+        return Viewport._format_dim_value(*args)
+
 
     def inference_meshes(self, x, y):
         picked = self._picked_mesh(x, y)
@@ -43,7 +58,7 @@ class MeshToolAccess:
     def _pixel_to_ray(self, x, y):
         return self.view._pixel_to_ray(x, y)
 
-    def _world_to_pixel(self, point):
+    def _world_to_pixel(self, point, mvp=None):
         return self.view._world_to_pixel(point)
 
     def _project_to_lock_line(self, *args):
@@ -196,16 +211,38 @@ class MeshToolAccess:
                 self.view.overlay_primitives.append(Primitive('text', (pixel,), text=text))
             self.measurementChanged.emit(text)
 
-    # These annotations are outside R3a. Never fall through to the GL index.
+    def draw_annotations(self, painter):
+        from views.viewport import Viewport
+        self._hover_entity = getattr(self, '_mesh_hover', None)
+        Viewport._draw_dimensions(self, painter)
+        Viewport._draw_text_labels(self, painter)
+
+    def _draw_occluded_segment(self, painter, a, b):
+        from views.viewport import Viewport
+        Viewport._draw_occluded_segment(self, painter, a, b)
+
+    def _project_samples(self, points):
+        return [(self._world_to_pixel(p), not self._is_occluded(p)) for p in points]
+
+    def _occluded_on_screen(self, point):
+        return self._is_occluded(point)
+
     def pick_dimension(self, *args, **kwargs):
+        from views.viewport import Viewport
+        return Viewport.pick_dimension(self, *args, **kwargs)
+
+    def pick_text_label(self, *args, **kwargs):
+        from views.viewport import Viewport
+        return Viewport.pick_text_label(self, *args, **kwargs)
+
+    def _unsupported_pick(self, *args, **kwargs):
         return None
 
-    pick_geopath = pick_dimension
-    pick_text_label = pick_dimension
-    pick_section_plane = pick_dimension
-    pick_image = pick_dimension
-    pick_image_plane = pick_dimension
-    _group_obb = pick_dimension
+    pick_geopath = _unsupported_pick
+    pick_section_plane = _unsupported_pick
+    pick_image = _unsupported_pick
+    pick_image_plane = _unsupported_pick
+    _group_obb = _unsupported_pick
     def begin_groups_preview(self, groups):
         selected = {g.uid for root in groups for g, _ in iter_placements(root)}
         self.ids = np.asarray([row for uid in selected
@@ -224,7 +261,7 @@ class MeshToolAccess:
         self.restore()
         self.original = None
 
-    image_plane_at = pick_dimension
+    image_plane_at = _unsupported_pick
 
     def _nearby_loose_edges(self, *args, **kwargs):
         return []
