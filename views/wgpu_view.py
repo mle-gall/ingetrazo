@@ -254,7 +254,9 @@ class WgpuView(QWidget):
             self._settle_timer.start(80)
         self.renderer.set_camera(*camera_key)
         # End R-look 3c camera/style work.
-        annotations = bool(self.scene.dimensions or self.scene.text_labels)
+        annotations = bool(self.scene.dimensions or self.scene.text_labels
+                           or (type(self.tools.tool).__name__ == 'TexturePositionTool'
+                               and self.tools.tool.active))
         # R3c-2a: section widgets share GL's painter implementation.
         section_widgets = bool(getattr(self.scene, 'section_planes', ())) and getattr(self.scene, 'show_section_planes', True)
         if annotations or self.overlay_primitives or section_widgets or getattr(self, "_had_overlay", False):
@@ -569,6 +571,23 @@ class WgpuView(QWidget):
         if self.tools.mode == 'select' or mode == 'zoom_window':
             self.overlay_primitives = []
         self.update()
+
+    def contextMenuEvent(self, event):
+        self.tools.sync()
+        tool = self.tools.tool
+        menu = getattr(tool, 'context_menu', None)
+        if menu is not None and menu(self.tools, event.globalPos()):
+            return
+        source = self.source_viewport
+        if source is None:
+            return
+        point = event.pos()
+        source._context_pixel = (point.x(), point.y())
+        face = self.tools.pick_face(point.x(), point.y())
+        if face is not None and face not in self.scene.selection:
+            self.scene.select([face])
+        window = source.window()
+        window.show_viewport_context_menu(event.globalPos())
 
     def mouseDoubleClickEvent(self, event):
         mode = self.tools.sync()

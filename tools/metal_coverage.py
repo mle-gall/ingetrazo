@@ -33,7 +33,7 @@ def table(root=None):
             '| --- | --- | --- | --- |']
     for key, cls in registry(root).items():
         status = 'native' if cls in TOOL_DISPATCH else 'inert with note'
-        if key in ('section', 'texture_position'):
+        if key == 'section':
             status += ' — after the crate work'
         hooks = set()
         for source in sources:

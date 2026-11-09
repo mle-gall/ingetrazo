@@ -661,6 +661,9 @@ class TexturePositionTool(Tool):
         """Done: write the map to the face as one undoable step."""
         if not self.active:
             return
+        preview = getattr(getattr(viewport, 'view', None), '_texture_preview', None)
+        if preview is not None:
+            preview.restore()
         if self.changed():
             tex = self.result_texture()
             if tex is not None:

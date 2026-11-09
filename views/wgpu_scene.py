@@ -81,8 +81,11 @@ def bake_mesh(mesh):
 
 
 
-def _source_arrays(mesh, paint=None, texture_ids=None):
+def _source_arrays(mesh, paint=None, texture_ids=None, face_overrides=None):
     """Use source topology directly; the resident renderer needs no welded Plan."""
+    if face_overrides:
+        # Resolve lazy faces before reading topology; never mutate document attrs.
+        list(mesh.faces)
     src = mesh.__dict__.get('_deferred_source')
     if src is not None:
         pos, corners, sizes, counts = (src[k] for k in ('pos', 'rings', 'sizes', 'counts'))
@@ -107,7 +110,7 @@ def _source_arrays(mesh, paint=None, texture_ids=None):
                             dtype=np.int64, count=len(arrays.pos))
         corners = remap[corners]
         flags = np.asarray([int(e.soft) | (int(e.hidden) << 1) for e in mesh.edges], np.uint8)
-        table = [f.attrs for f in mesh.faces]
+        table = [(face_overrides or {}).get(id(f), f.attrs) for f in mesh.faces]
         attr = np.arange(len(table))
     from core.materials import effective_attrs
     table = [effective_attrs(own, paint) or {} for own in [{}] + table]
@@ -162,7 +165,7 @@ def _placement_state(scene):
     return state
 
 
-def pack_scene(scene, view_tint=None):
+def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=True):
     from time import perf_counter
     try:
         import resource
@@ -210,7 +213,7 @@ def pack_scene(scene, view_tint=None):
                         if k in paint_attrs} if paint_attrs else None) or None
         key = (id(mesh), repr(baked_paint))
         if key not in lookup:
-            arrays = _source_arrays(mesh, baked_paint, texture_ids)
+            arrays = _source_arrays(mesh, baked_paint, texture_ids, face_overrides)
             lookup[key] = len(meshes) if len(arrays[0]) else -1
             if len(arrays[0]):
                 meshes.append(arrays)
@@ -240,7 +243,7 @@ def pack_scene(scene, view_tint=None):
         *arrays[:4], arrays[6], arrays[7], arrays[4], arrays[5], offsets, attributes, _native.qt_hypot(),
         np.concatenate([m[9] for m in meshes]) if meshes else np.empty((0,16), np.float32),
         np.concatenate([m[10] for m in meshes]) if meshes else np.empty((0,3), np.uint32))
-    textures = _texture_array(texture_ids)
+    textures = _texture_array(texture_ids) if texture_images else None
     baked = perf_counter()
     vertices = raw.view(VERTEX)
     bounds = bounds.reshape(-1, 2, 4)

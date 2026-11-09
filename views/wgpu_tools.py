@@ -26,6 +26,7 @@ TOOL_DISPATCH = {'SelectTool': 'select',
  'PolygonTool': 'mesh',
  'ArcTool': 'mesh',
  'PaintTool': 'mesh',
+ 'TexturePositionTool': 'mesh',
  'DimensionTool': 'mesh',
  'TextTool': 'mesh',
  'FollowMeTool': 'mesh',
@@ -79,6 +80,11 @@ class NativeTools(MeshToolAccess):
             if self.mode in ('tape', 'move') and self.start_point is not None and getattr(tool, 'start_point', None) is None:
                 self.cancel()
             return self.mode
+        preview = getattr(self.view, '_texture_preview', None)
+        if preview is not None:
+            preview.restore()
+        if type(self.tool).__name__ == 'TexturePositionTool':
+            self.tool._leave(self)
         self.cancel()
         self.tool = tool
         self.mode = TOOL_DISPATCH.get(type(tool).__name__, 'select' if tool is None else 'inert')
@@ -287,9 +293,24 @@ class NativeTools(MeshToolAccess):
     def flash_status(self, *args):
         self.view.source_viewport.flash_status(*args)
 
+    def mesh_feedback(self):
+        if type(self.tool).__name__ == 'TexturePositionTool':
+            self.measurements()
+            return
+        super().mesh_feedback()
+
     def update(self):
         if self.mode == 'mesh':
+            preview = getattr(self.view, '_texture_preview', None)
+            if preview is not None:
+                if not getattr(self.tool, 'active', False):
+                    preview.restore()
             self.view.set_scene(self.scene)
+            if type(self.tool).__name__ == 'TexturePositionTool':
+                if preview is None:
+                    from tools.texture_position_metal import TexturePreview
+                    preview = self.view._texture_preview = TexturePreview(self.view)
+                preview.update(self.tool)
             revision = self.history.revision
             if revision != getattr(self, '_notified_revision', revision):
                 notify = getattr(self.view.source_viewport, 'notify_scene_changed', None)
