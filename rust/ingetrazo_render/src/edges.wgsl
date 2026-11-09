@@ -24,7 +24,9 @@ struct EdgePlacement { eye: vec4f, transform: mat4x4f }
  let pos = select(a0,b0,end);
  let other = select(b0,a0,end);
  let packed_normal = vec3f(edge.normals[0],edge.normals[1],edge.normals[2]);
- let soft = dot(packed_normal,packed_normal) > 2.;
+ // The hard-only indirect template never includes soft records. Specializing
+ // this flag removes normal fetches as well as profile arithmetic.
+ let soft = PROFILES && dot(packed_normal,packed_normal) > 2.;
  let n0 = packed_normal * select(1.,0.5,soft);
  let n1 = vec3f(edge.normals[3],edge.normals[4],edge.normals[5]);
  let corner = vec4f(select(0.,1.,side_bit),select(0.,1.,end),select(0.,1.,soft),0.);

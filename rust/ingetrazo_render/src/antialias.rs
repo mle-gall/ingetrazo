@@ -215,7 +215,7 @@ mod tests {
         let Some(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
             return;
         };
-        let (device, _) = pollster::block_on(adapter.request_device(&Default::default(), None)).unwrap();
+        let (device, _queue) = pollster::block_on(adapter.request_device(&Default::default(), None)).unwrap();
         let style = crate::style::Style::new(&device);
         let _xray = crate::xray::Xray::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb, 64, 64);
         let passes = super::Antialias::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb,
