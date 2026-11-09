@@ -191,3 +191,29 @@ def test_annotations_rasterize_without_gl(monkeypatch):
     native._is_occluded = lambda p: False
     image = rasterize([], 100, 100, 1., native.draw_annotations)
     assert pixels(image).reshape(-1, 4)[:, 3].any()
+
+from tools.followme import FollowMeTool
+
+
+def test_followme_preselected_path_undo():
+    scene, history, native, _ = prepare(FollowMeTool())
+    face = scene.mesh.add_face([QVector3D(), QVector3D(1, 0, 0),
+                                QVector3D(1, 1, 0), QVector3D(0, 1, 0)])
+    edge = scene.mesh.add_edge(QVector3D(), QVector3D(0, 0, 3))
+    scene.select([edge])
+    native.pick_face = lambda *a: face
+    native.tool.on_activate(native)
+    native.update()
+    before = geometry(scene.mesh)
+    click(native, (0, 0, 0))
+    assert history.undo_stack
+    after = geometry(scene.mesh)
+    assert after != before
+    history.undo()
+    native.update()
+    assert geometry(scene.mesh) == before
+    history.redo()
+    native.update()
+    assert geometry(scene.mesh) == after
+    native.cancel()
+    assert not native.view.overlay_primitives
