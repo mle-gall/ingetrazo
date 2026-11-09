@@ -171,7 +171,6 @@ def load_source(path, select=None):
     """``(definition, source scene)`` for the .igz at ``path``: the whole
     document as one component definition (``core.insert``), its own links
     resolved first. Raises :class:`LinkError`."""
-    from core.insert import component_from_scene
     from core.scene import Scene
     from formats import igz
     key = _norm(path)

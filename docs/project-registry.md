@@ -1,9 +1,9 @@
 # Project registry
 
-The self-contained JSON document lives at `scene.plugin_data["bim_registry"]`.
-It has no Python objects or scene pointers. A later project-file implementation
-can move this document out of individual IGZ files without changing its keys.
-The IfcProject identity remains in `plugin_data.ifc_identity`.
+The self-contained JSON document lives locally unless the document belongs to
+a shared project. A project file then owns the entire registry and IFC identity;
+document-local values remain the fallback and migration source. No Python
+objects or scene pointers are serialized. See [project-file.md](project-file.md).
 
 ```json
 {

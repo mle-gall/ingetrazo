@@ -4832,7 +4832,14 @@ class ProjectBrowser(QDockWidget):
                          | QDockWidget.DockWidgetClosable)
         self._window = window
         self.outliner = OutlinerPanel(window)
-        self.setWidget(self.outliner)
+        from PySide6.QtWidgets import QTabWidget
+        from views.links_panel import LinksPanel
+        self.links_panel = LinksPanel(window)
+        tabs = QTabWidget()
+        tabs.addTab(self.outliner, tr("Model"))
+        tabs.addTab(self.links_panel, tr("Links"))
+        tabs.currentChanged.connect(lambda _: self.links_panel.refresh())
+        self.setWidget(tabs)
         self.setMinimumWidth(240)
 
     def on_scene_changed(self) -> None:

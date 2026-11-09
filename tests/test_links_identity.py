@@ -68,3 +68,15 @@ def test_ride_read_only():
         rows.append([row['uid'] for row in __import__('core.facets', fromlist=['build']).build(scene).values() if row['linked']])
     assert rows[0] and rows[0] == rows[1]
     assert path.stat().st_mtime_ns == before
+
+
+def test_portable_synthetic_fixture(tmp_path):
+    import shutil
+    from pathlib import Path
+    fixture = Path(__file__).parent / 'fixtures' / 'links'
+    for name in ('five-parts.igz', 'two-parts.igz'):
+        shutil.copyfile(fixture / name, tmp_path / name)
+    scene = Scene()
+    igz.load_into(scene, tmp_path / 'two-parts.igz')
+    assert not scene.link_errors
+    assert [g.name for g in scene.groups[0].children] == ['Part 0', 'Part 1']

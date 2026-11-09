@@ -212,3 +212,13 @@ for _name, _properties, _required in [
 ]:
     BUILTIN_TOOLS.append(dict(name=_name, description='Navigator: ' + _name.replace('_', ' '),
         mutates=not _name.startswith('query_'), inputSchema=dict(type='object', properties=_properties, required=_required)))
+
+for _name, _props, _required, _mutates in [
+    ('query_links', {}, [], False),
+    ('link_document', {'path': {'type': 'string'}, 'select': {'type': 'object'}}, ['path'], True),
+    ('reload_link', {'path': {'type': 'string'}}, ['path'], True),
+    ('query_project', {}, [], False),
+    ('set_project', {'path': {'type': 'string'}}, ['path'], True),
+]:
+    BUILTIN_TOOLS.append(dict(name=_name, description=_name.replace('_', ' '),
+        inputSchema=dict(type='object', properties=_props, required=_required), mutates=_mutates))

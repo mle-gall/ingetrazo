@@ -8002,7 +8002,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, tr("Link IngeTrazo document"),
                                 str(exc))
 
-    def link_igz_path(self, path, at=None):
+    def link_igz_path(self, path, at=None, select=None):
         """Place the document at ``path`` as a linked copy — following the
         cursor (``at=None``) or at once at ``at``. Raises LinkError."""
         from PySide6.QtCore import Qt as _Qt
@@ -8018,7 +8018,7 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         try:
             comp = links.make_link(self.viewport.scene, Path(path),
-                                   host_path=self._current_path)
+                                   host_path=self._current_path, select=select)
         finally:
             QApplication.restoreOverrideCursor()
         self.statusBar().showMessage(

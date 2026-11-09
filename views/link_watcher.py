@@ -93,6 +93,9 @@ class LinkWatcher(QObject):
             if failed:
                 text = (text + "  ·  " if text else "") + failed[0]
             bar().showMessage(text, 5000)
+        browser = getattr(self._window, "project_browser", None)
+        if browser is not None and hasattr(browser, "links_panel"):
+            browser.links_panel.refresh()
         panel = getattr(self._window, "layers_dock", None)
         refresh = getattr(getattr(panel, "panel", None), "refresh", None)
         if callable(refresh):

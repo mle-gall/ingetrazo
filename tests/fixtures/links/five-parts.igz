@@ -1,0 +1,61 @@
+{
+  "igz_format": 1,
+  "app_version": "0.6.0",
+  "scene": {
+    "edges": [],
+    "faces": [],
+    "groups": [
+      {
+        "edges": [],
+        "faces": [],
+        "name": "Part 0",
+        "uid": "0000000000000001"
+      },
+      {
+        "edges": [],
+        "faces": [],
+        "name": "Part 1",
+        "uid": "0000000000000002"
+      },
+      {
+        "edges": [],
+        "faces": [],
+        "name": "Part 2",
+        "uid": "0000000000000003"
+      },
+      {
+        "edges": [],
+        "faces": [],
+        "name": "Part 3",
+        "uid": "0000000000000004"
+      },
+      {
+        "edges": [],
+        "faces": [],
+        "name": "Part 4",
+        "uid": "0000000000000005"
+      }
+    ],
+    "layers": [
+      {
+        "name": "Layer 0",
+        "uid": "6300a94b804d4da7"
+      }
+    ],
+    "layer_folder_uids": {},
+    "dimension_style": {
+      "decimals": 2,
+      "units": "m",
+      "font_size": 9,
+      "color": [
+        45,
+        55,
+        75
+      ],
+      "norma": "iso",
+      "base_step_mm": 8.0,
+      "ends": "arrow",
+      "show_unit": true
+    }
+  }
+}

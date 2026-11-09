@@ -21,7 +21,10 @@ def schema_name(schema):
         raise ValueError('Unsupported schema: ' + str(schema))
 
 
-class RecordTools:
+from core.agent_links import LinkTools
+
+
+class RecordTools(LinkTools):
     def _tool_query_registry(self):
         return json_value(bim_registry.get(self._viewport.scene))
 
