@@ -142,8 +142,8 @@ impl Antialias {
         self.color = target(d, w, h, self.format);
         self.depth = target(d, w, h, wgpu::TextureFormat::Depth32Float);
     }
-    pub fn resolve_depth(&self, d: &wgpu::Device, e: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
-        self.depth_resolve.draw(d, e, &self.depth.create_view(&Default::default()), target);
+    pub fn resolve_depth(&self, d: &wgpu::Device, e: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, queries: Option<&wgpu::QuerySet>) {
+        self.depth_resolve.draw(d, e, &self.depth.create_view(&Default::default()), target, queries);
     }
     pub fn depth_view(&self) -> wgpu::TextureView { self.depth.create_view(&Default::default()) }
     pub fn color_view(&self) -> wgpu::TextureView { self.color.create_view(&Default::default()) }
@@ -239,7 +239,7 @@ mod tests {
         }
         let depth = crate::texture(&device, 64, 64, wgpu::TextureFormat::Depth32Float);
         let mut encoder = device.create_command_encoder(&Default::default());
-        passes.resolve_depth(&device, &mut encoder, &depth.create_view(&Default::default()));
+        passes.resolve_depth(&device, &mut encoder, &depth.create_view(&Default::default()), None);
         let _ = encoder.finish();
     }
 }

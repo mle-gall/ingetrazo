@@ -114,6 +114,7 @@ struct Renderer {
     timings: Vec<TimingSlot>,
     last_gpu: Option<f64>,
     last_counters: std::collections::BTreeMap<String, u64>,
+    last_pick_gpu: Option<f64>,
     pass_gpu: std::collections::BTreeMap<String, f64>,
     detailed_timestamps: bool,
     last_cpu: f64,
@@ -487,6 +488,7 @@ impl Renderer {
                 })
                 .collect(),
             last_gpu: None,
+            last_pick_gpu: None,
             pass_gpu: Default::default(),
             last_counters: Default::default(),
             detailed_timestamps: features.contains(wgpu::Features::TIMESTAMP_QUERY),
@@ -1354,7 +1356,7 @@ impl Renderer {
                 self.aa.draw(&mut e, &color, s, self.style, self.edges, self.look.data[6][0] > 0., self.multi, self.queries.as_ref(), Some(edge_only), self.sections.count > 0);
             }
             if !edge_only && ao_active {
-                if msaa { self.aa.resolve_depth(&self.device, &mut e, &depth); }
+                if msaa { self.aa.resolve_depth(&self.device, &mut e, &depth, tq); }
                 let output = if msaa && !self.pick_pending { self.aa.color_view() } else { target.create_view(&Default::default()) };
                 self.ao.draw(&self.device, &self.queue, &mut e, target, &depth, &output, msaa && !self.pick_pending, tq);
             }
@@ -1457,7 +1459,8 @@ impl Renderer {
             if !msaa { active.push("faces"); if !msaa && (self.edges || self.style == 4) { active.push("edge_quads"); } }
             if msaa && !self.pick_pending { active.push("antialias"); if ao_active || self.edges || self.style == 4 { active.push("antialias_edges"); } }
             if self.style == 1 { active.extend(["xray_accumulation", "xray_composite"]); }
-            if ao_active { active.extend(["ao_inputs", "ao_kernel", "ao_blur_x", "ao_blur_y", "ao_upsample_composite"]); }
+            if ao_active && msaa { active.push("ao_inputs"); }
+            if ao_active { active.extend(["ao_kernel", "ao_blur_x", "ao_blur_y", "ao_upsample_composite"]); }
             self.timings[k].active = active;
         }
         if msaa && needs_settled_ids(false, self.ids_dirty, self.stable_frames) { self.ensure_ids()?; }
@@ -1497,7 +1500,8 @@ impl Renderer {
         counters.insert("instances_input".into(), self.scene.as_ref().map_or(0, |s| s.n as u64));
         counters.insert("depth_prepass".into(), 0);
         let mut passes: std::collections::BTreeMap<_, _> = self.pass_gpu.iter().map(|(n,v)| (n.clone(), Some(*v))).collect();
-        for name in ["ao_inputs", "profile_top", "profile_classification", "id", "present"] {
+        passes.insert("id".into(), self.last_pick_gpu);
+        for name in ["profile_top", "profile_classification", "present"] {
             passes.insert(name.into(), None);
         }
         passes.insert("depth_prepass".into(), Some(0.));
@@ -1548,7 +1552,7 @@ impl Renderer {
                         view: &depth, stencil_ops: None,
                         depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.), store: wgpu::StoreOp::Store }),
                     }),
-                    timestamp_writes: None, occlusion_query_set: None,
+                    timestamp_writes: timing::writes(self.queries.as_ref(), "id"), occlusion_query_set: None,
                 });
                 if let Some((x, y)) = cursor { pass.set_scissor_rect(x, y, 1, 1); }
                 pass.set_pipeline(&self.xray);
@@ -1655,6 +1659,7 @@ impl Renderer {
         if x >= self.config.width || y >= self.config.height {
             return Ok(-1);
         }
+        let measure_id = self.ids_dirty && self.style != 4 && self.queries.is_some();
         self.ensure_ids_region(Some((x, y)))?;
         let mut e = self.device.create_command_encoder(&Default::default());
         e.copy_texture_to_buffer(
@@ -1678,9 +1683,19 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
+        if measure_id {
+            let first = timing::index("id");
+            e.resolve_query_set(self.queries.as_ref().unwrap(), first..first+2, &self.resolve, 0);
+            e.copy_buffer_to_buffer(&self.resolve, 0, &self.read, 8, 16);
+        }
         self.queue.submit([e.finish()]);
-        let b = self.readback(4)?;
-        Ok(u32::from_le_bytes(b.try_into().unwrap()) as i64 - 1)
+        let b = self.readback(if measure_id { 24 } else { 4 })?;
+        self.last_pick_gpu = measure_id.then(|| {
+            let first = u64::from_le_bytes(b[8..16].try_into().unwrap());
+            let last = u64::from_le_bytes(b[16..24].try_into().unwrap());
+            last.saturating_sub(first) as f64 * self.queue.get_timestamp_period() as f64 / 1e6
+        });
+        Ok(u32::from_le_bytes(b[..4].try_into().unwrap()) as i64 - 1)
     }
 }
 impl Renderer {
