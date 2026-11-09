@@ -305,7 +305,7 @@ class WgpuView(QWidget):
                            self._project_to_lock_line(start, direction, x, y))
         if self.hovered_row is not None and self.inference_index is not None:
             self.last_snap = snap(self.inference_index, self.hovered_row, self, x, y, **options)
-        elif self.tools.sync() in ('tape', 'move'):
+        elif self.tools.sync() in ('tape', 'move', 'mesh'):
             from core.snap import compute_snap
             from types import SimpleNamespace
             origin, direction = self._pixel_to_ray(x, y)
@@ -314,6 +314,8 @@ class WgpuView(QWidget):
             denominator = QVector3D.dotProduct(direction, normal)
             if abs(denominator) > 1e-9:
                 point = origin + direction * (QVector3D.dotProduct(plane-origin, normal)/denominator)
+                if self.tools.mode == 'mesh':
+                    point = self.tools.work_point(x, y) or point
                 self.last_snap = compute_snap(point, (x, y), SimpleNamespace(edges=[]),
                                               self._world_to_pixel, 12., **options)
         if inference is not None and self.last_snap is not None:
@@ -370,7 +372,7 @@ class WgpuView(QWidget):
         self._drag_nav = event.button() == Qt.MiddleButton or bool(
             getattr(self.source_viewport, 'nav_mode', None))
         mode = self.tools.sync()
-        if not self._drag_nav and event.button() == Qt.LeftButton and mode in ('tape', 'move'):
+        if not self._drag_nav and event.button() == Qt.LeftButton and mode in ('tape', 'move', 'mesh'):
             self.hover(self.press.x(), self.press.y(), event.modifiers())
             self.tools.click(event)
         if self._drag_nav:
@@ -396,7 +398,7 @@ class WgpuView(QWidget):
             else:
                 dy = -delta.y() if getattr(self.source_viewport, '_invert_orbit_y', False) else delta.y()
                 self.camera.orbit_about(self._pivot, delta.x(), dy, self.height())
-        elif self.tools.sync() in ('tape', 'move'):
+        elif self.tools.sync() in ('tape', 'move', 'mesh'):
             self.hover(event.position().x(), event.position().y(), event.modifiers())
             self.tools.hover(event)
         elif event.buttons() & Qt.LeftButton and self.tools.mode == 'select':
@@ -422,13 +424,17 @@ class WgpuView(QWidget):
                 rows = self.rect_rows(self.press.x(), self.press.y(), event.position().x(), event.position().y())
             self.select_rows(rows, event.modifiers())
             self.selection_ms = (time.perf_counter()-start)*1000
+        if self.tools.mode == 'mesh':
+            self.tools.tool.on_release(self.tools)
+            self.tools.update()
         self.last = None
-        self.overlay_primitives = []
+        if self.tools.mode == 'select':
+            self.overlay_primitives = []
         self.update()
 
     def mouseDoubleClickEvent(self, event):
         mode = self.tools.sync()
-        if mode in ('tape', 'move'):
+        if mode in ('tape', 'move', 'mesh'):
             self.hover(event.position().x(), event.position().y(), event.modifiers())
             self.tools.click(event)
             return
@@ -443,7 +449,7 @@ class WgpuView(QWidget):
 
     def keyPressEvent(self, event):
         mode = self.tools.sync()
-        if event.key() == Qt.Key_Escape and mode in ('tape', 'move'):
+        if event.key() == Qt.Key_Escape and mode in ('tape', 'move', 'mesh'):
             self.tools.cancel()
         elif event.key() == Qt.Key_Escape:
             if self.scene.edit_group is not None and self.source_viewport is not None:
