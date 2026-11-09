@@ -3327,3 +3327,114 @@ Final ride medians at **2000×1400**, milliseconds:
 Load before sampling: [4.97509765625, 5.84912109375, 7.45947265625]. Per-variant loads: `{'section-False-edges-False': [4.65673828125, 5.7685546875, 7.42138671875], 'section-False-edges-True': [4.65673828125, 5.7685546875, 7.42138671875], 'section-True-edges-False': [4.80224609375, 5.759765625, 7.3984375], 'section-True-edges-True': [4.80224609375, 5.759765625, 7.3984375]}`.
 
 A3 300 dpi resident composer capture: **2.256 s**, 4961×3508, `tecnico`, scale 1:750, 420×297 mm. The harness uses R3b's saved-camera/fit-scale recipe with an active section and the shared resident renderer. R3b's approximately 33 s included rebuilding geometry; it is not a pure GPU speedup comparison.
+
+## Renderer — perf round 3 (2026-11-09)
+
+Partial implementation; this round is **not acceptance-ready**. Base: `f792f3fd`.
+Local branch: `renderer/perf-round-3`. No push or PR.
+
+Implemented: `last_timings()` now exposes MSAA depth resolve as `ao_inputs`,
+and an explicit dirty pick exposes its ID render-pass GPU duration as `id`.
+The latter excludes placement culling, copies, queue backlog and CPU readback;
+a cached pick reports `None`. Section polygons are bounded by a conservative
+projected AABB scissor (full viewport fallback across the near plane), and
+render once before AO when AO is enabled. Their depth therefore participates
+in depth reconstruction and AO. Non-AO cap ordering remains unchanged.
+
+The attempted vertex-stage cap color conversion was reverted: it produced
+identical captures but no measured gain. Caps still use cached polygons,
+Depth32Float depth writes and the existing no-stencil configuration.
+
+### Paired ride measurements
+
+2000×1400 physical pixels, same session, baseline extension saved before edits,
+then final extension, bounded sequential subprocesses. Ten GPU samples per
+configuration after four warmups, capture/readback drains between samples.
+Per-pass medians from `last_timings()`. Load columns are 1/5/15-minute load
+averages. These are observations under changing machine load, not proof of
+a speedup. Metal pass intervals can overlap: do not sum them into frame time.
+
+| Configuration / pass | Before ms | After ms | Before load | After load |
+|---|---:|---:|---|---|
+| section=False,msaa=False,ao=False,profiles=True; frame | 20.552 | 19.386 | 7.03/7.42/7.28 | 6.03/7.08/7.16 |
+| section=False,msaa=False,ao=False,profiles=True; edge_quads | 12.458 | 12.638 | 7.03/7.42/7.28 | 6.03/7.08/7.16 |
+| section=False,msaa=False,ao=True,profiles=True; frame | 20.873 | 19.620 | 7.03/7.42/7.28 | 6.03/7.08/7.16 |
+| section=False,msaa=False,ao=True,profiles=True; edge_quads | 11.391 | 9.454 | 7.03/7.42/7.28 | 6.03/7.08/7.16 |
+| section=False,msaa=False,ao=True,profiles=True; ao_inputs | n/a | 0.000 | 7.03/7.42/7.28 | 6.03/7.08/7.16 |
+| section=False,msaa=False,ao=True,profiles=True; ao_kernel | 1.940 | 2.406 | 7.03/7.42/7.28 | 6.03/7.08/7.16 |
+| section=False,msaa=False,ao=True,profiles=True; ao_blur_x | 0.693 | 0.600 | 7.03/7.42/7.28 | 6.03/7.08/7.16 |
+| section=False,msaa=False,ao=True,profiles=True; ao_blur_y | 0.983 | 0.708 | 7.03/7.42/7.28 | 6.03/7.08/7.16 |
+| section=False,msaa=False,ao=True,profiles=True; ao_upsample_composite | 2.238 | 0.838 | 7.03/7.42/7.28 | 6.03/7.08/7.16 |
+| section=False,msaa=True,ao=False,profiles=True; frame | 24.373 | 24.286 | 6.95/7.40/7.27 | 5.62/6.98/7.13 |
+| section=False,msaa=True,ao=False,profiles=True; antialias_edges | 15.974 | 15.614 | 6.95/7.40/7.27 | 5.62/6.98/7.13 |
+| section=False,msaa=True,ao=True,profiles=True; frame | 25.211 | 26.843 | 6.95/7.40/7.27 | 5.62/6.98/7.13 |
+| section=False,msaa=True,ao=True,profiles=True; antialias_edges | 15.786 | 15.266 | 6.95/7.40/7.27 | 5.62/6.98/7.13 |
+| section=False,msaa=True,ao=True,profiles=True; ao_inputs | n/a | 4.538 | 6.95/7.40/7.27 | 5.62/6.98/7.13 |
+| section=False,msaa=True,ao=True,profiles=True; ao_kernel | 1.700 | 1.743 | 6.95/7.40/7.27 | 5.62/6.98/7.13 |
+| section=False,msaa=True,ao=True,profiles=True; ao_blur_x | 1.808 | 1.851 | 6.95/7.40/7.27 | 5.62/6.98/7.13 |
+| section=False,msaa=True,ao=True,profiles=True; ao_blur_y | 1.913 | 1.952 | 6.95/7.40/7.27 | 5.62/6.98/7.13 |
+| section=False,msaa=True,ao=True,profiles=True; ao_upsample_composite | 6.900 | 4.562 | 6.95/7.40/7.27 | 5.62/6.98/7.13 |
+| section=False,msaa=False,ao=False,profiles=False; frame | 15.670 | 15.020 | 6.95/7.40/7.27 | 5.62/6.98/7.13 |
+| section=False,msaa=False,ao=False,profiles=False; edge_quads | 7.578 | 8.753 | 6.95/7.40/7.27 | 5.62/6.98/7.13 |
+| section=True,msaa=False,ao=False,profiles=True; frame | 20.333 | 20.972 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| section=True,msaa=False,ao=False,profiles=True; edge_quads | 12.504 | 15.244 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| section=True,msaa=False,ao=False,profiles=True; section_caps | 3.381 | 2.694 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| section=True,msaa=True,ao=True,profiles=True; frame | 24.030 | 25.438 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| section=True,msaa=True,ao=True,profiles=True; antialias_edges | 14.212 | 15.506 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| section=True,msaa=True,ao=True,profiles=True; ao_inputs | n/a | 1.511 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| section=True,msaa=True,ao=True,profiles=True; ao_kernel | 1.543 | 1.609 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| section=True,msaa=True,ao=True,profiles=True; ao_blur_x | 1.659 | 1.707 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| section=True,msaa=True,ao=True,profiles=True; ao_blur_y | 1.766 | 1.907 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| section=True,msaa=True,ao=True,profiles=True; ao_upsample_composite | 4.469 | 3.300 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| section=True,msaa=True,ao=True,profiles=True; section_caps | 6.822 | 4.945 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+
+Cold picks follow a camera-change frame; settled picks are measured after draining queued rendering. Five samples, median wall time.
+
+| Pick | Before ms | After ms | Before load (first) | After load (first) |
+|---|---:|---:|---|---|
+| cold_ms | 27.589 | 30.400 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| settled_ms | 1.416 | 1.415 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+| id_gpu_ms | n/a | 1.258 | 6.41/7.27/7.23 | 6.09/7.03/7.14 |
+
+Raw samples/configuration medians: [baseline](benchmarks/perf-round-3-2026-11-09/baseline/timings.json), [final](benchmarks/perf-round-3-2026-11-09/final/timings.json).
+
+### Images
+
+`scripts/wgpu_look_compare.py --capture-only`, three read-only reference models,
+matched cameras: zero changed RGBA bytes for marquee, pusher car and ride.
+[Pixel comparison](benchmarks/perf-round-3-2026-11-09/look-pixel-differences.json).
+Captures are in `docs/benchmarks/perf-round-3-2026-11-09/look-{before,final}`
+(GL, Metal and paired images). GL emitted its shared-context fallback warning
+but completed all captures. These default captures have no active section.
+
+Section/configuration capture comparisons (changed RGBA bytes):
+
+- `section=False,msaa=False,ao=False,profiles=False.png`: 0
+- `section=True,msaa=False,ao=False,profiles=True.png`: 0
+- `section=False,msaa=False,ao=True,profiles=True.png`: 0
+- `section=True,msaa=True,ao=True,profiles=True.png`: 11176
+- `section=False,msaa=False,ao=False,profiles=True.png`: 0
+- `section=False,msaa=True,ao=True,profiles=True.png`: 0
+- `section=False,msaa=True,ao=False,profiles=True.png`: 0
+
+AO-enabled section captures intentionally change because caps now contribute
+to AO. See `baseline` and `final` PNGs alongside the timing JSON.
+
+### Validation and remaining gates
+
+- Isolated Python 3.13 venv installed from requirements plus maturin.
+- `CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml`: passed.
+- Same command for `rust/ingetrazo_render/Cargo.toml`, with `--features extension-module` and `CARGO_PROFILE_RELEASE_STRIP=none`: passed.
+- `CARGO_HOME=$PWD/.cargo-work PYO3_PYTHON=$PWD/.venv-work/bin/python cargo test --release --manifest-path rust/ingetrazo_render/Cargo.toml`: 34 passed (including existing profile classification, cap depth/stencil and Metal validation; new conservative-scissor test).
+- `.venv-work/bin/python -m pytest tests/test_wgpu_*.py -q -p no:cacheprovider`: 160 passed, 34 warnings. No batch/full suite.
+- Each GUI subprocess had a 240-second timeout; no unrelated processes stopped.
+
+Outstanding: profile optimization, actual silhouette-survivor and quad-pixel
+counters, coarser small-placement profile sets, first-pick scheduling/latency
+optimization, AO/MSAA overhead reduction, cap pass below 1.5 ms and cap pick
+identity/depth participation. Existing counters measure submitted edge quads
+after placement culling, not silhouette survivors. The profile increment in
+this particular camera/load is not a general proof of the requested gate.
+AO kernel timing alone excludes resolve, blur and composite. Caps now occlude
+AO, but the independent ID pass still lacks cap geometry. No claim is made
+that the complete perf-round-3 gates have been met.
