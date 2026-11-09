@@ -1,6 +1,7 @@
 """Device-free regression checks for resident edits and shared tool semantics."""
 from types import SimpleNamespace
 import numpy as np
+import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QVector3D, QMatrix4x4
 from core.group import Group
@@ -173,7 +174,8 @@ def test_prototype_reassignment_preserves_row():
     assert updates.packed.commands['start'].tolist() == [0, 1]
 
 
-def test_native_move_preview_then_history_commit():
+@pytest.mark.parametrize("completion", ["click", "escape", "enter"])
+def test_native_move_preview_then_history_commit(completion):
     from core.history import History
     from tools.move import MoveTool
     from views.wgpu_tools import NativeTools
@@ -197,9 +199,20 @@ def test_native_move_preview_then_history_commit():
     native.hover(event)
     assert scene.groups[0].xform.column(3).x() == 0
     assert view.packed.instances['world'][0, 3, 0] == 2
-    native.click(event)
+    from views.wgpu_view import WgpuView
+    view.tools = native
+    if completion == 'escape':
+        WgpuView.keyPressEvent(view, SimpleNamespace(key=lambda: Qt.Key_Escape))
+        assert not history.undo_stack
+        assert view.packed.instances['world'][0, 3, 0] == 0
+        return
+    if completion == 'enter':
+        WgpuView.keyPressEvent(view, SimpleNamespace(key=lambda: Qt.Key_4, text=lambda: '4', modifiers=lambda: Qt.NoModifier))
+        WgpuView.keyPressEvent(view, SimpleNamespace(key=lambda: Qt.Key_Return, text=lambda: '', modifiers=lambda: Qt.NoModifier))
+    else:
+        native.click(event)
     assert isinstance(history.undo_stack[-1], MoveGroupCommand)
-    assert scene.groups[0].xform.column(3).x() == 2
+    assert scene.groups[0].xform.column(3).x() == (4 if completion == 'enter' else 2)
     history.undo()
     assert scene.groups[0].xform.column(3).x() == 0
 
@@ -231,3 +244,67 @@ def test_inference_shared_mesh_change_invalidates_only_its_prototype():
     updates.apply(ids, rows)
     index.update(ids, updates.packed, [code for _, _, code in updates.changed])
     assert surface(index, 1, QVector3D(.25, .25, 3), QVector3D(0, 0, -1)) == QVector3D(.25, .25, 2)
+
+
+def test_uid_keeps_row_when_document_replaces_group_object():
+    scene, updates = fixture_scene()
+    replacement = Group(scene.groups[0].mesh)
+    replacement.uid = scene.groups[0].uid
+    replacement.xform = QMatrix4x4()
+    scene.groups[0] = replacement
+    renderer = Renderer()
+    updates.apply(*updates.diff(scene), renderer)
+    assert updates.packed.groups[0] is replacement
+    assert renderer.calls == []
+
+
+def test_history_insert_undo_redo_keeps_one_row(monkeypatch):
+    from core.history import History, InsertGroupCommand
+    from core.group import iter_placements
+    scene, updates = fixture_scene()
+    history = History(scene)
+    updates.observe(history)
+    added = Group(scene.groups[0].mesh)
+    added.xform = QMatrix4x4()
+    visited = []
+    monkeypatch.setattr('views.wgpu_updates.iter_placements',
+                        lambda group: (visited.append(group), iter_placements(group))[1])
+    history.execute(InsertGroupCommand(added))
+    ids, rows = updates.diff(scene)
+    assert visited == [added]
+    assert ids.tolist() == [2]
+    updates.apply(ids, rows)
+    history.undo()
+    updates.apply(*updates.diff(scene))
+    assert updates.packed.instances['info'][2, 2] == 1
+    history.redo()
+    ids, rows = updates.diff(scene)
+    assert ids.tolist() == [2]
+    updates.apply(ids, rows)
+    assert updates.packed.instances['info'][2, 2] == 0
+
+
+def test_tool_change_signal_reports_unsupported_tool_without_mouse_input():
+    from PySide6.QtCore import QObject, Signal
+    from PySide6.QtWidgets import QApplication
+    from views.wgpu_view import WgpuView
+    app = QApplication.instance() or QApplication([])
+    messages = []
+    class Source(QObject):
+        measurementChanged = Signal(str)
+        active_tool = None
+
+        def flash_status(self, message):
+            messages.append(message)
+
+    source = Source()
+    view = WgpuView()
+    view.source_viewport = source
+    view._observe_tool_source()
+    view.show()
+    source.active_tool = SimpleNamespace()
+    source.measurementChanged.emit('')
+    app.processEvents()
+    assert view.tools.mode == 'inert'
+    assert messages == ['not yet available on the Metal renderer']
+    view.close()

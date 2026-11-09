@@ -36,6 +36,8 @@ class NativeTools:
         source = self.view.source_viewport
         tool = getattr(source, 'active_tool', None)
         if tool is self.tool:
+            if self.mode in ('tape', 'move') and self.start_point is not None and getattr(tool, 'start_point', None) is None:
+                self.cancel()
             return self.mode
         self.cancel()
         self.tool = tool
@@ -77,6 +79,8 @@ class NativeTools:
                 self.original = self.view.packed.instances[self.ids].copy()
                 self.start_point = QVector3D(ctx.world)
                 self.tool.start_point = QVector3D(ctx.world)
+                self.preview_delta = (0., 0., 0.)
+                self.hover(event)
             else:
                 delta = ctx.world - self.start_point
                 self.restore()
@@ -101,9 +105,12 @@ class NativeTools:
             lines = self.tool.rubber_band_lines()
             label = self.tool.value_label()
         elif mode == 'move' and self.start_point is not None:
-            rows = self.original.copy()
-            rows['world'][:, 3, :3] += np.asarray((ctx.world-self.start_point).toTuple(), np.float32)
-            self.write_rows(rows)
+            delta = (ctx.world-self.start_point).toTuple()
+            if delta != self.preview_delta:
+                rows = self.original.copy()
+                rows['world'][:, 3, :3] += np.asarray(delta, np.float32)
+                self.write_rows(rows)
+                self.preview_delta = delta
             lines = [(self.start_point, ctx.world)]
             from core.units import fmt_len
             label = (fmt_len((ctx.world-self.start_point).length()), (ctx.world+self.start_point)*.5)
