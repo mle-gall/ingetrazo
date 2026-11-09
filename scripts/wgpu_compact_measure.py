@@ -35,7 +35,7 @@ def measure():
             result['reupload_memory_verified'] = True
         from views.wgpu_style import style_payload
         for edges, profiles in ((False, False), (True, False), (True, True)):
-            view.renderer.set_edges(edges)
+            scene.display_style.edges = edges
             scene.display_style.profiles = profiles
             view.renderer.set_style(style_payload(scene))
             for aa in (False, True):
