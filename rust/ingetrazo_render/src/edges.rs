@@ -28,9 +28,8 @@ pub fn expand(
             };
             let a = endpoint(0);
             let b = endpoint(4);
-            if hard.insert(key(&a, &b)) {
-                pairs.push((a, b, false));
-            }
+            hard.insert(key(&a, &b));
+            pairs.push((a, b, false));
         }
         let hard_count = pairs.len();
         for (k, n) in &adjacency {
@@ -216,15 +215,15 @@ mod compact_tests {
             crate::Command { count:3, instances:0, first:0, base:0, start:7 },
             crate::Command { count:4, instances:0, first:3, base:0, start:7 },
         ];
-        // Reversed duplicate hard edge is represented once.
+        // Coincident source edges preserve their independent dash directions.
         let (v, _, cmd) = super::expand(&vertices, bytemuck::cast_slice(&[0u32,1,2,0,1,1,0]),
             bytemuck::cast_slice(&commands), 1).unwrap();
-        assert_eq!(v.len(), 3*48);
+        assert_eq!(v.len(), 4*48);
         let edge: crate::Command = bytemuck::pod_read_unaligned(&cmd[20..]);
-        assert_eq!((edge.count,edge.base,edge.start), (18,7,6));
+        assert_eq!((edge.count,edge.base,edge.start), (24,7,12));
         assert_eq!(f32::from_le_bytes(v[32..36].try_into().unwrap()),1.);
         assert_eq!(f32::from_le_bytes(v[44..48].try_into().unwrap()),0.);
-        assert_eq!(f32::from_le_bytes(v[80..84].try_into().unwrap()),2.);
+        assert_eq!(f32::from_le_bytes(v[128..132].try_into().unwrap()),2.);
     }
 
     #[test]

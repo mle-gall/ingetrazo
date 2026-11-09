@@ -219,7 +219,7 @@ also 28 bytes in every pass (including MSAA and weighted X-ray). Texture lookup
 continues through the existing sparse material table; no material index or
 adjacency is added to faces. The uploaded index buffer is unchanged.
 
-Edges use one 48-byte storage record per unique hard edge or non-coplanar
+Edges use one 48-byte storage record per source hard edge or non-coplanar
 profile candidate, grouped by prototype. Little-endian offsets:
 
 | Offset | Type | Meaning |
@@ -237,7 +237,8 @@ candidates. The shader tests squared length > 2 and multiplies by 0.5 to
 recover the original normal exactly. This power-of-two flag encoding keeps
 float32 classification precision within the 48-byte record budget. Degenerate
 zero normals occur only on hard edges; synthesized candidates have a nonzero
-first adjacency normal.
+first adjacency normal. Coincident source edges retain their individual dash
+directions; only synthesized profile candidates are welded by endpoint position.
 
 Commands remain 20-byte rows: P indexed face commands followed by P edge rows.
 Edge rows are **non-indexed indirect** arguments in the first 16 bytes:
