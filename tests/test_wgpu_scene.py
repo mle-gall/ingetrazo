@@ -292,3 +292,20 @@ def test_container_colors_share_geometry_without_material_vertices():
     assert packed.instances['info'][:, 1].tolist() == [0xff0000ff, 0xff00ff00]
     assert len(packed.materials) == 16
     assert not packed.materials.any()
+
+
+def test_matching_back_uses_color_flag_without_material_rows():
+    mesh = triangle()
+    mesh.faces[0].attrs.update(color=(1, 0, 0), back=True)
+    packed = pack_scene(Scene(groups=[Group(mesh)]))
+    assert len(packed.materials) == 16
+    assert not packed.materials.any()
+    np.testing.assert_array_equal(packed.vertices['color'][:3], [[255, 0, 0, 254]]*3)
+
+
+def test_distinct_back_allocates_only_face_material_rows():
+    mesh = triangle()
+    mesh.faces[0].attrs.update(color=(1, 0, 0), back={'color': (0, 1, 0)})
+    packed = pack_scene(Scene(groups=[Group(mesh)]))
+    assert len(packed.materials) == 16 + 3*32
+    assert packed.materials[:16].view('<u4').tolist() == [0, 1, 3, 0]

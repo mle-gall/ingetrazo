@@ -32,6 +32,7 @@ struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f, @loc
   let mat = materials[at+1u];
   o.back = unpack4x8unorm(mat.x); o.textures = mat.yz;
  }
+ if u32(round(color.a*255.)) == 254u { o.back = vec4f(color.rgb,1.); }
  // Unpainted faces inherit container paint on both sides.
  if color.a < 0.5 && tint.a > 0.5 && o.back.a < 0.5 { o.back = tint; }
  o.distance = 0.; o.id = id+1u; return o;

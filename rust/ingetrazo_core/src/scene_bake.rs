@@ -262,7 +262,7 @@ pub fn bake_scene<'py>(
     }
     let maps: Vec<[f32; 16]> = maps.rows().into_iter()
         .map(|r| std::array::from_fn(|k| r[k])).collect();
-    let paints: Vec<[u32; 3]> = paints.rows().into_iter()
+    let mut paints: Vec<[u32; 3]> = paints.rows().into_iter()
         .map(|r| [r[0], r[1], r[2]]).collect();
     let h = crate::hypot_of(hypot)?;
     // Borrowed read-only NumPy slices stay alive throughout this synchronous call.
@@ -311,6 +311,24 @@ pub fn bake_scene<'py>(
         }
         jobs.into_par_iter()
             .for_each(|(i, p, dst, idx)| fill(&pts[offsets[i][0]..offsets[i + 1][0]], p, dst, idx));
+        // A back matching the front needs no corner data. Reserve alpha 254
+        // in the existing color word; 255 remains front-only explicit paint.
+        for (i, mesh) in prepared.iter().enumerate() {
+            for (triangle, face) in mesh.faces.iter().enumerate() {
+                let f = offsets[i][3] + face;
+                let vertex = table[i*3] as usize + triangle*3;
+                let color = u32::from_le_bytes(bytes[vertex*28+24..vertex*28+28].try_into().unwrap());
+                if paints[f][0] != 0 && paints[f][0] == color && paints[f][1..] == [0, 0] {
+                    for corner in 0..3 { bytes[(vertex+corner)*28+27] = 254; }
+                }
+            }
+            // Clear after marking every triangle of a face, not during it.
+            for face in &mesh.faces {
+                let f = offsets[i][3] + face;
+                let color = u32::from_le_bytes(colors[f]);
+                if paints[f][0] == color && paints[f][1..] == [0, 0] { paints[f][0] = 0; }
+            }
+        }
         let mut materials = vec![0u8; prepared.len() * 16];
         for (i, mesh) in prepared.iter().enumerate() {
             let first_face = offsets[i][3];
