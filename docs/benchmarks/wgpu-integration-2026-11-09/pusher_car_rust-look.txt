@@ -1,0 +1,27 @@
+qt.qpa.openglcontext: Could not create NSOpenGLContext with shared context, falling back to unshared context.
+UNSUPPORTED (log once): POSSIBLE ISSUE: unit 0 GLD_TEXTURE_INDEX_2D is unloadable and bound to sampler type (Float) - using zero texture because texture unloadable
+{"scale": 2.0, "size": [2000, 1400], "rgb_mae": 0.41405261904761903, "frames": {}, "prototypes": 70, "vertices": 665059, "material_bytes": 11043808, "resident_bytes": 110358932, "camera": {"target": [1.7956702709197998, 1.0231391191482544, 0.3249250650405884], "distance": 8.343749046325684, "yaw": -0.7853981633974483, "pitch": 0.5235987755982988, "up": [0.0, 0.0, 1.0], "fov_deg": 45.0, "aspect": 1.0, "znear": 0.1, "zfar": 10000.0, "perspective": true, "two_point": false}}
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed

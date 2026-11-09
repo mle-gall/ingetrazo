@@ -1,0 +1,70 @@
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded num-complex v0.4.6
+  Downloaded rawpointer v0.2.1
+  Downloaded heck v0.5.0
+  Downloaded autocfg v1.5.1
+  Downloaded target-lexicon v0.13.5
+  Downloaded unicode-ident v1.0.27
+  Downloaded pyo3-build-config v0.29.3
+  Downloaded rayon-core v1.13.0
+  Downloaded numpy v0.29.0
+  Downloaded pyo3-macros-backend v0.29.3
+  Downloaded pyo3-ffi v0.29.3
+  Downloaded proc-macro2 v1.0.107
+  Downloaded portable-atomic-util v0.2.8
+  Downloaded rayon v1.12.0
+  Downloaded portable-atomic v1.15.0
+  Downloaded once_cell v1.21.4
+  Downloaded num-traits v0.2.19
+  Downloaded ndarray v0.17.2
+  Downloaded matrixmultiply v0.3.11
+  Downloaded syn v2.0.119
+  Downloaded crossbeam-utils v0.8.23
+  Downloaded crossbeam-epoch v0.9.21
+  Downloaded quote v1.0.47
+  Downloaded num-integer v0.1.47
+  Downloaded rustc-hash v2.1.3
+  Downloaded pyo3-macros v0.29.3
+  Downloaded either v1.19.0
+  Downloaded crossbeam-deque v0.8.8
+  Downloaded libc v0.2.190
+  Downloaded pyo3 v0.29.3
+🐍 Found CPython 3.13 at /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-c5490b1b/.venv-work/bin/python
+🔗 Found pyo3 bindings with abi3-py3.10 support
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling target-lexicon v0.13.5
+   Compiling autocfg v1.5.1
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling crossbeam-utils v0.8.23
+   Compiling libc v0.2.190
+   Compiling crossbeam-epoch v0.9.21
+   Compiling heck v0.5.0
+   Compiling crossbeam-deque v0.8.8
+   Compiling rawpointer v0.2.1
+   Compiling rayon-core v1.13.0
+   Compiling once_cell v1.21.4
+   Compiling num-traits v0.2.19
+   Compiling matrixmultiply v0.3.11
+   Compiling either v1.19.0
+   Compiling rustc-hash v2.1.3
+   Compiling ingetrazo_core v0.1.0 (/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-c5490b1b/rust/ingetrazo_core)
+   Compiling pyo3-build-config v0.29.3
+   Compiling syn v2.0.119
+   Compiling pyo3-ffi v0.29.3
+   Compiling pyo3 v0.29.3
+   Compiling numpy v0.29.0
+   Compiling num-integer v0.1.47
+   Compiling num-complex v0.4.6
+   Compiling rayon v1.12.0
+   Compiling ndarray v0.17.2
+   Compiling pyo3-macros-backend v0.29.3
+   Compiling pyo3-macros v0.29.3
+    Finished `release` profile [optimized] target(s) in 46.23s
+📦 Built wheel for abi3 Python ≥ 3.10 to /var/folders/zy/1s11p6w53_jctswhjtc0w6zh0000gn/T/.tmpK1maS4/ingetrazo_core-0.1.0-cp310-abi3-macosx_11_0_arm64.whl
+✏️ Setting installed package as editable
+🛠 Installed ingetrazo_core-0.1.0

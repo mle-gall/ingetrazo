@@ -2126,3 +2126,85 @@ Arabic, cursor pick, extension wrapping, hidden panels and toolbar bold); the
 baseline swatch-tooltip failure did not reproduce. No new failures. No batch
 exceeded 30 minutes (longest 509.81 s), so no split was needed.
 [Full suite log](benchmarks/wgpu-look-2026-11-09/r-look-3a/suite.txt).
+
+## Integration — R2b + AO — 2026-11-09
+
+Integrated `renderer/r2b-tools` (`7f847691`) and `renderer/look-ao`
+(`b9edf50f`) onto compact-edge base `025a768e`, on local branch
+`renderer/integrate-r2b-ao`. No PR or push.
+
+The update API now preserves 28-byte face vertices, 48-byte edge records,
+non-indexed edge commands, hard-only templates, survivor ranges and viewpoint
+bindings across replacement and doubling growth. Instance updates/removals
+invalidate settled IDs. Sparse replacement materials retain complete 32-byte
+corner records and resident texture layer identities. Tool dispatch, Tape and
+History-backed placement Move are integrated; `MainWindow._activate_tool`
+already enables native tools (`26b58367`), superseding the source R2b report's
+legacy-guard checkpoint. The GL viewport implementation was not changed.
+
+AO composites between faces and compact edge/profile passes and overlays, at
+half resolution by default, honoring the style flag and Distance. Both MSAA
+modes work. AO-enabled MSAA still needs a single-sample depth raster in addition
+to color rendering; its cost is included in the corrected GPU timestamps.
+Weighted X-ray retains its source behavior with AO inactive.
+
+### Ride update gates
+
+Explicit MSAA off and AO off, scene profile setting retained, 76,029 placements,
+2000×1400 physical pixels. The full test suite was running concurrently; other
+machine workloads were not controlled. These are observed samples, not a
+claim of stable timing on an otherwise idle machine.
+
+| Operation | Integrated measurement | Gate |
+| --- | ---: | --- |
+| One move, History through row submission | 1.27 ms, one row | Incremental |
+| Same move through render and synchronous pick | 47.10 ms | Pass: <50 ms |
+| Tag 1,000 placements | 20.88 ms; zero renderer calls | Pass |
+| Insert shared component | 4.73 ms; one row | Pass |
+| Dispatched drag of 1,000 placements | p95 38.36 ms; max 39.21 ms | **Unresolved: >33 ms** |
+
+The first successful diagnostic inherited MSAA on and measured 72.99 ms for
+move-through-pick and 60.07 ms drag p95; that sample is retained separately.
+The final script explicitly sets the source benchmark's MSAA-off configuration.
+[Raw samples and configuration](benchmarks/wgpu-integration-2026-11-09/README.md).
+
+### AO and compact-edge checks
+
+| Ride GPU median | AO off | Half | Full |
+| --- | ---: | ---: | ---: |
+| MSAA off | 39.55 ms | 41.67 ms | 43.92 ms |
+| MSAA on | 41.34 ms | 79.96 ms | 81.73 ms |
+
+[Small-model and ride AO tables](benchmarks/wgpu-integration-2026-11-09/ao-costs.md)
+include marquee, pusher car and track, with raw CPU/GPU/wall samples alongside.
+The track GL comparison reached its 240-second cap; the Metal-only timing retry
+completed. Three new GL/Metal AO comparisons are linked in the report.
+
+Resident scene buffers, counting spare capacity, are **1,169,587,060 bytes**
+(1.170 GB); settled pick **1.31 ms**, cold pick **90.90 ms**. Hard edges with
+profiles off cost **31.39 ms GPU** in the paced diagnostic. The earlier 30 ms
+hard-edge and 79 ms cold-pick items therefore remain open. MSAA + AO is another
+clear performance cost, not a completed 60 Hz gate.
+
+Marquee profiles/textures, pusher-car red wheels and marquee X-ray are
+**pixel-identical** to the committed compact-edge captures: RGB MAE zero and
+zero changed pixels in all three 2000×1400 images.
+[Images, parity JSON, commands and detailed results](benchmarks/wgpu-integration-2026-11-09/README.md).
+
+Focused tests: **73 passed** (`tests/test_wgpu_*`); renderer Rust tests:
+**21 passed**. Native smoke passed buffer growth, prototype insertion/replacement,
+removal and a settled-cache → instance-update invalidation → pick-refresh
+assertion. The sparse-material regression verifies full corner records and
+resident texture IDs. Full-suite results are recorded in the linked report.
+
+R3 remains live mesh tools, loose-face transforms and sheets. Append-only
+replacement storage still requires reclamation for sustained mesh editing.
+Drag p95, hard-edge GPU time, cold picking and MSAA/AO depth cost remain open;
+they are not presented as completed R3 work.
+
+Full-suite validation completed once in 24 batches, **1,312 seconds**:
+**7,187 passed, 18 failed, 142 skipped, 2 xfailed, 805 deselected**. All failures
+match the supplied baseline: 14 translations (including Arabic), cursor pick,
+extension wrap, hidden panels and toolbar bold. The baseline swatch-tooltip
+failure did not reproduce; **zero new failures**. No batch timed out or needed
+splitting. The full log and focused/native-test evidence are in the report.

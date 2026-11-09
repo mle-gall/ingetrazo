@@ -1,0 +1,11 @@
+loaded 19
+packed 237
+qt.qpa.openglcontext: Could not create NSOpenGLContext with shared context, falling back to unshared context.
+UNSUPPORTED (log once): POSSIBLE ISSUE: unit 0 GLD_TEXTURE_INDEX_2D is unloadable and bound to sampler type (Float) - using zero texture because texture unloadable
+{"scale": 2.0, "size": [2000, 1400], "rgb_mae": 4.218300119047619, "frames": {"ao=off,msaa=False": {"cpu_median_ms": 8.328834, "gpu_median_ms": 1.2645, "wall_median_ms": 8.342167013324797}, "ao=half,msaa=False": {"cpu_median_ms": 8.561124999999999, "gpu_median_ms": 3.870792, "wall_median_ms": 8.575291954912245}, "ao=full,msaa=False": {"cpu_median_ms": 8.600833, "gpu_median_ms": 5.561375, "wall_median_ms": 8.614958031103015}, "ao=off,msaa=True": {"cpu_median_ms": 8.384709, "gpu_median_ms": 1.813167, "wall_median_ms": 8.39754194021225}, "ao=half,msaa=True": {"cpu_median_ms": 8.669208, "gpu_median_ms": 8.443833, "wall_median_ms": 8.685334003530443}, "ao=full,msaa=True": {"cpu_median_ms": 8.657084000000001, "gpu_median_ms": 9.527791, "wall_median_ms": 8.671291987411678}}}
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed

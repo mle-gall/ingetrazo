@@ -1,0 +1,29 @@
+{
+  "marquee": {
+    "shape": [
+      1400,
+      2000,
+      3
+    ],
+    "mae": 0.0,
+    "changed_pixels": 0
+  },
+  "pusher_car_rust": {
+    "shape": [
+      1400,
+      2000,
+      3
+    ],
+    "mae": 0.0,
+    "changed_pixels": 0
+  },
+  "marquee-xray": {
+    "shape": [
+      1400,
+      2000,
+      3
+    ],
+    "mae": 0.0,
+    "changed_pixels": 0
+  }
+}
