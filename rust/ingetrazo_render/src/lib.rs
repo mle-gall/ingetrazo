@@ -93,6 +93,7 @@ struct Renderer {
     ids: wgpu::Texture,
     camera: wgpu::Buffer,
     compute: wgpu::ComputePipeline,
+    compute_pick: wgpu::ComputePipeline,
     draw: wgpu::RenderPipeline,
     draw_plain: wgpu::RenderPipeline,
     draw_noids: wgpu::RenderPipeline,
@@ -275,7 +276,7 @@ impl Renderer {
         surface.configure(&device, &config);
         let camera = buffer(
             &device,
-            &[0; 96],
+            &[0; 112],
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         );
         let cs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -289,6 +290,13 @@ impl Renderer {
             entry_point: Some("cull"),
             compilation_options: Default::default(),
             cache: None,
+        });
+        let pick_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cursor culling"), bind_group_layouts: &[&compute.get_bind_group_layout(0)], push_constant_ranges: &[],
+        });
+        let compute_pick = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("cursor placement culling"), layout: Some(&pick_layout), module: &cs, entry_point: Some("cull"),
+            compilation_options: wgpu::PipelineCompilationOptions { constants: &[("PICK".to_string(), 1.)].into_iter().collect(), ..Default::default() }, cache: None,
         });
         let vs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("draw"),
@@ -488,6 +496,7 @@ impl Renderer {
             config,
             camera,
             compute,
+            compute_pick,
             draw,
             draw_plain,
             draw_noids,
@@ -654,7 +663,7 @@ impl Renderer {
         self.transparency.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer);
         self.aa.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer, &edge_records, &viewpoints);
         self.gpu_memory =
-            (v.len() + expanded_v.len() + ix.len() + p.len() + cmd.len() * 3 + instances.len() + n * 20 + 96 + 416)
+            (v.len() + expanded_v.len() + ix.len() + p.len() + cmd.len() * 3 + instances.len() + n * 20 + 112 + 416)
                 as u64 + self.textures.bytes + self.textures.materials.size();
         self.ids_dirty = true;
         self.scene = Some(Scene {
@@ -967,6 +976,7 @@ impl Renderer {
         let inverse_view = glam::Mat4::from_cols_array(&v).inverse();
         let eye = inverse_view * if p[15] == 0. { glam::Vec4::W } else { glam::Vec4::Z };
         data.extend(eye.to_array());
+        data.extend([-1., -1., 1., 1.]);
         if self.camera_data != data {
             self.stable_frames = 0;
             self.ids_dirty = true;
@@ -1404,10 +1414,18 @@ impl Renderer {
             let s = self.scene.as_ref().ok_or_else(|| PyValueError::new_err("set_scene first"))?;
             let mut encoder = self.device.create_command_encoder(&Default::default());
             encoder.copy_buffer_to_buffer(&s.hard_template, 0, &s.commands, 0, s.p as u64 * 40);
+            let cursor_group = cursor.filter(|_| self.camera_data.len() == 28).map(|(x,y)| {
+                let mut camera = self.camera_data.clone();
+                let margin = self.look.data[2][3].max(self.look.data[6][1]).max(1.);
+                camera[24..28].copy_from_slice(&pick_bounds(x, y, self.config.width, self.config.height, margin));
+                let camera = buffer(&self.device, bytemuck::cast_slice(&camera), wgpu::BufferUsages::UNIFORM);
+                bind_prototypes(&self.device, &self.compute.get_bind_group_layout(0),
+                    &[&camera, &s.inst, &s.protos, &s.commands, &s.survivors, &s.viewpoints, &s.counters], s.p)
+            });
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-                pass.set_pipeline(&self.compute);
-                pass.set_bind_group(0, &s.compute, &[]);
+                pass.set_pipeline(if cursor_group.is_some() { &self.compute_pick } else { &self.compute });
+                pass.set_bind_group(0, cursor_group.as_ref().unwrap_or(&s.compute), &[]);
                 pass.dispatch_workgroups(s.n.div_ceil(64), 1, 1);
             }
             let color = self.offscreen.create_view(&Default::default());
@@ -1524,7 +1542,7 @@ impl Renderer {
         self.scene.as_ref().map_or(0, |s| {
             [&s.vertex, &s.index, &s.edge_records, &s.inst, &s.protos,
              &s.survivors, &s.viewpoints, &s.commands, &s.template, &s.hard_template]
-                .iter().map(|b| b.size()).sum::<u64>() + 96 + 416
+                .iter().map(|b| b.size()).sum::<u64>() + 112 + 416
         }) + self.textures.bytes + self.textures.materials.size()
     }
 
@@ -1841,3 +1859,19 @@ mod cursor_schedule_tests {
     }
 }
 fn ids_complete(cursor: Option<(u32, u32)>) -> bool { cursor.is_none() }
+
+fn pick_bounds(x: u32, y: u32, width: u32, height: u32, margin: f32) -> [f32; 4] {
+    [2.*(x as f32-margin)/width as f32-1., 1.-2.*(y as f32+1.+margin)/height as f32,
+     2.*(x as f32+1.+margin)/width as f32-1., 1.-2.*(y as f32-margin)/height as f32]
+}
+#[cfg(test)]
+mod pick_bounds_tests {
+    #[test]
+    fn cursor_bounds_include_pixel_and_wide_loose_edges() {
+        let b = super::pick_bounds(49, 49, 100, 100, 2.);
+        for p in [[-0.02,0.02], [0.,0.], [-0.05,0.05]] {
+            assert!(p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3]);
+        }
+        assert!(b[0] < 0. && b[1] < 0. && b[2] > 0. && b[3] > 0.);
+    }
+}
