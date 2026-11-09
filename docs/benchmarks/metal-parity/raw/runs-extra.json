@@ -1,0 +1,110 @@
+[
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/new-document.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw"
+    ],
+    "returncode": 1,
+    "wall_seconds": 2.1269850420067087
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/mesh-figure.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw"
+    ],
+    "returncode": 1,
+    "wall_seconds": 2.1655998750356957
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/smooth.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw"
+    ],
+    "returncode": 0,
+    "wall_seconds": 1.3979960409924388
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/alpha.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw"
+    ],
+    "returncode": 0,
+    "wall_seconds": 1.1828364160610363
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--live-frame",
+      "--audit-case",
+      "selected-group"
+    ],
+    "returncode": 0,
+    "wall_seconds": 2.5303372910711914
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--live-frame",
+      "--audit-case",
+      "box-window"
+    ],
+    "returncode": 0,
+    "wall_seconds": 2.229975749971345
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--live-frame",
+      "--audit-case",
+      "box-crossing"
+    ],
+    "returncode": 0,
+    "wall_seconds": 1.6622561669209972
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--live-frame",
+      "--audit-case",
+      "zoom-window"
+    ],
+    "returncode": 0,
+    "wall_seconds": 1.706648249994032
+  }
+]

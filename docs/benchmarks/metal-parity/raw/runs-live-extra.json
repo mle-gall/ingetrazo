@@ -1,0 +1,46 @@
+[
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/new-document.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "live",
+      "--output",
+      "docs/benchmarks/metal-parity/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/mesh-figure.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "live",
+      "--output",
+      "docs/benchmarks/metal-parity/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "section-tool",
+      "--output",
+      "docs/benchmarks/metal-parity/raw"
+    ],
+    "returncode": 0,
+    "initial_returncode": 1,
+    "rerun_note": "flash_status redirected to no-op for unparented harness; final capture succeeded"
+  }
+]

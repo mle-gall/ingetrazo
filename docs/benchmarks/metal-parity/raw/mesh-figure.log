@@ -1,0 +1,22 @@
+UNSUPPORTED (log once): POSSIBLE ISSUE: unit 0 GLD_TEXTURE_INDEX_2D is unloadable and bound to sampler type (Float) - using zero texture because texture unloadable
+Traceback (most recent call last):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-6dc23389/scripts/wgpu_look_compare.py", line 160, in <module>
+    result = view.render_image(1000, 700, overlays=args.overlays)
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-6dc23389/views/wgpu_view.py", line 417, in render_image
+    pixels = bytes(self.renderer.render_image(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        width_px, height_px, tuple(view.data()), tuple(projection.data()), payload,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        rows.view(np.uint8).reshape(-1)))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: capture rows may only change visibility and tint
+Traceback (most recent call last):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-6dc23389/views/viewport.py", line 6187, in release_gl_textures
+    self.makeCurrent()
+    ~~~~~~~~~~~~~~~~^^
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-6dc23389/scripts/wgpu_look_compare.py", line 105, in <lambda>
+    gl.makeCurrent = lambda: context.makeCurrent(surface)
+                             ~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+RuntimeError: libshiboken: Internal C++ object (PySide6.QtGui.QOpenGLContext) already deleted.
+QOpenGLTexturePrivate::destroy() called without a current context.
+Texture has not been destroyed

@@ -1,0 +1,7 @@
+{
+  "modifier": "Ctrl",
+  "before_groups": 2,
+  "after_groups": 2,
+  "command": "MoveGroupCommand",
+  "translation": 2.0
+}

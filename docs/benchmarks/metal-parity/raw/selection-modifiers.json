@@ -1,0 +1,20 @@
+[
+  {
+    "modifiers": "Shift",
+    "metal_selected": 1,
+    "gl_selected": 0,
+    "gl_mode": "toggle"
+  },
+  {
+    "modifiers": "Ctrl",
+    "metal_selected": 0,
+    "gl_selected": 1,
+    "gl_mode": "add"
+  },
+  {
+    "modifiers": "Shift+Ctrl",
+    "metal_selected": 0,
+    "gl_selected": 0,
+    "gl_mode": "remove"
+  }
+]

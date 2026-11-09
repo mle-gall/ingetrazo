@@ -1,0 +1,75 @@
+[
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--pitch",
+      "5"
+    ],
+    "returncode": 0,
+    "seconds": 1.3174481249880046
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--edge-width",
+      "4"
+    ],
+    "returncode": 0,
+    "seconds": 1.3156745410524309
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/smooth.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--profiles-off"
+    ],
+    "returncode": 0,
+    "seconds": 1.4831952500389889
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "/Users/legallmaxence/code/ingetrazo-bench/marquee.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--live-frame",
+      "--measure-audit",
+      "--audit-case",
+      "latency"
+    ],
+    "returncode": 0,
+    "seconds": 1.8438321249559522
+  },
+  {
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "/Users/legallmaxence/code/ingetrazo-bench/pusher_car_rust.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--live-frame",
+      "--measure-audit",
+      "--audit-case",
+      "latency"
+    ],
+    "returncode": 0,
+    "seconds": 7.290315916063264
+  }
+]

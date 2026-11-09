@@ -1,0 +1,19 @@
+{
+  "load_seconds": 0.03935312503017485,
+  "capture_seconds": {
+    "gl": 0.13498329208232462,
+    "wgpu": 0.7200876249698922
+  },
+  "pack_seconds": 0.07127441593911499,
+  "rss_peak_bytes": 189579264,
+  "resident_bytes": 142532,
+  "size": [
+    1000,
+    700
+  ],
+  "method": "unshown offscreen export; excludes interactive overlays",
+  "case": "flat",
+  "overlays": false,
+  "live_frame": true,
+  "gl_first_capture_seconds": 0.07389116694685072
+}

@@ -1,0 +1,476 @@
+[
+  {
+    "case": "baseline",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "baseline",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 2.2081535829929635,
+    "wall_seconds": 3.083844415959902,
+    "warmup": true
+  },
+  {
+    "case": "guides-only",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "guides-only",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 1.320310957962647,
+    "wall_seconds": 2.1927855409448966,
+    "warmup": true
+  },
+  {
+    "case": "selected-face",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "selected-face",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 2.3107985829701647,
+    "wall_seconds": 2.727938042022288,
+    "warmup": true
+  },
+  {
+    "case": "selected-edge",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "selected-edge",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 4.978713916963898,
+    "wall_seconds": 2.3711436659796163,
+    "warmup": true
+  },
+  {
+    "case": "hover-face",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "hover-face",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 4.408415124984458,
+    "wall_seconds": 2.5930506659206003,
+    "warmup": true,
+    "excluded": "Manually forced GL face hover is not reachable through SelectTool (which suppresses it); PNG evidence removed."
+  },
+  {
+    "case": "hover-group",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "hover-group",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 2.692933333106339,
+    "wall_seconds": 2.3402788329403847,
+    "warmup": true
+  },
+  {
+    "case": "edit",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "edit",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 4.074556124978699,
+    "wall_seconds": 2.0337432919768617,
+    "warmup": true
+  },
+  {
+    "case": "hidden",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "hidden",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 1.9758294170023873,
+    "wall_seconds": 2.0110825409647077,
+    "warmup": true
+  },
+  {
+    "case": "section",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "section",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 1.7397393330466002,
+    "wall_seconds": 2.0798662920715287,
+    "warmup": true
+  },
+  {
+    "case": "section-parallel",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "section-parallel",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 1.5265493750339374,
+    "wall_seconds": 2.3656822920311242,
+    "warmup": true
+  },
+  {
+    "case": "parallel",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "parallel",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 1.6364662089617923,
+    "wall_seconds": 2.414864999940619,
+    "warmup": true
+  },
+  {
+    "case": "two-point",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "two-point",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 1.6962092090398073,
+    "wall_seconds": 2.330538749927655,
+    "warmup": true
+  },
+  {
+    "case": "shadows",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "shadows",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 1.7980417500948533,
+    "wall_seconds": 2.241559625021182,
+    "warmup": true
+  },
+  {
+    "case": "ao",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "ao",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 1.748040874954313,
+    "wall_seconds": 1.9013913749950007,
+    "warmup": true
+  },
+  {
+    "case": "by-tag",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "by-tag",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 1.5944791251095012,
+    "wall_seconds": 2.5279683331027627,
+    "warmup": true
+  },
+  {
+    "case": "flat",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "flat",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 1.541736708022654,
+    "wall_seconds": 2.279674166929908,
+    "warmup": true
+  },
+  {
+    "case": "colors",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "colors",
+      "--live-frame"
+    ],
+    "returncode": 0,
+    "seconds": 1.5271464170655236,
+    "wall_seconds": 2.3207641249755397,
+    "warmup": true
+  },
+  {
+    "case": "export-overlays",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "export-overlays",
+      "--overlays"
+    ],
+    "returncode": 0,
+    "seconds": 1.2001141249202192,
+    "wall_seconds": 1.2631161250174046,
+    "warmup": true
+  },
+  {
+    "case": "shaded",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "shaded",
+      "--mode",
+      "shaded"
+    ],
+    "returncode": 0,
+    "seconds": 0.9908099999884143,
+    "wall_seconds": 1.3439585419837385,
+    "warmup": true
+  },
+  {
+    "case": "hidden_line",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "hidden_line",
+      "--mode",
+      "hidden_line"
+    ],
+    "returncode": 0,
+    "seconds": 0.9391265419544652,
+    "wall_seconds": 1.4684694170719013,
+    "warmup": true
+  },
+  {
+    "case": "monochrome",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "monochrome",
+      "--mode",
+      "monochrome"
+    ],
+    "returncode": 0,
+    "seconds": 0.9416215840028599,
+    "wall_seconds": 1.250924541032873,
+    "warmup": true
+  },
+  {
+    "case": "wireframe",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "wireframe",
+      "--mode",
+      "wireframe"
+    ],
+    "returncode": 0,
+    "seconds": 0.9410805410007015,
+    "wall_seconds": 1.0643498749705032,
+    "warmup": true
+  },
+  {
+    "case": "xray",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "xray",
+      "--mode",
+      "xray"
+    ],
+    "returncode": 0,
+    "seconds": 1.1047841659747064,
+    "wall_seconds": 1.0979108330793679,
+    "warmup": true
+  },
+  {
+    "case": "back-edges",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "back-edges",
+      "--back-edges"
+    ],
+    "returncode": 0,
+    "seconds": 0.9371992910746485,
+    "wall_seconds": 1.1106197090120986,
+    "warmup": true
+  },
+  {
+    "case": "profiles-off",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "profiles-off",
+      "--profiles-off"
+    ],
+    "returncode": 0,
+    "seconds": 0.9984589999075979,
+    "wall_seconds": 1.1169035829370841,
+    "warmup": true
+  },
+  {
+    "case": "edges-off",
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--output",
+      "docs/benchmarks/metal-parity/raw",
+      "--audit-case",
+      "edges-off",
+      "--edges-off"
+    ],
+    "returncode": 0,
+    "seconds": 1.096137540997006,
+    "wall_seconds": 0.996431624982506,
+    "warmup": true
+  }
+]

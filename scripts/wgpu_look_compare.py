@@ -40,8 +40,17 @@ parser.add_argument('--profiles-off', action='store_true')
 parser.add_argument('--back-edges', action='store_true')
 parser.add_argument('--highlight', choices=('selected', 'hovered'))
 parser.add_argument('--edge-width', type=float)
+parser.add_argument('--audit-case', default='baseline')
+parser.add_argument('--overlays', action='store_true')
+parser.add_argument('--live-frame', action='store_true', help='Unshown interactive passes, including selection and overlays')
+parser.add_argument('--measure-audit', action='store_true')
 
 args = parser.parse_args()
+if args.capture_only and args.highlight:
+    parser.error('Paired selection requires --live-frame --audit-case selected-group '
+                 '(or hover-group); export paths omit interaction highlights')
+if args.measure_audit and not (args.capture_only and args.live_frame):
+    parser.error('--measure-audit requires --capture-only --live-frame')
 out = args.output
 out.mkdir(parents=True, exist_ok=True)
 source = args.model
@@ -61,7 +70,14 @@ if args.edge_width is not None:
 if args.highlight:
     label += '-' + args.highlight
 scene = Scene()
+load_start = time.perf_counter()
 load_into(scene, source)
+load_seconds = time.perf_counter() - load_start
+if args.audit_case != 'baseline':
+    sys.path.insert(0, str(Path('docs/benchmarks/metal-parity').resolve()))
+    from fixture import configure
+    configure(scene, args.audit_case)
+    label += '-' + args.audit_case
 if args.launch_section:
     scene.groups = [g for g in scene.groups if g.name == "Launch System | Launch_System.blend r3"]
     label += "-launch-section"
@@ -113,6 +129,122 @@ gl._edit_rest_mode = "normal" if args.edit_rest_mode == "none" else args.edit_re
 gl.resize(1000, 700)
 gl.scene = scene
 gl.camera = metal.camera
+if args.capture_only:
+    # Never map either widget. GL uses its ordinary paint pipeline on an
+    # explicit offscreen context; Metal uses an unshown native host and FBOs.
+    from PySide6.QtGui import QOpenGLContext, QOffscreenSurface
+    context = QOpenGLContext()
+    context.setFormat(gl.format())
+    if not context.create():
+        raise RuntimeError('offscreen GL context creation failed')
+    surface = QOffscreenSurface()
+    surface.setFormat(context.format())
+    surface.create()
+    gl.context = lambda: context
+    gl.makeCurrent = lambda: context.makeCurrent(surface)
+    gl.doneCurrent = context.doneCurrent
+    gl.makeCurrent()
+    gl.initializeGL()
+    metal.source_viewport = gl
+    gl.camera.aspect = 1000 / 700
+    if args.audit_case in ('parallel', 'section-parallel'):
+        gl.camera.perspective = False
+    if args.audit_case == 'two-point':
+        gl.camera.two_point = True
+    if args.edge_width is not None:
+        gl._export_edge_px = args.edge_width
+    warm_start = time.perf_counter()
+    gl.render_image(1000, 700, overlays=False)
+    gl_first_seconds = time.perf_counter() - warm_start
+    timings = {}
+    images = []
+    if args.live_frame:
+        sys.path.insert(0, str(Path('docs/benchmarks/metal-parity').resolve()))
+        from fixture import live_setup
+        live_setup(scene, gl, metal, args.audit_case)
+    for name, view in [('gl', gl), ('wgpu', metal)]:
+        start = time.perf_counter()
+        if args.live_frame and name == 'gl':
+            import views.viewport as viewport_module
+            overlay = gl._draw_overlay
+            gl._draw_overlay = lambda: None
+            gl._fb_size = lambda: (1000, 700)
+            gl.makeCurrent()
+            gl.paintGL()
+            result = gl._scene_fbo.toImage()
+            gl._draw_overlay = overlay
+            original_painter = viewport_module.QPainter
+            class CapturePainter(original_painter):
+                def __init__(self, target):
+                    super().__init__(result if target is gl else target)
+            viewport_module.QPainter = CapturePainter
+            try:
+                overlay()
+            finally:
+                viewport_module.QPainter = original_painter
+        elif args.live_frame:
+            # Initialize resident state without mapping the native host.
+            import ingetrazo_render
+            metal.renderer = ingetrazo_render.Renderer(int(metal.winId()), 1000, 700, 1.)
+            metal.packed.upload(metal.renderer)
+            metal._scene_dirty = False
+            native_renderer = metal.renderer
+            class OffscreenRenderer:
+                def render(self):
+                    native_renderer.request_capture()
+                    return native_renderer.render(False)
+                def __getattr__(self, name):
+                    return getattr(native_renderer, name)
+            metal.renderer = OffscreenRenderer()
+            metal.devicePixelRatioF = lambda: 1.
+            metal.draw_frame()
+            rgba = bytes(native_renderer.take_capture())
+            result = QImage(rgba, 1000, 700, QImage.Format_RGBA8888).copy()
+        else:
+            result = view.render_image(1000, 700, overlays=args.overlays)
+        timings[name] = time.perf_counter() - start
+        if result is None or result.isNull():
+            raise RuntimeError(name + ' returned no image')
+        result.save(str(out / f'{label}-{name}.png'))
+        images.append(result)
+    pair = QImage(2000, 700, QImage.Format_RGB32)
+    painter = QPainter(pair)
+    for i, im in enumerate(images):
+        painter.drawImage(i * 1000, 0, im)
+    painter.end()
+    pair.save(str(out / f'{label}-comparison.png'))
+    import resource
+    report = dict(load_seconds=load_seconds, capture_seconds=timings,
+                  pack_seconds=metal.build_seconds, rss_peak_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                  resident_bytes=metal.renderer.gpu_memory, size=[1000, 700],
+                  method=('unshown interactive passes, state injected' if args.live_frame
+                          else 'unshown offscreen export; excludes interactive overlays'),
+                  case=args.audit_case, overlays=args.overlays)
+    report['live_frame'] = args.live_frame
+    report['gl_first_capture_seconds'] = gl_first_seconds
+    if args.measure_audit and args.live_frame:
+        # Bounded samples. No presentation, no capture wait in measured frames.
+        metal.renderer.render = lambda: native_renderer.render(False)
+        report['offscreen_samples'] = []
+        for i in range(8):
+            metal.camera.yaw += .01
+            start = time.perf_counter()
+            frame = metal.draw_frame()
+            before = time.perf_counter()
+            row = metal.pick_row(500, 350)
+            picked = time.perf_counter()
+            metal.hover(500, 350)
+            report['offscreen_samples'].append(dict(frame_wall_ms=(before-start)*1000,
+                pick_ms=(picked-before)*1000, hover_ms=(time.perf_counter()-picked)*1000,
+                row=row, frame=frame))
+    (out / f'{label}.json').write_text(json.dumps(report, indent=2))
+    print(json.dumps(report), flush=True)
+    # Qt/GL resource destruction needs the offscreen context current.
+    gl.makeCurrent()
+    gl.release_gl_textures()
+    metal.close()
+    # Avoid processing queued widget paints or unrelated UI events on exit.
+    os._exit(0)
 gl.show()
 metal.source_viewport = gl
 metal.show()
