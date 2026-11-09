@@ -8,6 +8,20 @@ from core.camera import OrbitCamera
 from views.wgpu_scene import pack_scene
 
 
+def _paint_key(scene):
+    """What the baked paint depends on besides the content: Colour by
+    tag (with a style that shows it), and each tag's colour, opacity and
+    lock — what ``views.viewport._paint_of`` reads for a container."""
+    style = getattr(scene, 'display_style', None)
+    by_layer = (bool(getattr(style, 'color_by_layer', False))
+                and getattr(style, 'face_mode', None) in ('textures', 'shaded', 'xray'))
+    from core.layers import layer_color
+    return (by_layer, tuple(
+        (ly.name, tuple(layer_color(ly)) if by_layer else None,
+         float(getattr(ly, 'opacity', 1.0)), bool(getattr(ly, 'locked', False)))
+        for ly in getattr(scene, 'layers', ())))
+
+
 class WgpuView(QWidget):
     frameReady = Signal(float, object, float)
     _ZOOM_OUT_STEP = 0.05
@@ -79,18 +93,26 @@ class WgpuView(QWidget):
         allowed = getattr(scene, '_navigator_allowed', None)
         token = (id(scene), scene._bounds_key(),
                  None if allowed is None else frozenset(allowed))
-        if token == getattr(self, "_content_token", None):
+        paint_key = _paint_key(scene)
+        if (token == getattr(self, "_content_token", None)
+                and paint_key == getattr(self, "_paint_key", None)):
             self.update()
             return
         previous_token = getattr(self, "_content_token", None)
+        # Colour by tag toggled, or a tag's colour or look changed: the
+        # per-face colours are baked into the resident vertices, so the
+        # scene packs again (the row delta below only moves placements).
+        repaint = paint_key != getattr(self, "_paint_key", None)
         self._content_token = token
+        self._paint_key = paint_key
         start = time.perf_counter()
         tracker = getattr(self, '_instance_updates', None)
         if tracker is not None:
             if previous_token is not None and (previous_token[1][1:], previous_token[2]) != (token[1][1:], token[2]):
                 tracker.journal_valid = False
             tracker.observe(getattr(self.source_viewport, 'history', None))
-        delta = tracker.diff(scene) if tracker is not None and len(self.packed.instances) else None
+        delta = (tracker.diff(scene) if tracker is not None and len(self.packed.instances)
+                 and not repaint else None)
         if delta is not None:
             ids, rows = delta
             tracker.apply(ids, rows, self.renderer)
@@ -401,6 +423,7 @@ class WgpuView(QWidget):
         from views.wgpu_overlay import snap_glyph, Primitive
         start = time.perf_counter()
         self.hovered_row = self.pick_row(x, y)
+        self.hover_rows = self._hover_highlight_rows(self.hovered_row)
         self.last_snap = None
         self.overlay_primitives = []
         source = self.source_viewport
@@ -472,15 +495,71 @@ class WgpuView(QWidget):
         if self.renderer is None:
             return
         selected = frozenset(getattr(g, 'uid', None) for g in self.scene.selection)
-        signature = (selected, self.hovered_row)
+        hover = tuple(getattr(self, 'hover_rows', ()) or ())
+        signature = (selected, hover)
         if signature != self._selection_signature:
             indices = [i for uid in selected for i in self.uid_rows.get(uid, ())]
-            self.renderer.set_highlight(indices, self.hovered_row)
+            self.renderer.set_highlight(indices, list(hover))
             self._selection_signature = signature
+
+    def _parents(self):
+        """``{id(child): parent}`` over the scene's groups, per pack."""
+        token = getattr(self, '_content_token', None)
+        cached = getattr(self, '_parent_map', None)
+        if cached is not None and cached[0] == token:
+            return cached[1]
+        parents = {}
+        todo = list(self.scene.groups)
+        while todo:
+            g = todo.pop()
+            for child in getattr(g, 'children', None) or ():
+                parents[id(child)] = g
+                todo.append(child)
+        self._parent_map = (token, parents)
+        return parents
+
+    def context_placement(self, group):
+        """The placement a click selects for a hit on ``group``: the
+        top-level object at the root, the child directly under the group
+        being edited inside one, ``None`` for a hit outside the context —
+        what the GL viewport's ``pick_group`` returns."""
+        if group is None:
+            return None
+        parents = self._parents()
+        chain = [group]
+        while (parent := parents.get(id(chain[-1]))) is not None:
+            chain.append(parent)
+        ctx = self.scene.edit_group
+        if ctx is None:
+            return chain[-1]
+        for i, g in enumerate(chain):
+            if g is ctx:
+                return chain[i-1] if i > 0 else None
+        return None
+
+    def _hover_highlight_rows(self, row):
+        """The rows the cursor marks: only under the Select tool (Orbit,
+        Paint and the rest mark nothing, as in GL), and the whole placement
+        a click would select at this level — never a nested child on its
+        own, never loose faces (#832)."""
+        if row is None or getattr(self.tools, 'mode', None) != 'select':
+            return ()
+        if getattr(self.source_viewport, 'nav_mode', None):
+            return ()           # Orbit, Pan, Zoom ride over Select: no marks
+        resolved = self.resolve(row)
+        if resolved is None or resolved[0] is None:
+            return ()
+        top = self.context_placement(resolved[0])
+        if top is None or not self.scene.entity_selectable(top):
+            return ()
+        from core.group import iter_placements
+        return tuple(i for g, _ in iter_placements(top)
+                     for i in self.uid_rows.get(getattr(g, 'uid', None), ()))
 
     def select_rows(self, rows, modifiers=Qt.NoModifier):
         start = time.perf_counter()
-        groups = {self.packed.groups[i] for i in rows if self.resolve(i) is not None}
+        groups = {self.context_placement(self.packed.groups[i])
+                  for i in rows if self.resolve(i) is not None}
         groups = [g for g in groups if g is not None and self.scene.entity_selectable(g)]
         mode = ('toggle' if modifiers & (Qt.ControlModifier | Qt.MetaModifier)
                 else 'add' if modifiers & Qt.ShiftModifier else 'replace')
@@ -742,8 +821,7 @@ class WgpuView(QWidget):
         if self.renderer is None:
             return
         indices = [i for uid in selected_ids for i in self.uid_rows.get(uid, ())]
-        hover = next(iter(self.uid_rows.get(hovered_id, ())), None)
-        self.renderer.set_highlight(indices, hover)
+        self.renderer.set_highlight(indices, list(self.uid_rows.get(hovered_id, ())))
         self.update()
 
     def rect_rows(self, x0, y0, x1, y1):

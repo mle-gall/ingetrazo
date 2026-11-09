@@ -890,25 +890,28 @@ impl Renderer {
         Ok(())
     }
 
-    #[pyo3(signature = (selected_ids, hovered_id=None))]
+    /// `hovered_ids`: every row of the placement under the cursor (a
+    /// component's nested rows light up together, as one object).
+    #[pyo3(signature = (selected_ids, hovered_ids=Vec::new()))]
     fn set_highlight(
         &mut self,
         selected_ids: Vec<usize>,
-        hovered_id: Option<usize>,
+        hovered_ids: Vec<usize>,
     ) -> PyResult<()> {
         if let Some(s) = &mut self.scene {
             if selected_ids
                 .iter()
-                .chain(hovered_id.iter())
+                .chain(hovered_ids.iter())
                 .any(|&i| i >= s.flags.len())
             {
                 return Err(PyValueError::new_err("instance id out of range"));
             }
             let selected: std::collections::HashSet<_> = selected_ids.into_iter().collect();
+            let hovered: std::collections::HashSet<_> = hovered_ids.into_iter().collect();
             for (i, flag) in s.flags.iter_mut().enumerate() {
                 let next = (*flag & 1)
                     | if selected.contains(&i) { 2 } else { 0 }
-                    | if hovered_id == Some(i) { 4 } else { 0 };
+                    | if hovered.contains(&i) { 4 } else { 0 };
                 if next != *flag {
                     *flag = next;
                     s.rows[i*80+72..i*80+76].copy_from_slice(&next.to_le_bytes());
