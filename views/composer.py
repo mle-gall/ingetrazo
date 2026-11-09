@@ -12093,6 +12093,10 @@ class ComposerWindow(QMainWindow):
             getattr(scene, "show_section_planes", True),
             getattr(scene, "show_section_cuts", True))
         keep_style = getattr(scene, "display_style", None)
+        keep_two_point = getattr(cam, 'two_point', False)
+        keep_hidden = [(g, g.hidden) for g in scene.groups_by_uid().values()]
+        keep_shown = (scene.show_hidden_objects, scene.show_hidden_geometry)
+        from views.composer_scene import temporary_display
         # Base map / terrain / survey: a scene records their visibility too
         # (a plan sheet WITH the map next to a detail WITHOUT it).
         keep_georef = [(obj, obj.visible) for _key, obj in georef_objects(scene)
@@ -12113,8 +12117,13 @@ class ComposerWindow(QMainWindow):
             # the frame's scene shows (the visibility comes back below).
             from core.layers import hide_unprinted
             hide_unprinted(scene)
-            return fn()
+            with temporary_display(vp, saved_view):
+                return fn()
         finally:
+            cam.two_point = keep_two_point
+            for group, hidden in keep_hidden:
+                group.hidden = hidden
+            scene.show_hidden_objects, scene.show_hidden_geometry = keep_shown
             (cam.target, cam.distance, cam.yaw, cam.pitch, cam.fov_deg,
              cam.perspective, cam.aspect, cam.up) = keep[:8]
             for ly, visible in keep[8]:
@@ -12729,7 +12738,7 @@ class ComposerWindow(QMainWindow):
         return None if any(v.name == name for v in views) else name
 
     def render_frame(self, frame: MarcoVista) -> Optional[QImage]:
-        """Fill *frame*: a GL render for the raster styles, the exact
+        """Fill *frame*: a document-renderer image for the raster styles, the exact
         hidden-line pass for the vector style. Cached by frame identity;
         the live viewport state always comes back untouched."""
         if self.missing_scene(frame) is not None:
@@ -12748,6 +12757,9 @@ class ComposerWindow(QMainWindow):
 
         def run():
             vp = self._window.viewport
+            overrides = (getattr(vp, 'plano_style', None), getattr(vp, 'style_override', None),
+                         getattr(vp, '_export_edge_px', 1),
+                         getattr(vp, '_export_profile_px', 1))
             try:
                 if frame.style in ("tecnico", "lineas"):
                     vp.plano_style = frame.style
@@ -12775,13 +12787,13 @@ class ComposerWindow(QMainWindow):
                     getattr(frame, "pen_edge_mm", 0.18), RENDER_DPI)
                 vp._export_profile_px = pen_px(
                     getattr(frame, "pen_profile_mm", 0.35), RENDER_DPI)
-                return vp.render_image(w_px, h_px, overlays=False,
-                                       sharp_shadows=True)
+                doc = getattr(self._window, '_doc', None)
+                renderer = doc.stand_in if getattr(doc, '_renderer_wgpu', False) else vp
+                return renderer.render_image(w_px, h_px, overlays=False,
+                                             sharp_shadows=True)
             finally:
-                vp.plano_style = None
-                vp.style_override = None
-                vp._export_edge_px = 1
-                vp._export_profile_px = 1
+                (vp.plano_style, vp.style_override,
+                 vp._export_edge_px, vp._export_profile_px) = overrides
 
         image = self._with_frame_camera(frame, run)
         if image is not None and image.hasAlphaChannel():
