@@ -669,98 +669,97 @@ impl Renderer {
         let ao_active = self.ao.active(self.style);
         for edge_only in [false, true] {
             if edge_only && !ao_active { break; }
-            {
-                let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[
-                        Some(wgpu::RenderPassColorAttachment {
-                            view: &color,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Load,
-                                store: wgpu::StoreOp::Store,
-                            },
-                        }),
-                        Some(wgpu::RenderPassColorAttachment {
-                            view: &ids,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: if edge_only { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) },
-                                store: wgpu::StoreOp::Store,
-                            },
-                        }),
-                    ],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &depth,
-                        depth_ops: Some(wgpu::Operations {
-                            load: if edge_only { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(1.) },
+            let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &color,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    timestamp_writes: self
-                        .queries
-                        .as_ref()
-                        .filter(|_| !edge_only || !self.antialias)
-                        .map(|q| wgpu::RenderPassTimestampWrites {
-                            query_set: q,
-                            beginning_of_pass_write_index: if edge_only { None } else { Some(2) },
-                            end_of_pass_write_index: if self.antialias || (!edge_only && ao_active) { None } else { Some(3) },
-                        }),
-                    occlusion_query_set: None,
-                });
-                pass.set_pipeline(if self.style == 1 {
-                    &self.xray
-                } else {
-                    &self.draw
-                });
-                pass.set_bind_group(
-                    0,
-                    if self.style == 1 {
-                        &s.xray_draw
-                    } else {
-                        &s.draw
-                    },
-                    &[],
-                );
-                pass.set_bind_group(1, &self.look_groups[if self.style == 1 { 1 } else { 0 }], &[]);
-                pass.set_vertex_buffer(0, s.vertex.slice(..));
-                pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
-                if !edge_only && self.style != 4 {
-                    if self.multi {
-                        pass.multi_draw_indexed_indirect(&s.commands, 0, s.p);
-                    } else {
-                        for k in 0..s.p {
-                            pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
-                        }
-                    }
-                }
-                if (edge_only || !ao_active) && (self.edges || self.style == 4) {
-                    pass.set_pipeline(if self.style == 1 {
-                        &self.xray_edge
-                    } else {
-                        &self.edge
-                    });
-                    pass.set_bind_group(1, &self.look_groups[if self.style == 1 { 3 } else { 2 }], &[]);
-                    // Auto-layout pipelines have separate bind-group identities.
-                    pass.set_bind_group(
-                        0,
-                        if self.style == 1 {
-                            &s.xray_edge_draw
-                        } else {
-                            &s.edge_draw
                         },
-                        &[],
-                    );
-                    if self.multi {
-                        pass.multi_draw_indexed_indirect(&s.commands, s.p as u64 * 20, s.p);
-                    } else {
-                        for k in s.p..s.p * 2 {
-                            pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
-                        }
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &ids,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: if edge_only { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) },
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                ],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: if edge_only { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(1.) },
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: self
+                    .queries
+                    .as_ref()
+                    .filter(|_| !edge_only || !self.antialias)
+                    .map(|q| wgpu::RenderPassTimestampWrites {
+                        query_set: q,
+                        beginning_of_pass_write_index: if edge_only { None } else { Some(2) },
+                        end_of_pass_write_index: if self.antialias || (!edge_only && ao_active) { None } else { Some(3) },
+                    }),
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(if self.style == 1 {
+                &self.xray
+            } else {
+                &self.draw
+            });
+            pass.set_bind_group(
+                0,
+                if self.style == 1 {
+                    &s.xray_draw
+                } else {
+                    &s.draw
+                },
+                &[],
+            );
+            pass.set_bind_group(1, &self.look_groups[if self.style == 1 { 1 } else { 0 }], &[]);
+            pass.set_vertex_buffer(0, s.vertex.slice(..));
+            pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
+            if !edge_only && self.style != 4 {
+                if self.multi {
+                    pass.multi_draw_indexed_indirect(&s.commands, 0, s.p);
+                } else {
+                    for k in 0..s.p {
+                        pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
                     }
                 }
             }
+            if (edge_only || !ao_active) && (self.edges || self.style == 4) {
+                pass.set_pipeline(if self.style == 1 {
+                    &self.xray_edge
+                } else {
+                    &self.edge
+                });
+                pass.set_bind_group(1, &self.look_groups[if self.style == 1 { 3 } else { 2 }], &[]);
+                // Auto-layout pipelines have separate bind-group identities.
+                pass.set_bind_group(
+                    0,
+                    if self.style == 1 {
+                        &s.xray_edge_draw
+                    } else {
+                        &s.edge_draw
+                    },
+                    &[],
+                );
+                if self.multi {
+                    pass.multi_draw_indexed_indirect(&s.commands, s.p as u64 * 20, s.p);
+                } else {
+                    for k in s.p..s.p * 2 {
+                        pass.draw_indexed_indirect(&s.commands, k as u64 * 20);
+                    }
+                }
+            }
+            drop(pass);
             if self.antialias {
                 self.aa.draw(&mut e, &color, s, self.style, self.edges, self.multi, self.queries.as_ref(), if ao_active { Some(edge_only) } else { None });
             }
