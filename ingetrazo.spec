@@ -151,6 +151,14 @@ import importlib.util as _ilu
 hiddenimports += ['core._native']
 if _ilu.find_spec('ingetrazo_core') is not None:
     hiddenimports += ['ingetrazo_core']
+# macOS releases must carry the Metal extension; fail packaging if the build
+# step was skipped. Other platforms keep the optional OpenGL-only package.
+hiddenimports += ['core.renderer_settings']
+if sys.platform == 'darwin' and _ilu.find_spec('ingetrazo_render') is None:
+    raise RuntimeError('Build ingetrazo_render with scripts/build_native.sh first')
+if _ilu.find_spec('ingetrazo_render') is not None:
+    hiddenimports += collect_submodules('ingetrazo_render')
+
 hiddenimports += [
     # The bundled plugins import these at RUN time, so static analysis never
     # sees them and they were left out: the AI assistant died on load with
