@@ -1,0 +1,92 @@
+[
+  {
+    "pair": "synthetic-guides-only.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 91041
+  },
+  {
+    "pair": "alpha.png",
+    "crop_xywh": [
+      220,
+      20,
+      600,
+      650
+    ],
+    "bytes": 52466
+  },
+  {
+    "pair": "synthetic-shadows.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 122526
+  },
+  {
+    "pair": "smooth.png",
+    "crop_xywh": [
+      220,
+      20,
+      600,
+      650
+    ],
+    "bytes": 36786
+  },
+  {
+    "pair": "synthetic-selected-group.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 110557
+  },
+  {
+    "pair": "synthetic-xray-xray.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 102453
+  },
+  {
+    "pair": "synthetic-ao.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 150596
+  },
+  {
+    "pair": "pusher_car_rust.png",
+    "crop_xywh": [
+      435,
+      285,
+      330,
+      190
+    ],
+    "bytes": 22895
+  },
+  {
+    "pair": "new-document.png",
+    "crop_xywh": [
+      220,
+      20,
+      600,
+      650
+    ],
+    "bytes": 32499
+  }
+]
