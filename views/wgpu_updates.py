@@ -159,6 +159,17 @@ class InstanceUpdates:
         if self.changed:
             # A single native bake for the changed set, including shared meshes.
             baked = pack_scene(Scene(groups=[Group(mesh, name="Resident prototype") for mesh, _, _ in self.changed]))
+            paths = list(self.packed.texture_paths)
+            for path in baked.texture_paths:
+                if path not in paths:
+                    paths.append(path)
+            texture_map = np.array([0] + [paths.index(path)+1 for path in baked.texture_paths], np.uint32)
+            if tuple(paths) != self.packed.texture_paths:
+                from views.wgpu_scene import _texture_array
+                self.packed.texture_paths = tuple(paths)
+                self.packed.textures = _texture_array(paths)
+                if renderer is not None:
+                    renderer.set_textures(*self.packed.textures)
             for i, (mesh, _, code) in enumerate(self.changed):
                 uid = next((j for j, group in enumerate(baked.groups) if group.mesh is mesh), None)
                 if uid is None:
@@ -182,7 +193,9 @@ class InstanceUpdates:
                         header = baked.materials.view(np.uint32).reshape(-1, 4)[prototype]
                         first, length = int(header[1]), int(header[2])
                         if length:
-                            material = baked.materials[first*16:(first+length)*16]
+                            material = baked.materials[first*16:first*16+length*32].copy()
+                            words = material.view(np.uint32).reshape(-1, 8)
+                            words[:, 5:7] = texture_map[words[:, 5:7]]
                     renderer.update_prototype_materials(code, material)
                 offset = len(self.packed.vertices)
                 self.packed.vertices = np.concatenate((self.packed.vertices, vertices))

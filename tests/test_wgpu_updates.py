@@ -320,3 +320,26 @@ def test_prototype_bake_does_not_consume_document_group_names(monkeypatch):
     mesh.move_vertex(mesh.vertices[0], QVector3D(0, 0, 1))
     updates.apply(*updates.diff(scene))
     assert next(groups._counter) == before + 1
+
+
+def test_replacement_preserves_full_material_rows_and_resident_texture_ids(tmp_path):
+    from PySide6.QtGui import QImage, QColor
+    meshes = []
+    for name in ('red', 'blue'):
+        image = QImage(2, 2, QImage.Format_RGBA8888)
+        image.fill(QColor(name))
+        path = tmp_path / (name + '.png')
+        assert image.save(str(path))
+        mesh = Mesh()
+        mesh.add_face([QVector3D(), QVector3D(1, 0, 0), QVector3D(0, 1, 0)])
+        mesh.faces[0].attrs['texture'] = {'path': str(path)}
+        meshes.append(mesh)
+    scene = Scene(groups=[Group(mesh) for mesh in meshes])
+    updates = InstanceUpdates(scene, pack_scene(scene))
+    meshes[1].move_vertex(meshes[1].vertices[0], QVector3D(0, 0, .1))
+    renderer = Renderer()
+    updates.apply(*updates.diff(scene), renderer)
+    materials = next(args[1] for name, args in renderer.calls if name == 'update_prototype_materials')
+    assert materials.nbytes == 3 * 32
+    assert materials.view(np.uint32).reshape(-1, 8)[:, 5].tolist() == [2, 2, 2]
+    assert not any(name == 'set_textures' for name, _ in renderer.calls)

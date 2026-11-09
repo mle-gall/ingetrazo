@@ -926,11 +926,11 @@ impl Renderer {
     fn update_prototype_materials(&mut self, id: usize, data: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
         let data = data.as_slice()?;
         let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("no scene"))?;
-        if id >= s.p as usize || data.len()%16 != 0 { return Err(PyValueError::new_err("invalid material rows")); }
+        if id >= s.p as usize || data.len()%32 != 0 { return Err(PyValueError::new_err("invalid material rows")); }
         let mut header = [0u32;4];
         if !data.is_empty() {
             let face: Command = bytemuck::pod_read_unaligned(&s.template_data[id*20..id*20+20]);
-            header = [face.base as u32, (s.material_data.len()/16) as u32, (data.len()/16) as u32, 0];
+            header = [face.base as u32, (s.material_data.len()/16) as u32, (data.len()/32) as u32, 0];
         }
         s.material_data[id*16..(id+1)*16].copy_from_slice(bytemuck::bytes_of(&header));
         s.material_data.extend_from_slice(data);
