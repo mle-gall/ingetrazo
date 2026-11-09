@@ -1243,6 +1243,7 @@ class ComponentsPanel(QWidget):
         self._in_model_filter.textChanged.connect(self._apply_in_model_filter)
         lay.addWidget(self._in_model_filter)
         self._in_model = QListWidget()
+        self._in_model.setUniformItemSizes(True)
         self._in_model.setToolTip(tr(
             "Components placed in this drawing — click one to select its "
             "copies"))
@@ -1271,7 +1272,7 @@ class ComponentsPanel(QWidget):
         lay.addWidget(from_file)
         self.refresh_in_model()
 
-    def _components_in_model(self) -> list:
+    def _components_in_model(self):
         """``[(name, faces, [groups], template)]`` per distinct prototype,
         most copies first. Instances share their prototype mesh, so identity
         groups them — no geometry is walked. Copies nested inside groups
@@ -1279,17 +1280,19 @@ class ComponentsPanel(QWidget):
         the list (#599, @chakkreetiya). ``template`` is the definition
         kept in the file (``None`` when it is not kept); a kept one with no
         copy placed is a row too, with an empty list."""
-        from core.kept_components import kept_template
         from core.purge import iter_groups
         scene = self._window.viewport.scene
         by_proto: dict = {}
-        for g in iter_groups(scene.groups):
+        for i, g in enumerate(iter_groups(scene.groups)):
+            if i % 256 == 0:
+                yield
             if not g.is_component() or getattr(g, "billboard", False):
                 continue
             by_proto.setdefault(id(g.mesh), []).append(g)
         from core.mesh import face_count
+        kept = {id(t.mesh): t for t in reversed(scene.kept_components)}
         rows = [(gs[0].name, face_count(gs[0].mesh), gs,
-                 kept_template(scene, gs[0].mesh))
+                 kept.get(id(gs[0].mesh)))
                 for gs in by_proto.values()]
         rows += [(t.name, face_count(t.mesh), [], t)
                  for t in getattr(scene, "kept_components", None) or ()
@@ -1332,7 +1335,7 @@ class ComponentsPanel(QWidget):
             from PySide6.QtCore import QTimer
             timer = self._in_model_timer = QTimer(self)
             timer.setSingleShot(True)
-            timer.timeout.connect(self.refresh_in_model)
+            timer.timeout.connect(lambda: self.refresh_in_model(deferred=True))
         timer.start(300)
 
     def showEvent(self, ev) -> None:
@@ -1341,10 +1344,16 @@ class ComponentsPanel(QWidget):
             self._in_model_stale = False
             self.refresh_in_model()
 
-    def refresh_in_model(self) -> None:
-        from views.component_thumbs import thumbnail
-        self._in_model_cv = self._window.viewport.scene.content_version
-        rows = self._components_in_model()
+    def refresh_in_model(self, *, deferred=False) -> None:
+        from views.panel_refresh import refresh_steps
+        scene = self._window.viewport.scene
+        version = scene.content_version
+        refresh_steps(self, self._component_steps(), deferred=deferred,
+                      current=lambda: self._window.viewport.scene is scene
+                      and scene.content_version == version)
+
+    def _component_steps(self):
+        rows = yield from self._components_in_model()
 
         def label_of(name, faces, gs, kept):
             label = (f"{name}  ({len(gs)}×, {faces} " + tr("Faces").lower()
@@ -1378,15 +1387,22 @@ class ComponentsPanel(QWidget):
                     item.setData(Qt.UserRole, gs)
                 if item.data(Qt.UserRole + 1) is not kept:
                     item.setData(Qt.UserRole + 1, kept)
+            self._in_model_cv = self._window.viewport.scene.content_version
             self._mark_selected_row()
             self._apply_in_model_filter()
             return
-        self._in_model.clear()
-        for name, faces, gs, kept in rows:
+        items = []
+        for i, (name, faces, gs, kept) in enumerate(rows):
+            if i % 64 == 0:
+                yield
             item = QListWidgetItem(label_of(name, faces, gs, kept))
             item.setIcon(self._blank_thumb())
             item.setData(Qt.UserRole, gs)
             item.setData(Qt.UserRole + 1, kept)
+            items.append(item)
+        self._in_model_cv = self._window.viewport.scene.content_version
+        self._in_model.clear()
+        for item in items:
             self._in_model.addItem(item)
         if self._in_model.count() == 0:
             self._in_model.addItem(QListWidgetItem(tr("No components yet")))
@@ -1452,10 +1468,13 @@ class ComponentsPanel(QWidget):
         for a fraction of a second and went dark (#636). Read from the
         selection, the highlight also goes when the selection does."""
         selected = {id(e) for e in self._window.viewport.scene.selection}
+        if not selected:
+            self._in_model.setCurrentItem(None)
+            return
         for i in range(self._in_model.count()):
             item = self._in_model.item(i)
             groups = item.data(Qt.UserRole) or []
-            if selected and {id(g) for g in groups} == selected:
+            if {id(g) for g in groups} == selected:
                 self._in_model.setCurrentItem(item)
                 return
         self._in_model.setCurrentItem(None)
@@ -1467,6 +1486,10 @@ class ComponentsPanel(QWidget):
         needle = self._in_model_filter.text().strip().casefold()
         for i in range(self._in_model.count()):
             item = self._in_model.item(i)
+            if not needle:
+                if item.isHidden():
+                    item.setHidden(False)
+                continue
             groups = item.data(Qt.UserRole) or []
             kept = item.data(Qt.UserRole + 1)
             definition = groups[0] if groups else kept
@@ -2390,10 +2413,18 @@ class MaterialsPanel(QWidget):
         self._window.statusBar().showMessage(
             tr("{n} unused materials purged", n=n_mats), 3000)
 
-    def refresh_in_model(self) -> None:
+    def refresh_in_model(self, *, deferred=False) -> None:
+        from views.panel_refresh import refresh_steps
+        scene = self._window.viewport.scene
+        version = scene.content_version
+        refresh_steps(self, self._swatch_steps(), deferred=deferred,
+                      current=lambda: self._window.viewport.scene is scene
+                      and scene.content_version == version)
+
+    def _swatch_steps(self):
         """Rebuild the 'En el modelo' swatches from the materials in use."""
         vp = self._window.viewport
-        self._in_model_cv = vp.scene.content_version
+        version = vp.scene.content_version
         hist = getattr(vp, "history", None)
         # What each mesh wears, from the last scan, holds while nothing but
         # commands that keep groups (or paint) changed the model since: a
@@ -2401,11 +2432,8 @@ class MaterialsPanel(QWidget):
         # (~0.4 s on the plant of #158).
         worn = getattr(self, "_worn_by_mesh", None)
         if (worn is None or hist is None
-                or hist.groups_cv.get("paint") != self._in_model_cv):
-            worn = self._worn_by_mesh = {}
-        if hist is not None:
-            hist.paint_cv = self._in_model_cv
-            hist.groups_cv["paint"] = self._in_model_cv
+                or hist.groups_cv.get("paint") != version):
+            worn = {}
         # Keep the tray where the user left it. The old swatches only went
         # away at the next event-loop turn (deleteLater), so for a moment
         # the grid held both sets, grew, and the scroll area jumped — the
@@ -2454,26 +2482,32 @@ class MaterialsPanel(QWidget):
             # mesh is read once, not once per copy (21 406 copies of 2 722
             # meshes in #158), and a lazy one stays unbuilt.
             from core.mesh import face_attrs
-            for f in scene.loose_mesh.faces:
+            for i, f in enumerate(scene.loose_mesh.faces):
+                if i % 256 == 0:
+                    yield None
                 if scene.entity_visible(f):
                     yield f.attrs
             seen: set = set()
-            for g, _m in scene.placements():
+            for i, (g, _m) in enumerate(scene.placements()):
+                if i % 128 == 0:
+                    yield None
                 if id(g.mesh) not in seen:
                     seen.add(id(g.mesh))
                     yield from mesh_wears(g.mesh, face_attrs)
             # A group's paint lives on the group, not on its faces (#133,
             # @fafecm: it only showed up here once the group was exploded).
-            from core.group import iter_placements
-            for top in scene.groups:
-                for g, _m in iter_placements(top):
-                    paint = getattr(g, "material", None)
-                    if paint:
-                        yield paint
+            from core.purge import iter_groups
+            for i, g in enumerate(iter_groups(scene.groups)):
+                if i % 256 == 0:
+                    yield None
+                paint = getattr(g, "material", None)
+                if paint:
+                    yield paint
 
-        tally = list(in_use())
-        self._worn_by_mesh = live        # the meshes the model still has
-        for attrs in tally:
+        for attrs in in_use():
+            if attrs is None:
+                yield
+                continue
             mat = attrs.get("mat")
             tex = attrs.get("texture")
             if tex and tex.get("path"):
@@ -2488,6 +2522,11 @@ class MaterialsPanel(QWidget):
                     colors[tuple(col)] = col
                     if mat:
                         names.setdefault(("c", tuple(col)), mat)
+        self._worn_by_mesh = live
+        self._in_model_cv = version
+        if hist is not None:
+            hist.paint_cv = version
+            hist.groups_cv["paint"] = version
         # The same swatches as on screen (a Delete, a Paste that brought no
         # new paint): they stay — laying out a hundred buttons again took
         # ~0.2 s on the plant of #158.
@@ -4978,7 +5017,7 @@ class Tray(QDockWidget):
                 from PySide6.QtCore import QTimer
                 timer = self._mat_refresh_timer = QTimer(self)
                 timer.setSingleShot(True)
-                timer.timeout.connect(self.materials.refresh_in_model)
+                timer.timeout.connect(lambda: self.materials.refresh_in_model(deferred=True))
             timer.start(300)
         self._after_materials()
 

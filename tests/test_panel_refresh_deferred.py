@@ -243,3 +243,32 @@ def test_a_move_leaves_the_browser_rows_as_they_are(win, monkeypatch):
     vp.history.execute(MoveGroupCommand(g, V(2, 0, 0)))
     outliner.refresh(rows_if_changed=True)
     assert len(rows) == 3
+
+
+def test_sliced_refresh_cannot_publish_after_replacement_or_document_switch(monkeypatch):
+    from types import SimpleNamespace
+    from views import panel_refresh
+
+    panel = SimpleNamespace()
+    timers = []
+    ticks = iter(range(20))
+    monkeypatch.setattr(panel_refresh, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(panel_refresh, "QTimer", SimpleNamespace(
+        singleShot=lambda _ms, _panel, callback: timers.append(callback)))
+    published = []
+
+    def stages(name):
+        yield
+        published.append(name)
+
+    current = True
+    for name in ("old", "replacement"):
+        panel_refresh.refresh_steps(panel, stages(name), deferred=True,
+                                    current=lambda: current)
+    timers.pop(0)()
+    current = False
+    timers.pop(0)()
+    assert not published
+    panel_refresh.refresh_steps(panel, stages("new document"), deferred=False,
+                                current=lambda: True)
+    assert published == ["new document"]

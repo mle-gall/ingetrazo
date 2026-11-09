@@ -194,3 +194,16 @@ def test_native_face_pick_resolves_prototype_and_edit_context(view):
     assert owner is None
     assert view.tools.pick_face(*pixel) is face
     view.source_viewport = None
+
+
+def test_worker_warms_first_hover_for_the_captured_camera(view):
+    view._prepare_inference()
+    index = view._inference_future.result(timeout=5)
+    cache = index.screen_cache
+    assert cache is not None
+    point = QVector3D(6, 5, 0)
+    assert snap(index, 0, view, *view._world_to_pixel(point)).kind == 'endpoint'
+    assert index.screen_cache is cache
+    view.camera.distance *= 1.2
+    assert snap(index, 0, view, *view._world_to_pixel(point)).kind == 'endpoint'
+    assert index.screen_cache is not cache

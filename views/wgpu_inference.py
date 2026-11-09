@@ -31,6 +31,7 @@ etc.). Arc tools consume tangent_direction to produce their tangent preview;
 tangent is not a new competing compute_snap rule. Defaults retain the previous
 12 px snap tolerance when the GL thresholds are not supplied by the facade.
 """
+from collections.abc import Sequence
 from types import SimpleNamespace
 import numpy as np
 from PySide6.QtGui import QVector3D
@@ -39,80 +40,75 @@ from core.snap import compute_snap
 
 
 def _source_visible(source, scene):
-    keep = np.ones(len(source['edges']), bool)
     layers = source.get('layers')
     visible = getattr(scene, 'entity_visible', None)
-    if layers is not None and visible is not None:
-        for layer in np.unique(layers):
-            if layer >= 0 and not visible(SimpleNamespace(layer=source['meta']['edge_layers'][int(layer)])):
-                keep[layers == layer] = False
-    return keep
+    names = source.get('meta', {}).get('edge_layers') or ()
+    if layers is None or visible is None or not names:
+        return np.ones(len(source['edges']), bool)
+    # The negative sentinel (untagged) always passes. Evaluate layer policy
+    # once per name and gather the mask in a single pass over edges.
+    allowed = np.array([visible(SimpleNamespace(layer=name)) for name in names] + [True])
+    return allowed[np.where(layers >= 0, layers, -1)]
 
 
-def _prototype(packed, code, scene=None):
+def _prototype(packed, code, scene, first_row):
     face, edge = packed.commands[code], packed.edge_commands[code]
     positions = packed.vertices['pos']
     start = int(face['base'])
-    tris = positions[start:start + int(face['count'])].astype(np.float64).reshape(-1, 3, 3)
+    tris = positions[start:start + int(face['count'])].reshape(-1, 3, 3)
     start += int(face['count'])
-    edges = positions[start:start + int(edge['count'])].astype(np.float64).reshape(-1, 6)
-    # Render lines omit hidden edges and include soft silhouettes. Inference
-    # needs source edges: loose soft edges snap, group soft seams do not.
-    rows = np.flatnonzero(packed.instances['info'][:, 0] == code)
     groups = getattr(packed, 'groups', None)
-    group = groups[int(rows[0])] if groups is not None and len(rows) else None
+    group = groups[first_row] if groups is not None and first_row >= 0 else None
     mesh = group.mesh if group is not None else getattr(scene, 'loose_mesh', None)
-    if mesh is not None:
+    curves = []
+    if mesh is None:
+        edges = positions[start:start + int(edge['count'])].astype(np.float64).reshape(-1, 6)
+    else:
         reveal = bool(getattr(scene, 'show_hidden_geometry', False))
         source = mesh.__dict__.get('_deferred_source')
         if source is not None:
-            pairs = source['edges']
+            keep = _source_visible(source, scene)
             flags = source['flags']
-            flags = np.zeros(len(pairs), np.uint8) if flags is None else flags
-            keep = np.ones(len(pairs), bool) if reveal else (flags & 2) == 0
-            if group is not None and not reveal:
-                keep &= (flags & 1) == 0
-            keep &= _source_visible(source, scene)
-            edges = np.asarray(source['pos'][pairs[keep]], np.float64).reshape(-1, 6)
+            if flags is not None and not reveal:
+                keep &= (flags & (3 if group is not None else 2)) == 0
+            edges = source['pos'][source['edges'][keep]].reshape(-1, 6)
+            ids = source.get('curves')
+            if ids is not None:
+                ids = ids[keep]
+                selected = np.flatnonzero(ids >= 0)
+                if len(selected):
+                    # Stable within a curve, and retain first-seen curve
+                    # order because equally close snap candidates can tie.
+                    _, first, inverse = np.unique(ids[selected], return_index=True,
+                                                  return_inverse=True)
+                    order = np.argsort(inverse, kind='stable')
+                    ends = np.cumsum(np.bincount(inverse))[:-1]
+                    segments = np.split(edges[selected[order]], ends)
+                    curves = [segments[i] for i in np.argsort(first)]
         else:
             visible = getattr(scene, 'edge_snappable', lambda e: not e.hidden or reveal)
-            edges = np.array([(*e.a.toTuple(), *e.b.toTuple()) for e in mesh.edges
-                              if visible(e) and (group is None or reveal or not e.soft)],
-                             np.float64).reshape(-1, 6)
-    return _native.available().InstanceProto(
+            lines, named = [], {}
+            for e in mesh.edges:
+                if visible(e) and (group is None or reveal or not e.soft):
+                    pair = (e.a.toTuple(), e.b.toTuple())
+                    lines.append(pair)
+                    if e.curve is not None:
+                        named.setdefault(e.curve, []).append(pair)
+            edges = np.asarray(lines, float).reshape(-1, 6)
+            curves = named.values()
+    tris = tris.astype(np.float64)
+    proto = _native.available().InstanceProto(
         np.ascontiguousarray(tris[:, 0]),
         np.ascontiguousarray(tris[:, 1] - tris[:, 0]),
-        np.ascontiguousarray(tris[:, 2] - tris[:, 0]), edges)
+        np.ascontiguousarray(tris[:, 2] - tris[:, 0]), np.asarray(edges, float))
+    return proto, curves
 
 
-def _curve_features(packed, code, scene):
-    """Fit named curves once, without materialising deferred topology."""
+def _curve_features(curves):
+    """Fit only a queried prototype's named curves from its visibility snapshot."""
     from core.snap import fit_circle
-    rows = np.flatnonzero(packed.instances['info'][:, 0] == code)
-    groups = getattr(packed, 'groups', None)
-    group = groups[int(rows[0])] if groups is not None and len(rows) else None
-    mesh = group.mesh if group is not None else getattr(scene, 'loose_mesh', None)
-    if mesh is None:
-        return [], []
-    source = mesh.__dict__.get('_deferred_source')
-    curves = {}
-    reveal = bool(getattr(scene, 'show_hidden_geometry', False))
-    if source is not None:
-        ids = source.get('curves')
-        if ids is not None:
-            flags = source['flags']
-            for i in np.flatnonzero((ids >= 0) & _source_visible(source, scene)):
-                if flags is not None and not reveal and flags[i] & (3 if group else 2):
-                    continue
-                curves.setdefault(int(ids[i]), []).append(source['pos'][source['edges'][i]])
-    else:
-        visible = getattr(scene, 'edge_snappable', lambda e: not e.hidden or reveal)
-        for e in mesh.edges:
-            if (e.curve is not None and visible(e)
-                    and (group is None or reveal or not e.soft)):
-                curves.setdefault(e.curve, []).append((e.a.toTuple(), e.b.toTuple()))
     centers, tangents = [], []
-    for segments in curves.values():
+    for segments in curves:
         ends = np.asarray(segments, float).reshape(-1, 3)
         points, counts = np.unique(ends, axis=0, return_counts=True)
         fit = fit_circle([QVector3D(*p) for p in points]) if len(points) >= 3 else None
@@ -146,6 +142,32 @@ def tangent_direction(index, packed, row, point):
     return None
 
 
+class _CurveFeatures(Sequence):
+    """Prototype-indexed curve fits; discard the input segments once fitted."""
+
+    def __init__(self, curves):
+        self.pending = curves
+        self.fitted = [None] * len(curves)
+
+    def __len__(self):
+        return len(self.fitted)
+
+    def __getitem__(self, code):
+        if isinstance(code, slice):
+            return [self[i] for i in range(*code.indices(len(self)))]
+        if self.fitted[code] is None:
+            self.fitted[code] = _curve_features(self.pending[code])
+            self.pending[code] = None
+        return self.fitted[code]
+
+    def replace(self, code, curves):
+        while len(self) <= code:
+            self.pending.append(())
+            self.fitted.append(None)
+        self.pending[code] = curves
+        self.fitted[code] = None
+
+
 class ResidentInference:
     """Keep immutable prototype BVHs; edited IDs get a tiny local placement set.
 
@@ -153,10 +175,10 @@ class ResidentInference:
     set avoids both rebuilding and destroying a document-sized BVH on input.
     Only queried edited rows construct a replacement placement acceleration.
     """
-    def __init__(self, base, protos, packed, scene=None):
+    def __init__(self, base, protos, curves, packed, scene=None):
         self.packed = packed
         self.scene = scene
-        self.features = [_curve_features(packed, c, scene) for c in range(len(protos))]
+        self.features = _CurveFeatures(curves)
         self.context_rows = {}
         self.screen_cache = None
         self.screen_dirty = set()
@@ -180,12 +202,13 @@ class ResidentInference:
             while len(self.protos) <= code:
                 self.protos.append(None)
                 self.bounds.append(None)
-                self.features.append(([], []))
-            self.protos[code] = _prototype(packed, code, self.scene)
-            self.bounds[code] = packed.bounds[code].copy()
-            self.features[code] = _curve_features(packed, code, self.scene)
-            self.changed.add(code)
+
             affected = np.flatnonzero(packed.instances['info'][:, 0] == code)
+            self.protos[code], curves = _prototype(
+                packed, code, self.scene, affected[0] if len(affected) else -1)
+            self.bounds[code] = packed.bounds[code].copy()
+            self.features.replace(code, curves)
+            self.changed.add(code)
             self.replaced[affected] = True
             self.screen_dirty.update(affected.tolist())
             for row, (cached_code, _) in list(self.local.items()):
@@ -243,7 +266,14 @@ class ResidentInference:
 
 def prepare(packed, scene=None):
     native = _native.available()
-    protos = [_prototype(packed, code, scene) for code in range(len(packed.commands))]
+    codes, rows = np.unique(packed.instances['info'][:, 0], return_index=True)
+    first = np.full(len(packed.commands), -1, dtype=np.int64)
+    first[codes] = rows
+    protos, curves = [], []
+    for code, row in enumerate(first):
+        proto, named = _prototype(packed, code, scene, row)
+        protos.append(proto)
+        curves.append(named)
     mats = packed.instances['world'].astype(np.float64).reshape(-1, 16)
     ids = packed.instances['info'][:, 0].astype(np.int64)
     bounds = packed.bounds[ids, :, :3].astype(np.float64)
@@ -254,7 +284,7 @@ def prepare(packed, scene=None):
     we = np.einsum('nij,nj->ni', abs(matrix[:, :3, :3]), extent)
     base = native.InstanceSet(protos, ids, mats, np.ascontiguousarray(wc-we),
                               np.ascontiguousarray(wc+we))
-    return ResidentInference(base, protos, packed, scene)
+    return ResidentInference(base, protos, curves, packed, scene)
 
 
 def surface(index, row, origin, direction, limit=float('inf')):
@@ -280,7 +310,7 @@ def eligible_rows(index, packed=None):
     return np.flatnonzero((flags & (1 | 128)) == 0).astype(np.int64)
 
 
-def _screen_rows(index, packed, mvp, width, height, x, y, radius, rows):
+def screen_boxes(index, packed, mvp, width, height):
     """Cached conservative screen boxes; only moved rows reproject after edits."""
     key = (tuple(mvp.data()), width, height, len(packed.instances))
     cache = index.screen_cache
@@ -326,6 +356,11 @@ def _screen_rows(index, packed, mvp, width, height, x, y, radius, rows):
         else:
             moved.update(changed.tolist())
         index.screen_cache = (key, lo, hi, grid, moved)
+    return lo, hi, grid, moved
+
+
+def _screen_rows(index, packed, mvp, width, height, x, y, radius, rows):
+    lo, hi, grid, moved = screen_boxes(index, packed, mvp, width, height)
     candidates = grid.near(x, y, radius) if grid is not None and radius <= 128 else None
     if candidates is not None:
         if moved:

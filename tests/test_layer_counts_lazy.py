@@ -57,6 +57,7 @@ def test_counting_a_lazy_document_builds_nothing_and_counts_the_same(
     used = used_layers(scene)
 
     assert all(type(m) is M.DeferredMesh for m in lazy)
+    assert all("_deferred_plan" not in m.__dict__ for m in lazy)
     built = Counter(layer_of(e) for e in layer_carriers(scene))
     assert got == dict(built)
     assert used == {DEFAULT_LAYER} | set(built)
@@ -66,3 +67,41 @@ def test_an_eager_document_counts_as_before(tmp_path):
     scene = _labelled(random.Random(7))
     built = Counter(layer_of(e) for e in layer_carriers(scene))
     assert layer_counts(scene) == dict(built)
+
+
+def test_welded_duplicate_last_layer_and_missing_boundary_edges():
+    import numpy as np
+    from core.purge import _count_edges
+
+    pos = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 0]])
+    edges = np.array([[0, 1], [1, 3], [0, 3], [0, 1]])
+    src = dict(pos=pos, edges=edges, flags=np.zeros(4), layers=np.array([0, 1, 0, -1]),
+               rings=np.array([0, 1, 2]), sizes=np.array([3]), meta=dict(edge_layers=['a', 'b']))
+    counts = Counter()
+    _count_edges(src, counts)
+    assert counts == {None: 2, 'b': 1}
+
+
+def test_panel_publishes_only_a_complete_current_count(monkeypatch):
+    from types import SimpleNamespace
+    import time
+    from core import purge
+    from views.layers_panel import LayersPanel
+
+    ticks = iter(range(20))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    scene = Scene()
+    published = []
+    panel = SimpleNamespace(_scene=lambda: scene, _show_counts=published.append,
+                            _count_timer=SimpleNamespace(start=lambda ms: None))
+    def steps(scene):
+        version = scene.content_version
+        yield None
+        yield {"layer": version}
+    monkeypatch.setattr(purge, "layer_count_steps", steps)
+    LayersPanel._count_slice(panel)
+    scene.version += 1
+    LayersPanel._count_slice(panel)
+    assert not published
+    LayersPanel._count_slice(panel)
+    assert published == [{"layer": scene.content_version}]
