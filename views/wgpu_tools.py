@@ -12,7 +12,7 @@ from tools.base import ToolContext
 from tools.tape import TapeMeasureTool
 from views.wgpu_overlay import Primitive
 
-TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh'}
+TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh'}
 
 
 def move_command(groups, delta):
@@ -67,12 +67,12 @@ class NativeTools(MeshToolAccess):
         if mode == 'mesh':
             self.tool.on_hover(ctx)
             self.tool.on_click(ctx)
-            self.start_point = self.tool.start_point
+            self.start_point = getattr(self.tool, 'start_point', None)
             self.update()
             self.mesh_feedback()
         elif mode == 'tape':
             self.tool.on_click(ctx)
-            self.start_point = self.tool.start_point
+            self.start_point = getattr(self.tool, 'start_point', None)
             self.measurements()
         elif mode == 'move':
             if self.start_point is None:
@@ -110,7 +110,7 @@ class NativeTools(MeshToolAccess):
         self.hover_point = ctx.world
         if mode == 'mesh':
             self.tool.on_hover(ctx)
-            self.start_point = self.tool.start_point
+            self.start_point = getattr(self.tool, 'start_point', None)
             self.mesh_feedback()
             return
         if mode == 'tape':
@@ -149,7 +149,7 @@ class NativeTools(MeshToolAccess):
                 if value is not None:
                     self.tool.on_value(self, value)
                 self.value_buffer = ''
-                self.start_point = self.tool.start_point
+                self.start_point = getattr(self.tool, 'start_point', None)
                 self.view.overlay_primitives = []
                 self.update()
                 return True

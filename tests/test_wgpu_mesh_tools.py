@@ -79,3 +79,31 @@ def test_draw_commands_match_direct_tool_and_restore(tool_type, inside):
     native.cancel()
     assert native.tool.start_point is None
     assert not native.view.overlay_primitives
+
+from tools.pushpull import PushPullTool
+
+
+@pytest.mark.parametrize('inside', [False, True])
+def test_pushpull_numeric_commit_and_cancel(inside):
+    scene, history, native, updates = harness(PushPullTool(), inside)
+    face = scene.mesh.add_face([QVector3D(0, 0, 0), QVector3D(2, 0, 0),
+                                QVector3D(2, 2, 0), QVector3D(0, 2, 0)])
+    native.pick_face_any = lambda *a: (face, None)
+    native._ray_hit_plane = lambda *a: QVector3D(1, 1, 0)
+    native.update()
+    before = geometry(scene.mesh)
+    click(native, (1, 1, 0))
+    assert native.tool.dragging
+    assert native.tool.on_value(native, 1.)
+    assert len(history.undo_stack) == 1
+    assert len(scene.mesh.faces) > before[2]
+    assert len(updates.changed) == 1
+    history.undo()
+    native.update()
+    assert geometry(scene.mesh) == before
+    history.redo()
+    native.update()
+    assert len(updates.changed) == 1
+    native.cancel()
+    assert not native.tool.dragging
+    assert not native.view.overlay_primitives

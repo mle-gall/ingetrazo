@@ -5,6 +5,12 @@ from views.wgpu_overlay import Primitive
 
 
 class MeshToolAccess:
+    mesh_outline_preview = True
+
+    def inference_meshes(self, x, y):
+        picked = self._picked_mesh(x, y)
+        return [self.scene.mesh] if picked is None else [self.scene.mesh, picked[0]]
+
     def work_point(self, x, y):
         from core import axes
         tool = self.tool
