@@ -19,6 +19,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model', type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--reference', type=Path, help='baseline quantity JSON to compare')
     args = parser.parse_args()
     from core.scene import Scene
     from core.bim import collect_objects, object_quantities
@@ -41,8 +42,23 @@ def main():
     for obj in objects:
         object_quantities(obj)
     print('class quantities:', perf_counter() - start, flush=True)
-    Path(str(args.output) + '.json').write_text(json.dumps(
-        [(obj['area'], obj['volume']) for obj in objects]))
+    snapshot = [(obj['area'], obj['volume']) for obj in objects]
+    Path(str(args.output) + '.json').write_text(json.dumps(snapshot))
+    if args.reference is not None:
+        import numpy as np
+        expected = json.loads(args.reference.read_text())
+        if len(expected) != len(snapshot):
+            raise AssertionError('object count changed')
+        mismatches = []
+        for index, (before, after) in enumerate(zip(expected, snapshot)):
+            if ((before[1] is None) != (after[1] is None)
+                    or not np.allclose([v for v in before if v is not None],
+                                       [v for v in after if v is not None],
+                                       rtol=2e-5, atol=1e-7)):
+                mismatches.append(index)
+        print('quantity mismatches:', mismatches, flush=True)
+        if mismatches:
+            raise AssertionError('quantities differ from the reference')
     from types import SimpleNamespace
     from PySide6.QtWidgets import QApplication
     from views.tray import BimPanel
