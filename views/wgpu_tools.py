@@ -15,6 +15,8 @@ from views.wgpu_overlay import Primitive
 TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh', 'EraserTool': 'mesh', 'RotateTool': 'mesh', 'ScaleTool': 'mesh', 'OffsetTool': 'mesh', 'CircleTool': 'mesh', 'PolygonTool': 'mesh', 'ArcTool': 'mesh', 'PaintTool': 'mesh', 'DimensionTool': 'mesh', 'TextTool': 'mesh', 'FollowMeTool': 'mesh'}
 
 
+TOOL_DISPATCH['FreehandTool'] = 'mesh'
+
 def move_command(groups, delta):
     commands = [MoveGroupCommand(group, delta) for group in groups]
     return commands[0] if len(commands) == 1 else CompoundCommand(commands)
@@ -66,8 +68,6 @@ class NativeTools(MeshToolAccess):
                  else view._world_under_cursor(event.position().x(), event.position().y()))
         if point is None:
             return None
-        if self.tool is not None and not self.tool.uses_snap:
-            point = self.work_point(event.position().x(), event.position().y()) or point
         if self.tool is not None:
             self.tool.snap_kind = getattr(view.last_snap, "kind", None)
         return ToolContext(self, point, event.position(), event.modifiers(), view.last_snap)
