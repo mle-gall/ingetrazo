@@ -48,12 +48,21 @@ class PackedScene:
     hidden_commands: np.ndarray | None = None
     hidden_edge_commands: np.ndarray | None = None
 
+    profile_exclusions: tuple = ()
+    reveal_hidden: tuple = (False, False)
+
     def upload(self, renderer):
         renderer.set_scene(tuple(a.view(np.uint8).reshape(-1) for a in
                                  (self.vertices, self.indices, self.bounds, np.concatenate((self.commands, self.edge_commands)))),
                            self.instances.view(np.uint8).reshape(-1))
         renderer.set_materials(self.materials)
         renderer.set_textures(*self.textures)
+        if hasattr(renderer, "set_profile_exclusions"):
+            renderer.set_profile_exclusions(self.profile_exclusions)
+        from views.wgpu_parity import has_transparency, hidden_geometry
+        if hasattr(renderer, "set_material_transparency"):
+            renderer.set_material_transparency(has_transparency(self))
+        hidden_geometry(SimpleNamespace(renderer=renderer, packed=self))
 
 
 def bake_mesh(mesh):
@@ -102,6 +111,8 @@ def _baked_paint(paint):
     if not paint or paint.get('front_only'):
         return None
     if any(k in paint for k in ('texture', 'by_layer', 'layer_fx', 'opacity')):
+        if (paint.get('base') or {}).get('front_only'):
+            return dict(paint, base=None)
         return paint
     return None
 
@@ -137,6 +148,13 @@ def _source_arrays(mesh, paint=None, texture_ids=None, face_overrides=None, bill
         flags = np.asarray([int(e.soft) | (int(e.hidden) << 1) for e in mesh.edges], np.uint8)
         table = [(face_overrides or {}).get(id(f), f.attrs) for f in mesh.faces]
         attr = np.arange(len(table))
+    # IGZ source streams can repeat a coordinate for each face/edge. Soft fan
+    # adjacency requires common vertex IDs; weld only prototypes that need it.
+    if np.any(flags & 1):
+        _, first, inverse = np.unique(np.asarray(pos, np.float32), axis=0,
+                                      return_index=True, return_inverse=True)
+        corners = first[inverse[corners]]
+        edges = first[inverse[edges]]
     from core.materials import effective_attrs
     table = [effective_attrs(own, paint) or {} for own in [{}] + table]
     palette = np.full((len(table), 4), 210, np.uint8)
@@ -157,7 +175,7 @@ def _source_arrays(mesh, paint=None, texture_ids=None, face_overrides=None, bill
                                      texture_ids if texture_ids is not None else {})
     if billboard is True:
         from views.wgpu_billboards import fitted_maps
-        maps = fitted_maps(pos, corners, sizes, counts, maps)
+        maps = fitted_maps(pos, corners, sizes, counts, maps.copy())
         # GL's cutout uses the same image on either side.
         paints[:, 2] = paints[:, 1]
     return (np.asarray(pos, np.float32), np.asarray(corners, np.int64),
@@ -191,10 +209,12 @@ def _placement_state(scene):
             paint = _paint_of(vp, group) or {}
             # A style-generated Front tint is not material paint. Keep that
             # distinction resident so changing style needs no geometry rebuild.
-            unpainted = not paint or (not material and paint.get('front_only'))
             from core.materials import effective_attrs
             resolved = effective_attrs({}, paint) or {}
-            rgb = resolved.get('color') or (210/255,)*3
+            from core.style import DEFAULT_FACE_COLOR
+            rgb = resolved.get('color') or DEFAULT_FACE_COLOR
+            base = (paint or {}).get('base', paint) or {}
+            unpainted = not resolved or (bool(base.get('front_only')) and not paint.get('fx_self'))
             alpha = 0 if unpainted else _alpha(resolved)
             paints[key] = np.array([*np.clip(np.array(rgb[:3])*255, 0, 255), alpha], np.uint8).view('<u4')[0]
         return visible, paints[key]
@@ -286,20 +306,29 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
     attributes = (np.concatenate([m[8]+offset for m, offset in zip(meshes, palette_offsets)])
                   if meshes else empty[8])
     arrays = [np.concatenate([m[k] for m in meshes]) if meshes else empty[k] for k in range(8)]
+    profile_exclusions = tuple((code, np.asarray(m[0][m[4][(m[5] & 3) != 0]], np.float32).reshape(-1).tolist())
+                               for code, m in enumerate(meshes) if np.any(m[5] & 3))
+    prototype_count = len(meshes)
+    maps = (np.concatenate([m[9] for m in meshes]) if texture_ids or billboard_codes
+            else np.broadcast_to(np.zeros(16, np.float32), (int(offsets[-1,3]), 16)))
+    paints_array = np.concatenate([m[10] for m in meshes]) if meshes else np.empty((0,3), np.uint32)
+    # Drop the per-prototype copies BEFORE native output allocation, not just
+    # before decoding textures. Deferred source arrays remain owned by meshes.
+    del meshes
     handoff = perf_counter()
     raw, indices, bounds, table, materials = _native.available().bake_scene(
         *arrays[:4], arrays[6], arrays[7], arrays[4], arrays[5], offsets, attributes, _native.qt_hypot(),
-        np.concatenate([m[9] for m in meshes]) if meshes else np.empty((0,16), np.float32),
-        np.concatenate([m[10] for m in meshes]) if meshes else np.empty((0,3), np.uint32), True)
+        maps, paints_array, True)
+    del arrays, attributes, maps, paints_array
     textures = _texture_array(texture_ids) if texture_images else None
     baked = perf_counter()
     vertices = raw.view(VERTEX)
     bounds = bounds.reshape(-1, 2, 4)
     table = table.reshape(-1, 5)
-    commands = np.zeros(len(meshes), COMMAND)
-    edge_commands = np.zeros(len(meshes), COMMAND)
-    hidden_commands = np.zeros(len(meshes), COMMAND)
-    hidden_edge_commands = np.zeros(len(meshes), COMMAND)
+    commands = np.zeros(prototype_count, COMMAND)
+    edge_commands = np.zeros(prototype_count, COMMAND)
+    hidden_commands = np.zeros(prototype_count, COMMAND)
+    hidden_edge_commands = np.zeros(prototype_count, COMMAND)
     instances = np.zeros(len(rows), INSTANCE)
     if rows:
         instances['world'] = [r[1] for r in rows]
@@ -310,7 +339,7 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
             tint = (view_tint or {}).get(uid)
             if tint is not None:
                 instances['info'][i, 3] = np.array([*np.clip(np.array(tint[:3])*255, 0, 255), 255], np.uint8).view('<u4')[0]
-    counts = np.bincount(instances['info'][:, 0], minlength=len(meshes))
+    counts = np.bincount(instances['info'][:, 0], minlength=prototype_count)
     commands['count'] = table[:, 1]
     edge_commands['count'] = table[:, 2]
     if billboard_codes:
@@ -328,14 +357,16 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
     if len(rows):
         shown = instances[(instances['info'][:, 2] & 1) == 0]
         if not len(shown):
-            return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures, tuple(texture_ids), hidden_commands, hidden_edge_commands)
+            return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures, tuple(texture_ids), hidden_commands, hidden_edge_commands, profile_exclusions,
+                               (bool(getattr(scene, 'show_hidden_geometry', False)), bool(getattr(scene, 'show_hidden_objects', False))))
         b = bounds[shown['info'][:, 0], :, :3]
         center, extent = (b[:, 0]+b[:, 1])/2, (b[:, 1]-b[:, 0])/2
         mat = shown['world'].transpose(0, 2, 1)
         wc = np.einsum('nij,nj->ni', mat[:, :3, :3], center)+mat[:, :3, 3]
         we = np.einsum('nij,nj->ni', abs(mat[:, :3, :3]), extent)
         world_bounds = np.array([(wc-we).min(axis=0), (wc+we).max(axis=0)])
-    return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures, tuple(texture_ids), hidden_commands, hidden_edge_commands)
+    return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures, tuple(texture_ids), hidden_commands, hidden_edge_commands, profile_exclusions,
+                               (bool(getattr(scene, 'show_hidden_geometry', False)), bool(getattr(scene, 'show_hidden_objects', False))))
 
 
 def _material_columns(pos, corners, sizes, counts, table, attributes, texture_ids):
@@ -343,7 +374,7 @@ def _material_columns(pos, corners, sizes, counts, table, attributes, texture_id
     from PySide6.QtGui import QVector3D
     from core.materials import back_is_default
     from core.texture import face_uv_axes
-    maps = np.zeros((len(counts), 16), np.float32)
+    maps = np.broadcast_to(np.zeros(16, np.float32), (len(counts), 16))
     paints = np.zeros((len(counts), 3), np.uint32)
     palette = np.zeros((len(table), 3), np.uint32)
     textures = []
@@ -369,6 +400,7 @@ def _material_columns(pos, corners, sizes, counts, table, attributes, texture_id
     paints[:] = palette[attributes]
     textured = np.flatnonzero(np.any(paints[:,1:] != 0, axis=1))
     if len(textured):
+        maps = np.zeros((len(counts), 16), np.float32)
         starts = np.concatenate(([0], np.cumsum(sizes)))
         face_ring = np.concatenate(([0], np.cumsum(counts)))
         points = np.asarray(pos)[corners]

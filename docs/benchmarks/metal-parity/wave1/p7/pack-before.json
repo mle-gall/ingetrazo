@@ -1,0 +1,30 @@
+[
+  {
+    "seconds": 39.535463500069454,
+    "rss": 3522281472,
+    "timings": {
+      "handoff": 32.06102383299731,
+      "native": 6.944274083012715,
+      "finish": 0.08589591702912003,
+      "peak_build_rss_bytes": 3522281472
+    },
+    "vertices": 887876696,
+    "hidden_vertices": 0,
+    "materials": 815977536,
+    "textures": 4
+  },
+  {
+    "seconds": 32.99070654204115,
+    "rss": 3522281472,
+    "timings": {
+      "handoff": 28.59259412495885,
+      "native": 3.846285333042033,
+      "finish": 0.07045016693882644,
+      "peak_build_rss_bytes": 3522281472
+    },
+    "vertices": 887876696,
+    "hidden_vertices": 0,
+    "materials": 815977536,
+    "textures": 4
+  }
+]

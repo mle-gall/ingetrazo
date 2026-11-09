@@ -74,17 +74,29 @@ def live_setup(scene, gl, metal, case):
     gl.active_tool = SelectTool()
     if case in ('box-window','box-crossing','zoom-window'):
         from PySide6.QtCore import QPointF
-        from views.wgpu_overlay import Primitive
+        from PySide6.QtGui import QMouseEvent
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
         a,b=QPointF(250,250),QPointF(650,550)
         if case=='box-crossing':a,b=b,a
         if case=='zoom-window':gl._zoom_box_active=True;gl._zoom_box_start=a;gl._zoom_box_cur=b
         else:gl._box_active=True;gl._box_start=a;gl._box_cur=b
-        metal.overlay_primitives=[Primitive('rectangle',((a.x(),a.y()),(b.x(),b.y())))]
+        if case == 'zoom-window':
+            gl.nav_mode = 'zoom_window'
+        metal.tools.sync()
+        QApplication.sendEvent(metal, QMouseEvent(QMouseEvent.MouseButtonPress,
+            a, a, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+        QApplication.sendEvent(metal, QMouseEvent(QMouseEvent.MouseMove,
+            b, b, Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
     if case == 'section-tool':
         from tools.section import SectionPlaneTool
         gl.active_tool=SectionPlaneTool();gl.active_tool.hover_point=V(0,0,2)
     if case == 'selected-group':scene.select([scene.groups[0]])
-    if case == 'selected-face':scene.select([scene.loose_mesh.faces[0]])
+    if case == 'selected-face':
+        # Select the visible slab top, not its obscured underside, so the
+        # paired image actually exercises the depth-tested stipple pass.
+        upward = [f for f in scene.loose_mesh.faces if f.normal().z() > .9]
+        scene.select([max(upward, key=lambda f: max(p.z() for p in f.vertices))])
     if case == 'selected-edge':scene.select([scene.loose_mesh.edges[0]])
     if case == 'hover-face':gl._hover_entity=None  # Select intentionally suppresses face hover
     if case == 'hover-edge':gl.set_hover(next(e for e in scene.loose_mesh.edges if e.a.x()==4 and e.b.x()==4 and e.a.z()==0 and e.b.z()==0))

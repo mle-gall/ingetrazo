@@ -202,22 +202,24 @@ def test_selection_marks_and_preview_bridge(view):
     from views.wgpu_overlay import rasterize, pixels
     f = face(view)
     view.scene.select([f])
-    image = rasterize([], 800, 600, 1, view._draw_selection_marks)
-    assert np.any(pixels(image)[3::4])
-    # The pack keeps suppressed faces as hidden ranges (P3), so the visible
-    # face count drops while the vertex stream stays.
-    visible = int(view.packed.commands['count'].sum())
+    calls = []
+    view.renderer = SimpleNamespace(set_highlight=lambda *a: None,
+        set_face_marks=lambda a: calls.append(('marks', a.copy())),
+        set_suppressed_faces=lambda a: calls.append(('suppression', a)))
+    view.sync_selection()
+    assert calls[-1][0] == 'marks' and len(calls[-1][1]) == 6*28
+    original = view.packed
     view.tools.set_suppressed_faces([f])
-    assert view.suppressed_faces == (f,)
-    assert not f.attrs.get('hidden')
-    assert int(view.packed.commands['count'].sum()) < visible
+    assert calls[-1] == ('suppression', [(0, 0, 2)])
+    assert view.packed is original and not f.attrs.get("hidden")
     view.tools.set_suppressed_faces([])
-    assert int(view.packed.commands['count'].sum()) == visible
+    assert calls[-1] == ('suppression', [])
+
 
 
 
 @pytest.mark.parametrize('fail', [False, True])
-def test_billboard_export_restores_world_and_schedules_overlays(view, fail):
+def test_billboard_export_restores_world_and_schedules_overlays(view, fail, monkeypatch):
     from core.group import make_billboard_group
     from views.wgpu_scene import INSTANCE
     from PySide6.QtGui import QImage
@@ -230,7 +232,10 @@ def test_billboard_export_restores_world_and_schedules_overlays(view, fail):
     view._scene_dirty = False
     before = view.packed.instances['world'].copy()
     scheduled = []
-    view.tools.draw_annotations = lambda p: scheduled.append(True)
+    def composite(image, *args, **kwargs):
+        scheduled.append(True)
+        return image
+    monkeypatch.setattr("views.wgpu_annotations.composite_annotations", composite)
 
     class Capture:
         def __init__(self):

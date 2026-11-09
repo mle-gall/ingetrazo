@@ -55,8 +55,8 @@ def test_locked_rgb_and_matching_back():
     np.testing.assert_array_equal(face_colors(packed)[:, :3], np.tile(rgb, (3, 1)))
     assert np.all(face_colors(packed)[:, 3] == 255)
     header = packed.materials[:16].view('<u4')
-    back = packed.materials[int(header[1])*16:].reshape(-1, 32)[:, 16:20]
-    np.testing.assert_array_equal(back, np.tile([*rgb, 255], (3, 1)))
+    assert header[2] == 0 and header[3] == 1  # matching backs reuse vertex RGBA
+    assert packed.materials.nbytes == 16
     assert scene._layer_state(g)[1]
     assert not scene.entity_selectable(g)
 
@@ -169,7 +169,7 @@ def test_texture_only_opacity_and_distinct_back():
 
 
 def test_hidden_material_corners_follow_visible_edge_gap():
-    mesh = triangle({'color': (1, 0, 0), 'back': True})
+    mesh = triangle({'color': (1, 0, 0), 'back': {'color': (0, 0, 1)}})
     f = mesh.add_face([QVector3D(4, 0, 0), QVector3D(6, 0, 0), QVector3D(4, 3, 0)])
     f.attrs.update(hidden=True, color=(0, 1, 0), opacity=.4, back=True)
     packed = pack_scene(Scene(groups=[Group(mesh), Group(triangle())]))

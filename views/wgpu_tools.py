@@ -74,7 +74,7 @@ class NativeTools(MeshToolAccess):
 
     @property
     def scene(self):
-        return getattr(self.view, 'scene', None) or self.view.source_viewport.scene
+        return getattr(self.view, 'scene', None) or getattr(self.view.source_viewport, 'scene', None)
 
     @property
     def last_snap(self):
@@ -216,6 +216,8 @@ class NativeTools(MeshToolAccess):
         if billboards is not None:
             billboards.restore()
         self.view.packed.instances[self.ids] = rows
+        from views.wgpu_parity import hidden_geometry
+        hidden_geometry(self.view)
         if billboards is not None and len(billboards.ids):
             from views.wgpu_billboards import Billboards
             self.view._billboards = Billboards(self.view.packed)
@@ -226,6 +228,10 @@ class NativeTools(MeshToolAccess):
             self.write_rows(self.original)
 
     def cancel(self):
+        renderer = getattr(self.view, "renderer", None)
+        if renderer is not None and hasattr(renderer, "set_preview_mesh"):
+            empty = np.empty(0, np.uint8)
+            renderer.set_preview_mesh(empty, empty)
         self.restore()
         if self.mode == 'mesh' and self.tool is not None:
             self.tool.on_cancel(self)
@@ -278,16 +284,21 @@ class NativeTools(MeshToolAccess):
             self._notified_revision = revision
         self.view.update()
 
-    # TODO(P6): expose pick_edge_any/pick_guide/pick_axis(access, x, y)
-    # from wgpu_inference; these facade hooks must not borrow GL pick caches.
     def pick_edge_any(self, x, y):
-        return None
+        from views.wgpu_inference import reference_edge
+        if getattr(self.view, 'inference_index', None) is None:
+            return None
+        return reference_edge(self.view.inference_index, self.view, x, y,
+                              radius_px=self.pick_threshold_px)
 
     def pick_guide(self, x, y):
-        return None
+        # These shared projection-only pickers never read GL caches.
+        from views.viewport import Viewport
+        return Viewport.pick_guide(self, x, y) if self.scene is not None else None
 
     def pick_axis(self, x, y):
-        return None
+        from views.viewport import Viewport
+        return Viewport.pick_axis(self, x, y) if self.scene is not None else None
 
     def width(self):
         return self.view.width()

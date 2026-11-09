@@ -1,0 +1,23 @@
+........................................................................ [ 15%]
+........................................................................ [ 31%]
+........................................................................ [ 46%]
+....ss.................................................................. [ 62%]
+.........................sssssssss...................................... [ 77%]
+........................................................................ [ 93%]
+................................                                         [100%]
+=============================== warnings summary ===============================
+tests/test_wgpu_billboards.py: 1 warning
+tests/test_wgpu_materials.py: 1 warning
+tests/test_wgpu_texture_position.py: 30 warnings
+tests/test_wgpu_updates.py: 3 warnings
+tests/test_metal_parity_input.py: 2 warnings
+tests/test_metal_parity_pack.py: 4 warnings
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8e134073/views/wgpu_scene.py:435: DeprecationWarning: Function: 'QImage.mirrored(bool horizontally, bool vertically)' is marked as deprecated, please check the documentation for more information.
+    images = [QImage(path).mirrored() for path in paths]
+
+tests/test_metal_parity_input.py::test_context_group_and_locked_target
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-8e134073/tests/test_metal_parity_input.py:191: DeprecationWarning: Function: 'QContextMenuEvent.QContextMenuEvent(QContextMenuEvent.Reason reason, const QPoint &pos)' is marked as deprecated, please check the documentation for more information.
+    event = QContextMenuEvent(QContextMenuEvent.Mouse, QPoint(400, 300))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+453 passed, 11 skipped, 42 warnings in 10.74s

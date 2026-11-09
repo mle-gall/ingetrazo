@@ -511,6 +511,9 @@ class ArcTool(SegmentCount, AxisMagnet, PlaneLock, Tool):
         mesh = getattr(scene, "mesh", None)
         if mesh is None or self.start_point is None:
             return None
+        resident_tangent = getattr(viewport, "reference_tangent", None)
+        if callable(resident_tangent):
+            return resident_tangent(self.start_point)
         # The loose mesh first, then every placed group / component in its
         # own space (inference reaches geometry inside them from outside).
         spaces = [(mesh, None)]

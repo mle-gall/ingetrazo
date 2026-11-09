@@ -17,7 +17,6 @@ def _paint_key(scene):
     by_layer = (bool(getattr(style, 'color_by_layer', False))
                 and getattr(style, 'face_mode', None) in ('textures', 'shaded', 'xray'))
     from core.layers import layer_color
-    # TODO(P3/P2): pack hidden-reveal metadata and render ghost/hidden edges.
     return (by_layer, bool(getattr(scene, 'show_hidden_geometry', False)),
             bool(getattr(scene, 'show_hidden_objects', False)), tuple(
         (ly.name, tuple(layer_color(ly)) if by_layer else None,
@@ -96,7 +95,7 @@ class WgpuView(QWidget):
         allowed = getattr(scene, '_navigator_allowed', None)
         token = (id(scene), scene._bounds_key(),
                  None if allowed is None else frozenset(allowed))
-        paint_key = (_paint_key(scene), frozenset(id(f) for f in getattr(self, 'suppressed_faces', ())))
+        paint_key = _paint_key(scene)
         if (token == getattr(self, "_content_token", None)
                 and paint_key == getattr(self, "_paint_key", None)):
             self.update()
@@ -121,6 +120,13 @@ class WgpuView(QWidget):
         if delta is not None:
             ids, rows = delta
             tracker.apply(ids, rows, self.renderer)
+            from views.wgpu_parity import hidden_geometry, face_ranges
+            if tracker.changed:
+                self.packed.__dict__.pop("_face_ranges", None)
+                self._selection_signature = None
+                if getattr(self, 'suppressed_faces', ()) and self.renderer is not None:
+                    self.renderer.set_suppressed_faces(face_ranges(self, self.suppressed_faces))
+            hidden_geometry(self)
             self._rest_signature = None
             from views.wgpu_billboards import Billboards
             self._billboards = Billboards(self.packed)
@@ -152,10 +158,7 @@ class WgpuView(QWidget):
             self.build_seconds = time.perf_counter() - start
             self.update()
             return
-        suppressed = getattr(self, 'suppressed_faces', ())
-        self.packed = pack_scene(scene, getattr(self.source_viewport, 'view_tint', None),
-                                 face_overrides={id(f): dict(f.attrs, hidden=True) for f in suppressed}
-                                 if suppressed else None)
+        self.packed = pack_scene(scene, getattr(self.source_viewport, 'view_tint', None))
         from views.wgpu_billboards import Billboards
         self._billboards = Billboards(self.packed)
         self._scene_dirty = True
@@ -216,7 +219,7 @@ class WgpuView(QWidget):
         if previous is not None:
             previous.cancel()
         self.inference_index = None
-        self._inference_future = self._inference_worker.submit(prepare, self._inference_snapshot())
+        self._inference_future = self._inference_worker.submit(prepare, self._inference_snapshot(), self.scene)
     def _inference_snapshot(self):
         from dataclasses import replace
         return replace(self.packed, instances=self.packed.instances.copy(),
@@ -244,6 +247,9 @@ class WgpuView(QWidget):
             scratch = pack_scene(Scene(groups=[Group(mesh)]))
             scratch.instances['info'][:, 2] = 1
             scratch.upload(self.renderer)
+        if getattr(self, 'suppressed_faces', ()):
+            from views.wgpu_parity import face_ranges
+            self.renderer.set_suppressed_faces(face_ranges(self, self.suppressed_faces))
         self._rest_signature = None
         self._frame_style = None
         self._axes_state = None
@@ -447,20 +453,9 @@ class WgpuView(QWidget):
         image = QImage(pixels, width_px, height_px, width_px * 4,
                        QImage.Format_RGBA8888).copy()
         if overlays:
-            from PySide6.QtGui import QPainter
-            from views.wgpu_overlay import rasterize
-            # Draw at view logical dimensions and scale to the export target;
-            # export helpers can override annotation layout without mapping a window.
-            # TODO(P4): export_annotations(view, painter, width, height) for sheet layout.
-            layer = rasterize(self._edit_box_primitives() + self.overlay_primitives,
-                              self.width(), self.height(), 1., self.tools.draw_annotations)
-            if getattr(source.scene, 'show_section_planes', True):
-                self._paint_section_widgets(layer)
-            painter = QPainter(image)
-            try:
-                painter.drawImage(image.rect(), layer)
-            finally:
-                painter.end()
+            from views.wgpu_annotations import composite_annotations
+            image = composite_annotations(image, source.scene, camera,
+                logical_size=(self.width(), self.height()), overlays=True)
         return image
         # End R3c-2a offscreen entry point.
 
@@ -506,6 +501,7 @@ class WgpuView(QWidget):
             from core.mesh import Face
             entity = SelectTool()._pick(self.tools, x, y) if source is not None else None
             self.tools.set_hover(None if isinstance(entity, Face) else entity)
+            self.hover_ms = (time.perf_counter()-start)*1000
             self.update()
             return None
         if self.tools.sync() == 'mesh':
@@ -532,7 +528,7 @@ class WgpuView(QWidget):
                        linear_mode=getattr(source, 'linear_inference_mode', 'all'),
                        project_onto_line=lambda start, direction:
                            self._project_to_lock_line(start, direction, x, y))
-        if self.hovered_row is not None and self.inference_index is not None:
+        if self.inference_index is not None:
             self.last_snap = snap(self.inference_index, self.hovered_row, self, x, y, **options)
         elif self.tools.sync() in ('tape', 'move', 'mesh'):
             from core.snap import compute_snap
@@ -551,19 +547,6 @@ class WgpuView(QWidget):
             source._note_snap(self.last_snap)
             point = (self.last_snap.point if self.last_snap.kind in source._ENCOURAGING_KINDS else None)
             inference._dwell_on(point)
-        if self.last_snap is not None:
-            pixel = self._world_to_pixel(self.last_snap.point)
-            if pixel is not None:
-                self.overlay_primitives.append(snap_glyph(
-                    pixel, self.last_snap.kind, QColor.fromRgbF(*self.last_snap.color).name()))
-            guides = list(self.last_snap.guides or [])
-            if self.last_snap.guide:
-                guides.append((*self.last_snap.guide, self.last_snap.color))
-            for a, b, color in guides:
-                pa, pb = self._world_to_pixel(a), self._world_to_pixel(b)
-                if pa is not None and pb is not None:
-                    self.overlay_primitives.append(Primitive(
-                        'polyline', (pa, pb), QColor.fromRgbF(*color).name()))
         self.sync_selection()
         self.hover_ms = (time.perf_counter()-start)*1000
         from views.viewport import _PERF, _plog
@@ -590,6 +573,8 @@ class WgpuView(QWidget):
         if mode in ('fade', 'hide'):
             flags[rows] |= np.uint32(64 | (128 if mode == 'hide' else 0))
         self._rest_signature = signature
+        from views.wgpu_parity import hidden_geometry
+        hidden_geometry(self)
 
     def _group_obb(self, group):
         return self.source_viewport._group_obb(group)
@@ -618,121 +603,51 @@ class WgpuView(QWidget):
     def sync_selection(self):
         if self.renderer is None:
             return
-        selected = frozenset(getattr(g, 'uid', None) for g in self.scene.selection)
+        from core.mesh import Face, Edge
+        from core.group import Group, iter_placements
+        from views.wgpu_parity import face_marks
+        selected = self.scene.selection
+        uids = {g.uid for root in selected if isinstance(root, Group)
+                for g, _ in iter_placements(root)}
         hover = tuple(getattr(self, 'hover_rows', ()) or ())
-        signature = (selected, hover)
+        faces = [f for f in selected if isinstance(f, Face)]
+        hovered = getattr(self.tools, '_mesh_hover', getattr(self.source_viewport, '_hover_entity', None))
+        signature = (frozenset(map(id, selected)), hover, id(hovered), id(self.packed),
+                     tuple(self.camera.eye().toTuple()) if faces else ())
         if signature != self._selection_signature:
-            indices = [i for uid in selected for i in self.uid_rows.get(uid, ())]
-            # TODO(P2): edge-only group flags; face stipple belongs to loose faces.
-            self.renderer.set_highlight([], [])
+            indices = [i for uid in uids for i in self.uid_rows.get(uid, ())]
+            self.renderer.set_highlight(indices, list(hover))
+            if hasattr(self.renderer, 'set_face_marks'):
+                self.renderer.set_face_marks(face_marks(self, faces))
+            if self.tools.mode == 'select' and hasattr(self.renderer, 'set_preview_mesh'):
+                from views.wgpu_scene import VERTEX
+                from views.wgpu_parity import raw
+                edges = [(e, (.95, .45, .16)) for e in selected if isinstance(e, Edge)]
+                if isinstance(hovered, Edge) and hovered not in selected:
+                    edges.append((hovered, (.30, .55, .95)))
+                vertices = [(p.toTuple(), (0,0,1), (*np.asarray(np.array(c)*255, np.uint8),255))
+                            for e,c in edges for p in (e.a,e.b)]
+                self.renderer.set_preview_mesh(np.empty(0,np.uint8), raw(np.array(vertices,VERTEX)))
             self._selection_signature = signature
 
     def _draw_selection_marks(self, painter):
-        """Loose topology has no placement UID; mark entities in screen space.
-
-        Group selections use their wireframe, never the face stipple flag.
-        TODO(P2): replace the cached sampled face marks with a native
-        depth-tested transient highlight pass (same GL-colored screen-space dots).
-        """
-        from core.mesh import Face, Edge
-        from core.group import Group, iter_placements
+        """Loose edge feedback; faces/groups are depth-tested native passes."""
+        if self.tools.mode == 'select' and hasattr(self.renderer, 'set_preview_mesh'):
+            return
+        from core.mesh import Edge
         from PySide6.QtCore import QPointF
-        from PySide6.QtGui import QPainterPath, QPen
-        selected = list(self.scene.selection)
+        from PySide6.QtGui import QPen
+        entities = [(e, False) for e in self.scene.selection if isinstance(e, Edge)]
         hovered = getattr(self.tools, '_mesh_hover', getattr(self.source_viewport, '_hover_entity', None))
-        entities = [(e, False) for e in selected]
-        if hovered is not None and hovered not in self.scene.selection:
+        if isinstance(hovered, Edge) and hovered not in self.scene.selection:
             entities.append((hovered, True))
         painter.save()
         try:
-            for entity, hover in entities:
-                color = QColor.fromRgbF(*((.30, .55, .95) if hover else (.95, .45, .16)))
-                painter.setPen(QPen(color, 1.5))
-                segments = []
-                if isinstance(entity, Face) and not hover:
-                    if self.inference_index is None:
-                        continue  # wait for depth queries; never flash through solids
-                    choose = getattr(self.source_viewport, '_selection_dot_colors', None)
-                    if choose is not None:
-                        front, back = choose(entity)
-                        facing = QVector3D.dotProduct(entity.normal(), self.camera.eye()-entity.vertices[0]) > 0
-                        color = QColor.fromRgbF(*(front if facing else back))
-                    path = QPainterPath()
-                    path.setFillRule(Qt.OddEvenFill)
-                    for loop in (entity.loop, *entity.hole_loops):
-                        pts = [self._world_to_pixel(v.position) for v in loop]
-                        if not pts or any(p is None for p in pts):
-                            continue
-                        path.moveTo(QPointF(*pts[0]))
-                        for point in pts[1:]:
-                            path.lineTo(QPointF(*point))
-                        path.closeSubpath()
-                    # Sample screen-space dots against native picked surfaces.
-                    # Unlike a filled painter polygon this cannot cover objects
-                    # in front, or show a selected back face through its solid.
-                    key = (id(entity), id(self.packed), self.scene.version,
-                           tuple(self.camera.view_matrix().data()),
-                           tuple(self.camera.projection_matrix().data()),
-                           self.width(), self.height())
-                    cache = getattr(self, '_face_mark_cache', {})
-                    if key not in cache:
-                        box = path.boundingRect()
-                        normal, anchor = entity.normal(), entity.vertices[0]
-                        dots = []
-                        index = self.inference_index
-                        visible = np.flatnonzero((self.packed.instances['info'][:, 2] & 129) == 0)
-                        changed = ([] if index is None else [int(row) for row in visible
-                                   if row in index.rows or int(self.packed.instances['info'][row, 0]) in index.changed])
-                        static = np.asarray([row for row in visible if row not in changed], np.int64)
-                        from views.viewport import _moller_trumbore
-                        def occluded(origin, direction, depth):
-                            if index is None:
-                                return False
-                            ray = (origin.toTuple(), direction.toTuple(), depth - 1e-4)
-                            candidates = [index.base.ray_cands(static, *ray)]
-                            candidates.extend(index.ray_cands(np.array([row], np.int64), *ray)
-                                              for row in changed)
-                            for _, _, v0, e1, e2 in candidates:
-                                if len(v0):
-                                    ts, hits = _moller_trumbore(np.asarray(ray[0]), np.asarray(ray[1]), v0, e1, e2)
-                                    if np.any(hits & (ts < depth - 1e-4)):
-                                        return True
-                            return False
-                        for y in range(max(0, int(box.top())) // 4 * 4,
-                                       min(self.height(), int(box.bottom()) + 1), 4):
-                            for x in range(max(0, int(box.left())) // 4 * 4,
-                                           min(self.width(), int(box.right()) + 1), 4):
-                                point = QPointF(x, y)
-                                if not path.contains(point):
-                                    continue
-                                origin, direction = self._pixel_to_ray(x, y)
-                                denom = QVector3D.dotProduct(direction, normal)
-                                if abs(denom) < 1e-9:
-                                    continue
-                                t = QVector3D.dotProduct(anchor-origin, normal) / denom
-                                if t > 0 and not occluded(origin, direction, t):
-                                    dots.append(point)
-                        # Keep only the current frame's selected-face entries.
-                        self._face_mark_cache = {k: v for k, v in cache.items()
-                                                 if k[1:] == key[1:]}
-                        self._face_mark_cache[key] = dots
-                    painter.setPen(QPen(color, 1.))
-                    painter.drawPoints(self._face_mark_cache[key])
-                elif isinstance(entity, Edge):
-                    segments.append((entity.a, entity.b))
-                elif isinstance(entity, Group):
-                    for group, matrix in iter_placements(entity):
-                        segments.extend((matrix.map(e.a), matrix.map(e.b))
-                                        for e in group.mesh.edges
-                                        if not e.hidden and not e.soft)
-                for a, b in segments:
-                    pa, pb = self._world_to_pixel(a), self._world_to_pixel(b)
-                    if pa is not None and pb is not None:
-                        # Conservative edge visibility until P2 supplies native
-                        # edge-only highlight flags and clipped depth segments.
-                        if isinstance(entity, Group) and self.tools._is_occluded((a+b)*.5):
-                            continue
-                        painter.drawLine(QPointF(*pa), QPointF(*pb))
+            for edge, hover in entities:
+                painter.setPen(QPen(QColor.fromRgbF(*((.30, .55, .95) if hover else (.95, .45, .16))), 1.5))
+                a, b = self._world_to_pixel(edge.a), self._world_to_pixel(edge.b)
+                if a is not None and b is not None:
+                    painter.drawLine(QPointF(*a), QPointF(*b))
         finally:
             painter.restore()
 
@@ -874,17 +789,8 @@ class WgpuView(QWidget):
             self.tools.hover(event)
         elif event.buttons() & Qt.LeftButton and (self.tools.mode == 'select' or mode == 'zoom_window'):
             from views import wgpu_overlay
-            # TODO(P4): selection_rectangle(start, end, zoom=False) -> Primitive.
-            helper = getattr(wgpu_overlay, 'selection_rectangle', None)
-            if helper is not None:
-                primitive = helper(self.press, self.last, zoom=mode == 'zoom_window')
-            else:
-                crossing = self.last.x() < self.press.x()
-                color = ('#d29628' if mode == 'zoom_window' else
-                         '#289e5c' if crossing else '#3366c7')
-                primitive = wgpu_overlay.Primitive('rectangle',
-                    ((self.press.x(), self.press.y()), (self.last.x(), self.last.y())),
-                    color, fill='#183366c7', dash=(4, 2) if crossing or mode == 'zoom_window' else ())
+            primitive = wgpu_overlay.selection_rectangle((self.press.x(), self.press.y()),
+                (self.last.x(), self.last.y()), zoom=mode == 'zoom_window')
             self.overlay_primitives = [primitive]
         self.update()
 

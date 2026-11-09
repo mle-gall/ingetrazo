@@ -3438,3 +3438,31 @@ this particular camera/load is not a general proof of the requested gate.
 AO kernel timing alone excludes resolve, blur and composite. Caps now occlude
 AO, but the independent ID pass still lacks cap geometry. No claim is made
 that the complete perf-round-3 gates have been met.
+
+
+## Renderer — Metal parity integration P7 (2026-11-09)
+
+The view now consumes the P2/P3 alpha, hidden-range, profile-exclusion,
+face-mark, transient mesh and index-suppression APIs. The default alpha ABI is
+enabled; all-opaque packs skip material OIT, including its extra depth resolve.
+Both disabled reveal toggles skip CPU ghost expansion and GPU ghost uploads.
+Matching front/back colors use a prototype header bit instead of repeated
+32-byte material corners (ride: 816 MB → 256 KB). Source-array copies are
+released before native output and texture allocation. Core/render extensions
+must be rebuilt together for the matching-back header bit.
+
+Selection uses native face stipple and edge-only group flags; recessed
+Push/Pull suppresses base triangles without rebuilding the pack. P4 live and
+output-aspect export annotation helpers are wired, including real Qt drag box
+events. P6 resident reference/nearby inference is connected to the tool facade;
+no picked face is required for guide/neighbor candidates, and Arc continuation
+uses resident curve tangents rather than scanning GL placements. Document sun settings
+and reference-ground visibility drive shadows. Unrelated tag effects no longer
+turn the default unpainted front into explicit grey container paint.
+
+Evidence and reproducible bounded offscreen commands are in
+[the P7 report](benchmarks/metal-parity/wave1/p7/REPORT.md). That report separates
+closed integrations from remaining OIT ordering, painter-guide occlusion,
+reference-content and physical-input acceptance limits. Frame timings are
+loaded-Mac samples, not an isolated-machine speed claim; byte-identical opaque
+opacity A/B captures are checked separately from timing.

@@ -1,0 +1,183 @@
+[
+  {
+    "case": "guides-only",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "guides-only",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "case": "hidden",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "hidden",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "case": "selected-face",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "selected-face",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "case": "selected-group",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "selected-group",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "case": "hover-edge",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "hover-edge",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "case": "shadows",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "shadows",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "case": "box-window",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "box-window",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "case": "box-crossing",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "box-crossing",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "case": "zoom-window",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "zoom-window",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "case": "export-overlays",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "export-overlays",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw"
+    ],
+    "returncode": 0
+  },
+  {
+    "case": "glyphs",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "glyphs",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw",
+      "--p4-overlays"
+    ],
+    "returncode": 0
+  },
+  {
+    "case": "smooth",
+    "argv": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/smooth.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "baseline",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p7/raw"
+    ],
+    "returncode": 0
+  }
+]

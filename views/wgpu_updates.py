@@ -242,6 +242,10 @@ class InstanceUpdates:
                 prototype.billboard = self.billboard_modes.get(id(mesh), False)
                 prototypes.append(prototype)
             baked = pack_scene(Scene(groups=prototypes))
+            from views.wgpu_parity import has_transparency
+            if renderer is not None and hasattr(renderer, 'set_material_transparency') and has_transparency(baked):
+                renderer.set_material_transparency(True)
+            exclusions = dict(self.packed.profile_exclusions)
             paths = list(self.packed.texture_paths)
             for path in baked.texture_paths:
                 if path not in paths:
@@ -262,6 +266,7 @@ class InstanceUpdates:
                     prototype = int(baked.instances['info'][uid, 0])
                     face, edge = baked.commands[prototype], baked.edge_commands[prototype]
                     bounds = baked.bounds[prototype]
+                exclusions[code] = dict(baked.profile_exclusions).get(prototype, []) if uid is not None else []
                 start = int(face['base'])
                 count = int(face['count'] + edge['count'])
                 vertices = baked.vertices[start:start+count]
@@ -279,6 +284,12 @@ class InstanceUpdates:
                             material = baked.materials[first*16:first*16+length*32].copy()
                             words = material.view(np.uint32).reshape(-1, 8)
                             words[:, 5:7] = texture_map[words[:, 5:7]]
+                        elif header[3] & 1:
+                            # Incremental material API takes corner records. Expand
+                            # only this edited prototype's compressed matching back.
+                            records = np.zeros((int(face['count']), 32), np.uint8)
+                            records[:, 16:20] = vertices['color'][:int(face['count'])]
+                            material = records.reshape(-1)
                     renderer.update_prototype_materials(code, material)
                 offset = len(self.packed.vertices)
                 self.packed.vertices = np.concatenate((self.packed.vertices, vertices))
@@ -289,6 +300,10 @@ class InstanceUpdates:
                     target[code]['base'] = offset
                     target[code]['first'] = offset + (int(face['count']) if target is self.packed.edge_commands else 0)
                 self.meshes[id(mesh)] = (mesh, mesh._mut_serial, code)
+            had_exclusions = bool(self.packed.profile_exclusions)
+            self.packed.profile_exclusions = tuple((c, p) for c, p in exclusions.items() if p)
+            if renderer is not None and hasattr(renderer, 'set_profile_exclusions') and (had_exclusions or self.packed.profile_exclusions):
+                renderer.set_profile_exclusions(self.packed.profile_exclusions)
         if len(ids):
             if renderer is not None:
                 renderer.update_instances(ids.tolist(), rows.view(np.uint8).reshape(-1))

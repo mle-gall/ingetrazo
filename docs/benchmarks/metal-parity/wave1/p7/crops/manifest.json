@@ -1,0 +1,146 @@
+[
+  {
+    "pair": "smooth.png",
+    "gl": "raw/smooth-gl.png",
+    "metal": "raw/smooth-wgpu.png",
+    "crop_xywh": [
+      220,
+      20,
+      600,
+      650
+    ],
+    "bytes": 46303
+  },
+  {
+    "pair": "synthetic-box-crossing.png",
+    "gl": "raw/synthetic-box-crossing-gl.png",
+    "metal": "raw/synthetic-box-crossing-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 118702
+  },
+  {
+    "pair": "synthetic-box-window.png",
+    "gl": "raw/synthetic-box-window-gl.png",
+    "metal": "raw/synthetic-box-window-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 113717
+  },
+  {
+    "pair": "synthetic-export-overlays.png",
+    "gl": "raw/synthetic-export-overlays-gl.png",
+    "metal": "raw/synthetic-export-overlays-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 102695
+  },
+  {
+    "pair": "synthetic-glyphs.png",
+    "gl": "raw/synthetic-glyphs-gl.png",
+    "metal": "raw/synthetic-glyphs-wgpu.png",
+    "crop_xywh": [
+      0,
+      0,
+      700,
+      680
+    ],
+    "bytes": 25505
+  },
+  {
+    "pair": "synthetic-guides-only.png",
+    "gl": "raw/synthetic-guides-only-gl.png",
+    "metal": "raw/synthetic-guides-only-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 98584
+  },
+  {
+    "pair": "synthetic-hidden.png",
+    "gl": "raw/synthetic-hidden-gl.png",
+    "metal": "raw/synthetic-hidden-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 118775
+  },
+  {
+    "pair": "synthetic-hover-edge.png",
+    "gl": "raw/synthetic-hover-edge-gl.png",
+    "metal": "raw/synthetic-hover-edge-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 112029
+  },
+  {
+    "pair": "synthetic-selected-face.png",
+    "gl": "raw/synthetic-selected-face-gl.png",
+    "metal": "raw/synthetic-selected-face-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 116776
+  },
+  {
+    "pair": "synthetic-selected-group.png",
+    "gl": "raw/synthetic-selected-group-gl.png",
+    "metal": "raw/synthetic-selected-group-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 112279
+  },
+  {
+    "pair": "synthetic-shadows.png",
+    "gl": "raw/synthetic-shadows-gl.png",
+    "metal": "raw/synthetic-shadows-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 126304
+  },
+  {
+    "pair": "synthetic-zoom-window.png",
+    "gl": "raw/synthetic-zoom-window-gl.png",
+    "metal": "raw/synthetic-zoom-window-wgpu.png",
+    "crop_xywh": [
+      170,
+      180,
+      690,
+      480
+    ],
+    "bytes": 119262
+  }
+]

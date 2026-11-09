@@ -31,9 +31,7 @@ def style_payload(scene, override=None, *, horizon=2.0, scale=1.0, edit_rest_fad
         plane = (-n.x(), -n.y(), -n.z(),
                  n.x()*o.x() + n.y()*o.y() + n.z()*o.z())
     result['section_plane'] = plane
-    # TODO(P3): enable material_opacity once the alpha-byte bake is installed.
-    # The opt-in preserves legacy byte 254 (two-sided paint provenance).
-    result['material_opacity'] = bool(getattr(scene, 'wgpu_material_opacity', False))
+    result['material_opacity'] = True
     result['group_selection_edges'] = True
     result['show_hidden_geometry'] = bool(getattr(scene, 'show_hidden_geometry', False))
     result['show_hidden_objects'] = bool(getattr(scene, 'show_hidden_objects', False))
@@ -71,6 +69,11 @@ def sun_payload(scene, *, override=None):
     result.update(shadows=True, sun_direction=tuple(direction),
                   shadow_darkness=float(getattr(sh, 'darkness', 0.55)),
                   shadow_matrix=list(Viewport._light_vp(direction, lo, hi).data()))
-    # TODO(P1): suppress the ground catcher when a visible reference ground
-    # (map/terrain/photo mesh) supplies the receiver, matching GL's predicates.
+    from types import SimpleNamespace
+    reference = SimpleNamespace(scene=scene)
+    result['ground_shadows'] = not (Viewport._base_map_showing(reference)
+        or Viewport._terrain_showing(reference)
+        or (getattr(scene, 'photo_mesh', None) is not None
+            and getattr(scene.photo_mesh, 'visible', False)
+            and scene.entity_visible(scene.photo_mesh)))
     return result
