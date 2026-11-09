@@ -1,4 +1,5 @@
 //! A resident Metal scene: compute compaction precedes native indirect draws.
+mod timing;
 mod overlay;
 mod textures;
 // R-look: isolated style and background passes.
@@ -28,6 +29,7 @@ struct Command {
 }
 struct TimingSlot {
     read: wgpu::Buffer,
+    active: Vec<&'static str>,
     pending: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
 }
 struct Scene {
@@ -44,6 +46,7 @@ struct Scene {
     edge_data: Vec<u8>,
     edge_records: wgpu::Buffer,
     viewpoints: wgpu::Buffer,
+    counters: wgpu::Buffer,
     vertex_data: Vec<u8>,
     index_data: Vec<u8>,
     vertex: wgpu::Buffer,
@@ -101,6 +104,9 @@ struct Renderer {
     resolve: wgpu::Buffer,
     timings: Vec<TimingSlot>,
     last_gpu: Option<f64>,
+    last_counters: std::collections::BTreeMap<String, u64>,
+    pass_gpu: std::collections::BTreeMap<String, f64>,
+    detailed_timestamps: bool,
     last_cpu: f64,
     last_acquire: f64,
     frame_stages: [f64; 5],
@@ -229,7 +235,7 @@ impl Renderer {
             ..Default::default()
         }))
         .ok_or_else(|| PyValueError::new_err("no Metal adapter"))?;
-        let optional = wgpu::Features::MULTI_DRAW_INDIRECT | wgpu::Features::TIMESTAMP_QUERY;
+        let optional = wgpu::Features::MULTI_DRAW_INDIRECT | wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
         let features = (a.features() & optional) | wgpu::Features::INDIRECT_FIRST_INSTANCE;
         let (device, queue) = pollster::block_on(a.request_device(
             &wgpu::DeviceDescriptor {
@@ -376,12 +382,12 @@ impl Renderer {
             device.create_query_set(&wgpu::QuerySetDescriptor {
                 label: None,
                 ty: wgpu::QueryType::Timestamp,
-                count: 4,
+                count: timing::COUNT,
             })
         });
         let resolve = buffer(
             &device,
-            &[0; 32],
+            &[0; timing::BYTES],
             wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
         );
         let read = buffer(
@@ -420,13 +426,17 @@ impl Renderer {
                 .map(|_| TimingSlot {
                     read: buffer(
                         &device,
-                        &[0; 32],
+                        &[0; timing::BYTES + 32],
                         wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     ),
                     pending: None,
+                    active: Vec::new(),
                 })
                 .collect(),
             last_gpu: None,
+            pass_gpu: Default::default(),
+            last_counters: Default::default(),
+            detailed_timestamps: features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS),
             last_cpu: 0.,
             last_acquire: 0.,
             frame_stages: [0.; 5],
@@ -567,10 +577,11 @@ impl Renderer {
         let hard_template = capacity_buffer(&self.device, &hard_cmd, prototype_capacity * 40, wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
         let survivors = buffer(&self.device, &vec![0; capacity * 4], wgpu::BufferUsages::STORAGE);
         let viewpoints = buffer(&self.device, &vec![0; capacity * 80], wgpu::BufferUsages::STORAGE);
+        let counters = buffer(&self.device, &[0; 32], wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST);
         let compute = bind_prototypes(
             &self.device,
             &self.compute.get_bind_group_layout(0),
-            &[&self.camera, &inst, &protos, &commands, &survivors, &viewpoints],
+            &[&self.camera, &inst, &protos, &commands, &survivors, &viewpoints, &counters],
             count as u32,
         );
         let draw = bind(
@@ -604,6 +615,7 @@ impl Renderer {
             edge_data: expanded_v,
             edge_records,
             viewpoints,
+            counters,
             material_data: vec![0; count*16],
             material_shifts,
             inst,
@@ -709,7 +721,7 @@ impl Renderer {
             if data.len() as u64 > target.size() { *target = capacity_buffer(&self.device, data, grown_capacity(target.size() as usize, data.len()), usage | wgpu::BufferUsages::COPY_DST); }
             else { self.queue.write_buffer(target, 0, data); }
         }
-        s.compute = bind_prototypes(&self.device, &self.compute.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors, &s.viewpoints], s.p);
+        s.compute = bind_prototypes(&self.device, &self.compute.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors, &s.viewpoints, &s.counters], s.p);
         s.edge_draw = bind(&self.device, &self.edge.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors, &s.edge_records, &s.viewpoints]);
         s.xray_edge_draw = bind(&self.device, &self.xray_edge.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors, &s.edge_records, &s.viewpoints]);
         s.profile_draw = bind(&self.device, &self.profile_top.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors, &s.edge_records, &s.viewpoints]);
@@ -759,7 +771,7 @@ impl Renderer {
             s.survivors = buffer(&self.device, &vec![0; s.capacity*4], wgpu::BufferUsages::STORAGE);
             s.viewpoints = buffer(&self.device, &vec![0; s.capacity*80], wgpu::BufferUsages::STORAGE);
             s.compute = bind_prototypes(&self.device, &self.compute.get_bind_group_layout(0),
-                &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors, &s.viewpoints], s.p);
+                &[&self.camera, &s.inst, &s.protos, &s.commands, &s.survivors, &s.viewpoints, &s.counters], s.p);
             s.draw = bind(&self.device, &self.draw.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
             s.edge_draw = bind(&self.device, &self.edge.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors, &s.edge_records, &s.viewpoints]);
             s.xray_draw = bind(&self.device, &self.xray.get_bind_group_layout(0), &[&self.camera, &s.inst, &s.survivors]);
@@ -1019,6 +1031,22 @@ impl Renderer {
                             * self.queue.get_timestamp_period() as f64
                             / 1e6,
                     );
+                    if self.detailed_timestamps {
+                        self.pass_gpu = timing::decode(&data, self.queue.get_timestamp_period() as f64);
+                        for (name, value) in &mut self.pass_gpu { if !slot.active.contains(&name.as_str()) { *value = 0.; } }
+                        let ranges: Vec<_> = slot.active.iter().filter(|n| **n != "frame").filter_map(|name| {
+                            let k = timing::index(name) as usize * 8;
+                            let a = u64::from_le_bytes(data[k..k+8].try_into().unwrap());
+                            let b = u64::from_le_bytes(data[k+8..k+16].try_into().unwrap());
+                            (b > a && a > 0).then_some((a,b))
+                        }).collect();
+                        self.last_gpu = ranges.iter().map(|p| p.0).min().zip(ranges.iter().map(|p| p.1).max()).map(|(a,b)| (b-a) as f64 * self.queue.get_timestamp_period() as f64 / 1e6);
+                        self.pass_gpu.insert("frame".into(), self.last_gpu.unwrap_or(0.));
+                    }
+                    for (k, name) in ["instances_submitted", "culled_frustum", "culled_below_pixel", "triangles_submitted"].iter().enumerate() {
+                        let at = timing::BYTES + k*4;
+                        self.last_counters.insert(name.to_string(), u32::from_le_bytes(data[at..at+4].try_into().unwrap()) as u64);
+                    }
                     drop(data);
                     slot.read.unmap();
                 }
@@ -1040,7 +1068,9 @@ impl Renderer {
         let depth = self.depth.create_view(&Default::default());
         let ids = self.ids.create_view(&Default::default());
         let mut e = self.device.create_command_encoder(&Default::default());
-        self.background.draw(&mut e, &color);
+        let tq = self.queries.as_ref().filter(|_| self.detailed_timestamps);
+        self.background.draw(&mut e, &color, tq);
+        e.clear_buffer(&s.counters, 0, None);
         e.copy_buffer_to_buffer(if self.look.data[6][0] > 0. { &s.template } else { &s.hard_template }, 0, &s.commands, 0, s.p as u64 * 40);
         {
             let mut pass = e.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1050,8 +1080,8 @@ impl Renderer {
                     .as_ref()
                     .map(|q| wgpu::ComputePassTimestampWrites {
                         query_set: q,
-                        beginning_of_pass_write_index: Some(0),
-                        end_of_pass_write_index: Some(1),
+                        beginning_of_pass_write_index: Some(timing::index("culling")),
+                        end_of_pass_write_index: Some(timing::index("culling")+1),
                     }),
             });
             pass.set_pipeline(&self.compute);
@@ -1061,11 +1091,11 @@ impl Renderer {
         let msaa = self.antialias && self.style != 1 && self.look.data[6][2] == 0.;
         self.stable_frames = self.stable_frames.saturating_add(1);
         let draw_ids = needs_id_pass(msaa, self.pick_pending, self.ids_dirty, self.stable_frames);
-        if self.style == 1 { self.transparency.draw(&mut e, &color, s, self.multi); }
+        if self.style == 1 { self.transparency.draw(&mut e, &color, s, self.multi, tq); }
 
         let ao_active = self.ao.active(self.style);
         for edge_only in [false, true] {
-            if edge_only && !ao_active { break; }
+            if edge_only && !(self.edges || self.style == 4) { break; }
             if (draw_ids || ao_active) && (!msaa || !edge_only) {
             let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
@@ -1095,15 +1125,12 @@ impl Renderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: self
-                    .queries
-                    .as_ref()
-                    .filter(|_| !edge_only || !self.antialias)
-                    .map(|q| wgpu::RenderPassTimestampWrites {
-                        query_set: q,
-                        beginning_of_pass_write_index: if edge_only { None } else { Some(2) },
-                        end_of_pass_write_index: if (msaa && !self.pick_pending) || (!edge_only && ao_active) { None } else { Some(3) },
-                    }),
+                timestamp_writes: tq.map(|q| {
+                    let name = if edge_only { "edge_quads" } else { "faces" };
+                    wgpu::RenderPassTimestampWrites { query_set: q,
+                        beginning_of_pass_write_index: Some(timing::index(name)),
+                        end_of_pass_write_index: Some(timing::index(name)+1) }
+                }),
                 occlusion_query_set: None,
             });
             pass.set_pipeline(if self.style == 1 || msaa {
@@ -1133,7 +1160,7 @@ impl Renderer {
                     }
                 }
             }
-            if !msaa && (edge_only || !ao_active) && (self.edges || self.style == 4) {
+            if !msaa && edge_only && (self.edges || self.style == 4) {
                 for hidden in [true, false] {
                     if hidden && self.style != 1 && self.look.data[6][2] == 0. { continue; }
                     pass.set_pipeline(if hidden { &self.xray_edge } else { &self.edge });
@@ -1155,20 +1182,21 @@ impl Renderer {
             }
             drop(pass);
             }
-            if msaa && !self.pick_pending {
+            if msaa && !self.pick_pending && (!edge_only || ao_active) {
                 self.aa.draw(&mut e, &color, s, self.style, self.edges, self.multi, self.queries.as_ref(), if ao_active { Some(edge_only) } else { None });
             }
             if !edge_only && ao_active {
                 let output = if msaa && !self.pick_pending { self.aa.color_view() } else { target.create_view(&Default::default()) };
-                self.ao.draw(&self.device, &self.queue, &mut e, target, &depth, &output, msaa && !self.pick_pending);
+                self.ao.draw(&self.device, &self.queue, &mut e, target, &depth, &output, msaa && !self.pick_pending, tq);
             }
         }
         if draw_ids || ao_active { self.ids_dirty = false; }
         self.overlay
-            .draw(&mut e, &color, self.config.width, self.config.height);
+            .draw(&mut e, &color, self.config.width, self.config.height, tq);
         if let (Some(q), Some(k)) = (&self.queries, timing_slot) {
-            e.resolve_query_set(q, 0..4, &self.resolve, 0);
-            e.copy_buffer_to_buffer(&self.resolve, 0, &self.timings[k].read, 0, 32);
+            e.resolve_query_set(q, 0..if self.detailed_timestamps { timing::COUNT } else { 4 }, &self.resolve, 0);
+            e.copy_buffer_to_buffer(&self.resolve, 0, &self.timings[k].read, 0, timing::BYTES as u64);
+            e.copy_buffer_to_buffer(&s.counters, 0, &self.timings[k].read, timing::BYTES as u64, 32);
         }
         let stride = (self.config.width * 4).div_ceil(256) * 256;
         let capture = self.capture_next.then(|| {
@@ -1248,6 +1276,12 @@ impl Renderer {
                     let _ = tx.send(r);
                 });
             self.timings[k].pending = Some(rx);
+            let mut active = vec!["background", "culling", "overlay", "frame"];
+            if draw_ids || ao_active { active.push("faces"); if !msaa && (self.edges || self.style == 4) { active.push("edge_quads"); } }
+            if msaa && !self.pick_pending { active.push("antialias"); }
+            if self.style == 1 { active.extend(["xray_accumulation", "xray_composite"]); }
+            if ao_active { active.extend(["ao_inputs", "ao_kernel", "ao_blur_x", "ao_blur_y", "ao_upsample_composite"]); }
+            self.timings[k].active = active;
         }
         self.last_cpu = cpu;
         Ok((cpu, self.last_gpu))
@@ -1279,8 +1313,8 @@ impl Renderer {
             .upload(&self.device, &self.queue, width, height, bytes);
         Ok(())
     }
-    fn last_timings(&self) -> (f64, Option<f64>, f64) {
-        (self.last_cpu, self.last_gpu, self.last_acquire)
+    fn last_timings(&self) -> (f64, Option<f64>, f64, std::collections::BTreeMap<String, f64>, std::collections::BTreeMap<String, u64>) {
+        (self.last_cpu, self.last_gpu, self.last_acquire, self.pass_gpu.clone(), self.last_counters.clone())
     }
     fn ensure_ids(&mut self) -> PyResult<()> {
         if !self.ids_dirty { return Ok(()); }

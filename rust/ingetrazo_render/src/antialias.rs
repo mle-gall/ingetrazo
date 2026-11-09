@@ -154,7 +154,7 @@ impl Antialias {
     ) {
         let color = self.color.create_view(&Default::default());
         let depth = self.depth.create_view(&Default::default());
-        if edge_only != Some(true) { self.background.draw(e, &color); }
+        if edge_only != Some(true) { self.background.draw(e, &color, None); }
         let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("4x MSAA color resolve"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -173,11 +173,7 @@ impl Antialias {
                 }),
                 stencil_ops: None,
             }),
-            timestamp_writes: queries.filter(|_| edge_only != Some(false)).map(|q| wgpu::RenderPassTimestampWrites {
-                query_set: q,
-                beginning_of_pass_write_index: if edge_only.is_none() { Some(2) } else { None },
-                end_of_pass_write_index: Some(3),
-            }),
+            timestamp_writes: crate::timing::writes(queries, "antialias"),
             occlusion_query_set: None,
         });
         pass.set_vertex_buffer(0, scene.vertex.slice(..));

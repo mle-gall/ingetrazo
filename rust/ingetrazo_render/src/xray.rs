@@ -188,6 +188,7 @@ impl Xray {
         color: &wgpu::TextureView,
         s: &crate::Scene,
         multi: bool,
+        queries: Option<&wgpu::QuerySet>,
     ) {
         let views = self
             .targets
@@ -212,7 +213,7 @@ impl Xray {
                 label: Some("X-ray accumulation"),
                 color_attachments: &attachments,
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: crate::timing::writes(queries, "xray_accumulation"),
                 occlusion_query_set: None,
             });
             let groups = self.groups.as_ref().unwrap();
@@ -241,7 +242,7 @@ impl Xray {
                 },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: None,
+            timestamp_writes: crate::timing::writes(queries, "xray_composite"),
             occlusion_query_set: None,
         });
         p.set_pipeline(&self.composite);

@@ -2341,3 +2341,37 @@ not a full visual regression suite. The cache moves floating-point matrix
 work to the compute pass; duplicate MSAA edge rendering is also removed.
 [Current capture](benchmarks/wgpu-perf-2026-11-09/marquee-metal-ao-half-wgpu.png),
 [comparison metrics](benchmarks/wgpu-perf-2026-11-09/capture-comparison.json).
+
+## Renderer — face pass — 2026-11-09
+
+Instrumentation baseline on `renderer/perf-face-pass`, Apple M1 Max, 2000×1400,
+10 warm-ups / 20 samples, 120 ms pacing. These runs are **contended**: the
+owner authorized diagnostic measurements with Ableton and the main-checkout
+review instance left running. Load averages accompany every configuration in
+`wgpu-perf-2026-11-09/{ride,pusher}-before.json`.
+
+The baseline splits single-sample faces and edges into separate native passes
+because this Metal adapter does not support timestamps inside render passes.
+Encoder-level timestamps returned zero in validation; native pass descriptor
+timestamps work. This extra store/load boundary means the instrumented edge
+baseline is not identical to the original uninstrumented renderer. The frame
+column spans the earliest to latest measured pass, including inter-pass gaps;
+individual pass medians need not sum to its median. No depth pre-pass exists.
+`last_timings()` preserves its first three tuple entries and appends the named
+GPU table and asynchronous GPU culling counters. Profile classification is
+integrated into edge quads; AO upsample/composite are fused. `ao_inputs` and
+`profile_top` are reserved, currently unmeasured columns, **not evidence of zero
+cost**. Present remains CPU-only through `frame_stage_timings()`.
+
+Faces-only baseline: ride face 24.827 ms, background 1.133 ms, culling 0.241 ms,
+frame 29.102 ms (load 5.994); pusher face 3.086 ms, background 0.818 ms,
+culling 0.022 ms, frame 5.014 ms (load recorded in JSON). The pusher is not a
+few-thousand-triangle workload: even the 400×280 smoke test submits 1,320,760
+triangles. At full resolution the counters establish the actual workload.
+There is no measured standalone 5 ms disabled-feature pass: most pusher cost
+is faces, with background and inter-pass scheduling contributing the rest.
+AO, X-ray and MSAA do not execute in the faces-only baseline.
+
+Initial validation: both isolated release builds succeeded; 23 render-crate
+unit tests passed before the final instrumentation adjustments. Final checks
+and optimization results follow below. Performance gates remain open.

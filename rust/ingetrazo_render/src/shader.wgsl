@@ -9,6 +9,7 @@ struct Command { count: u32, instances: atomic<u32>, first: u32, base: i32, star
 @group(0) @binding(4) var<storage, read_write> survivors: array<u32>;
 struct EdgePlacement { eye: vec4f, transform: mat4x4f }
 @group(0) @binding(5) var<storage, read_write> viewpoints: array<EdgePlacement>;
+@group(0) @binding(6) var<storage, read_write> counters: array<atomic<u32>>;
 @compute @workgroup_size(64)
 fn cull(@builtin(global_invocation_id) gid: vec3u) {
  let id = gid.x;
@@ -28,8 +29,10 @@ fn cull(@builtin(global_invocation_id) gid: vec3u) {
    low = min(low, q.xy/q.w); high = max(high, q.xy/q.w);
   }
  }
- if any(outside == vec3u(8)) || any(outside2 == vec3u(8)) { return; }
- if !crosses && all((high-low)*camera.size.xy*0.5 < vec2f(1)) { return; }
+ if any(outside == vec3u(8)) || any(outside2 == vec3u(8)) { atomicAdd(&counters[1], 1u); return; }
+ if !crosses && all((high-low)*camera.size.xy*0.5 < vec2f(1)) { atomicAdd(&counters[2], 1u); return; }
+ atomicAdd(&counters[0], 1u);
+ atomicAdd(&counters[3], commands[i.info.x].count / 3u);
  viewpoints[id].transform = m;
  let a = i.world[0].xyz; let b = i.world[1].xyz; let c = i.world[2].xyz;
  let determinant = dot(a,cross(b,c));
