@@ -4468,17 +4468,18 @@ LIVE_TAKEOFF_FACE_LIMIT = 350_000
 
 
 def _takeoff_size(scene) -> tuple:
-    """``(tagged groups, placed faces)`` in one walk, with no measuring and
-    no mesh built: a lazy mesh answers from its plan."""
+    """``(tagged groups, placed faces)`` in one walk, with no measuring, no
+    mesh built and no Plan built: a lazy mesh answers from its saved
+    counts (``core.mesh.face_count``). Asking ``plan_of`` here cost 40 s on
+    the ride model just to decide whether to measure (Perf 4)."""
     from core.bim import _placed_groups
-    from core.lazy_mesh import plan_of
+    from core.mesh import face_count
     tagged = 0
     faces = 0
     for g, _base in _placed_groups(scene.groups):
         if getattr(g, "ifc", None):
             tagged += 1
-        plan = plan_of(g.mesh)
-        faces += plan.nfaces if plan is not None else len(g.mesh.faces)
+        faces += face_count(g.mesh)
     return tagged, faces
 
 

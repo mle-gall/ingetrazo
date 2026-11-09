@@ -1283,3 +1283,185 @@ completed batches, 1,267 passed / 18 failed / 48 skipped / 1 deselected;
 all observed failures match the baseline, but the remainder is unverified.
 Ride default timed out without an image; edges-off wrote its image before
 a shutdown timeout. Its width-4 diagnostic exited normally.
+## P9 — direct indexed takeoff arrays and prototype measurements (2026-11-09)
+
+`arrays_of` reads indexed deferred sources without constructing a Plan or
+welding positions. Sorted undirected ring-corner pairs provide edge incidence;
+loose edges do not affect closure. The saved point identities are authoritative:
+coincident but distinct indexed points remain distinct, so coincident sheets do
+not acquire a spurious closed volume. This deliberately differs from the old
+Plan's positional weld for malformed/noncanonical indexed sources. Legacy JSON
+sources have no shared vertex identity because each ring repeats coordinates, so they
+retain the existing positional weld, without building a Plan, to preserve their
+historical closure and tolerance semantics. Thus the no-weld guarantee applies
+to indexed saved arrays, not coordinate-soup JSON. Binary metadata identifies
+indexed sources even when their historical build order is marked sequential.
+
+Prototype measurements cache Newell results, perimeter, signed volume, closure and local
+bounds. Rigid/uniform occurrences reuse area and determinant-scaled volume;
+a relative Gram-matrix tolerance of 2e-6 includes mirrored placements and rejects
+anisotropic transforms even at tiny scales. General affine occurrences measure
+transformed positions. Uniform placements also fall back when float32 coordinate
+error times perimeter/surface area can exceed 2e-5 relative / 1e-7 absolute area
+or volume tolerance. Thin solids and sheets far from the origin therefore retain
+the old world-rounded quantities. Assemblies with inconsistent face winding keep
+the assembled calculation: edge incidence alone does not guarantee that signed
+area vectors cancel, and their historical volume depends on the shared anchor. Multiple open placements retain the existing cross-
+placement weld. Signed volume aggregation preserves cancellation between
+oppositely wound closed placements. Exact class dimensions still use transformed
+points: transforming a local AABB alone would overestimate arbitrary rotated
+shapes. Float32 world-position rounding can differ slightly from scaling local
+float64 measurements, as with the existing array/Qt tolerance comparisons.
+
+An iterative owned-placement traversal follows `iter_placements` composition
+semantics, pruning tagged descendants. Each object's list supplies both its memo
+signature and geometry callback during collection. Per-mesh tag presence and
+positive face-tag indices are cached by mutation serial, source identity and
+tag epoch. Source identity also invalidates geometry caches on materialization.
+
+The tray still calls `plan_of` in `views/tray.py::_takeoff_size` before collection.
+That file belongs to the parallel UI work and was not edited. Recommend replacing
+that count with `core.mesh.face_count`, which already reads deferred face counts
+without a Plan. Keep the current 4,000-object / 350,000-face live limits unless a
+separate live refresh measurement meets the five-second gate. The full ride is
+not demonstrated safe for automatic live measurement by these changes.
+
+Reproduction (run twice in separate processes, model read only):
+
+```sh
+QT_QPA_PLATFORM=offscreen INGETRAZO_RUST=1 .venv-work/bin/python \
+  tests/benchmark_takeoff_arrays.py \
+  /Users/legallmaxence/Desktop/space_exact/space_asbuilt_ride.igz \
+  --output .venv-work/takeoff-run1
+```
+
+The benchmark reports profiled cold collection, unprofiled memo collection,
+class quantities, and a real offscreen `BimPanel.refresh` with warmed arrays and
+a fresh takeoff memo. The full ride is explicitly measured on request, bypassing
+the live size cap. The constructor calls refresh and runs the size check before the explicitly
+timed refresh; that construction/initial-size-check time is now reported
+separately by the helper. It can build Plans on the new path, so the subsequent
+refreshes have both warmed arrays and Plans. Profiles and per-object
+area/volume snapshots are written inside the worktree; the input is never saved.
+
+Validation uses a worktree-owned Python 3.13 environment installed from
+`requirements.txt`; the optional Rust and IFC wheels are absent. Focused tests:
+
+```sh
+QT_QPA_PLATFORM=offscreen INGETRAZO_RUST=1 .venv-work/bin/python -m pytest \
+  tests/test_geometry_arrays.py tests/test_bim.py \
+  tests/test_bim_grouped_tags.py tests/test_bim_reinforcing_bar.py -q
+```
+
+Result: **41 passed, 15 skipped** (3.89 s). Transform references clear cached
+measurements before recomputing from world points, so they independently check
+the fast path. Coverage includes uniform scale, mirroring, nonuniform and tiny
+anisotropic scale, saved coincident/distinct points, split-solid closure,
+prototype reuse, far-origin float32 rounding, inconsistent winding, tag invalidation, and absence of `_deferred_plan` after lazy
+collection. IFC-dependent readback cases remain skipped without their optional
+wheel; existing non-IFC quantity fixtures pass.
+
+Bounded suite command:
+
+```sh
+QT_QPA_PLATFORM=offscreen INGETRAZO_RUST=1 .venv-work/bin/python \
+  scripts/pytest_batches.py -m 'not slow' --batches 60
+```
+
+Pass `--reference .venv-work/before1.json` to compare every record's area,
+volume and closure against a saved baseline. The full-model check uses the
+existing P6 tolerance (2e-5 relative / 1e-7 absolute). Numerical guards were added
+after the first comparison exposed thin-solid rounding and inconsistent-winding
+anchor differences; the reported final runs include those guards. In the first
+final run all 1,482 volumes are exactly equal, no closure changed, and the maximum
+relative area difference is 5.4801e-8 (maximum absolute difference 0.000252829 m²).
+The focused suite was rerun after the final numeric guards; the earlier full-suite
+geometry batch precedes those guards and its three added regression cases.
+
+The bounded run was interrupted by host `ENOSPC` during batch 41, after batches
+1–40 completed. A worktree-local copy of the runner resumed the same 60-way file
+partition at batch 41 (earlier batches were not rerun), with `TMPDIR` under
+`.venv-work/tmp`. No shared files or other agents' outputs were removed. Disk
+availability subsequently recovered from 2.8 GiB to 32 GiB. The incomplete batch
+41 attempt is excluded from the completed-suite counts. No batch reached the
+30-minute split threshold. The unfinished first tray timing was also stopped
+under extreme host contention; completed collection measurements were retained,
+and the second cold run plus two tray refreshes run after this worktree's suite.
+
+Completed suite totals (all 60 partitions): **6,908 passed, 21 failed,
+350 skipped, 2 xfailed, 14 errors, 805 deselected**, 55 warnings. Completed batch
+runtime totals 3,534.18 s; the longest batch was 265.11 s. Eighteen of the supplied
+19 baseline failures reproduced: 14 translations, cursor pick, extension wrap,
+hidden panels and toolbar bold. The baseline swatch-tooltip failure did not
+reproduce. Three additional failures were the explicit missing-Rust assertion,
+autosave slot and extension catalogue-worker completion. The last two passed
+an isolated recheck (2 passed in 2.24 s, alongside the native setup recheck).
+All 14 WGPU interaction setup errors are the missing optional native module:
+`_native.available().bake_scene` raises because `available()` returns `None`.
+The isolated native setup test reproduced that same error. No unrelated UI or
+native test code was changed to suppress these results.
+
+Isolated recheck command (same offscreen/Rust-requested environment):
+
+```sh
+TMPDIR="$PWD/.venv-work/tmp" QT_QPA_PLATFORM=offscreen INGETRAZO_RUST=1 \
+.venv-work/bin/python -m pytest -q \
+  tests/test_project_tabs.py::test_each_untitled_project_autosaves_to_its_own_slot \
+  tests/test_extension_manager.py::test_extension_sort_modes_and_recent_date_availability \
+  tests/test_wgpu_interaction.py::test_resolution
+```
+
+All logs, baseline core snapshot, quantity JSON snapshots and cProfile files are
+under `.venv-work`. Host load varied dramatically, exceeding 220 during the
+suite; comparisons below are observations under contention, not a controlled
+speedup claim. The supplied native-enabled 29.5 s cold profile is not reproduced
+by this NumPy-only environment. No live-limit increase is recommended.
+
+Final profiles (seconds; cumulative rows overlap and must not be added):
+
+| Function / metric | Before 1 | Before 2 | After 1 | After 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Plan construction (cum) | 97.194 | 151.761 | 0.000 | 0.000 |
+| All welding (335 retained assemblies after) (cum) | 211.862 | 269.813 | 78.173 | 42.042 |
+| Cross-placement merged (cum) | 133.935 | 148.132 | 79.550 | 42.718 |
+| Recursive world_arrays (own) | 3.200 | 6.488 | 0.000 | 0.000 |
+| Iterative owned traversal (own) | 0.000 | 0.000 | 0.357 | 0.168 |
+| Placed-array transforms/cache dispatch (own) | 0.000 | 0.000 | 2.929 | 1.094 |
+| Memo signature (cum) | 1.073 | 2.116 | 0.781 | 0.336 |
+| Measurements (including prototype caches) (cum) | 10.191 | 16.032 | 39.005 | 12.076 |
+| Tag presence (cum) | 5.584 | 7.252 | 0.518 | 0.215 |
+| Face-tag lookup (cum) | 5.937 | 7.713 | 0.848 | 0.396 |
+| Face attribute scans (cum) | 4.608 | 5.921 | 0.000 | 0.000 |
+
+Final timing observations, in seconds (Python 3.13.12, NumPy 2.5.4,
+PySide6 6.11.3; no native wheel):
+
+| Operation | Before 1 | Before 2 | After 1 | After 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Cold collection, cProfile enabled | 259.16 | 346.77 | 143.18 | 64.24 |
+| Unchanged memo collection | 1.37 | 1.82 | 2.10 | 0.33 |
+| Class quantities after collection | 91.30 | 96.78 | 119.94 | 37.70 |
+| Tray refresh, warm arrays/Plans, fresh memo | 100.44 | 99.65 | 78.21 | 83.77 |
+| One-minute host load at collection start | 17.25 | 38.08 | 76.26 | 24.06 |
+
+The two tray observations in each column pair are successive refreshes in its
+second benchmark process, not separate cold starts. The after constructor and
+initial size check additionally took **40.64 s**; the corresponding baseline
+constructor time was not recorded. Use `--tray-repeats 2` to reproduce the two
+refresh observations. The second after process ran after this worktree's suite
+and isolated rechecks, while unrelated work still shared the Mac.
+
+Both final quantity snapshots are identical to each other and pass the baseline
+comparison. Each cold after profile has **zero Plan calls**, **335 weld calls**
+(all retained assembly welds), and no `world_arrays` calls. Before: **13,179 Plan
+calls**, **13,514 weld calls**, and **324,729 recursive world-array calls**.
+Iterative traversal itself takes 0.357 / 0.168 s; transformed-position work remains
+visible separately in the profile table, rather than being described as free.
+Local metrics, numeric fallback guards and retained open-assembly measurement
+still cost time. Neither cold run meets five seconds. Keep the existing live
+limits at **4,000 objects / 350,000 faces**, and have the UI owner replace the
+Plan-building size check with `face_count` before considering another limit study.
+
+The baseline profiles used a frozen worktree-local copy of `core` at `706aee71`;
+other source files and the read-only ride input were identical. Discarded interim
+implementation runs and the interrupted tray timing are not included above.

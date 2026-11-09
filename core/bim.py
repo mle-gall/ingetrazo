@@ -75,8 +75,19 @@ def _group_meshes(scene):
 def _holds_face_tags(mesh) -> bool:
     """Whether any face of ``mesh`` is tagged — a lazy mesh answers from
     the document it was read from, without being built."""
-    from core.mesh import face_attrs
-    return any(a.get("ifc") for a in face_attrs(mesh))
+    d = mesh.__dict__
+    key = (d.get('_mut_serial'), _TAG_EPOCH, id(d.get('_deferred_source')))
+    cached = d.get('_bim_face_tags')
+    if cached is None or cached[0] != key:
+        source = d.get('_deferred_source')
+        if source is not None:
+            table = source['meta'].get('face_attrs') or ()
+            present = any(a.get('ifc') for a in table)
+        else:
+            present = any(f.attrs.get('ifc') for f in mesh.faces)
+        cached = (key, present)
+        d['_bim_face_tags'] = cached
+    return cached[1]
 
 
 def next_object_id(scene) -> int:
@@ -182,18 +193,20 @@ def face_set_volume(faces):
     return abs(math.fsum(terms))
 
 
-def _group_signature(g, base=None) -> tuple:
+def _group_signature(g, base=None, placements=None) -> tuple:
     """What a tagged group's quantities depend on: its tag, the matrix its
     ancestors compose and, for every placement down its tree, the mesh,
     that mesh's mutation serial, the composed matrix and whether it is
     tagged (a tagged descendant is left out). Equal signatures measure the
     same."""
-    from core.group import iter_placements
+    from core.geometry_arrays import owned_placements
+    if placements is None:
+        placements = owned_placements(g, base)
     tag = tuple(sorted((k, repr(v)) for k, v in (g.ifc or {}).items()))
     parts = []
-    for placed, m in iter_placements(g, base):
+    for placed, m in placements:
         mesh = placed.mesh
-        parts.append((id(mesh), getattr(mesh, "_mut_serial", None),
+        parts.append((id(mesh), mesh.__dict__.get("_mut_serial"),
                       None if m is None else tuple(m.data()),
                       placed is not g and bool(getattr(placed, "ifc", None))))
     return (id(g), tag, tuple(parts))
@@ -246,18 +259,23 @@ def _face_tags_in(mesh, memo, seen) -> dict:
     it or a tag changes — the takeoff refreshes on every edit."""
     key = None
     if memo is not None:
-        key = ("untagged", id(mesh), getattr(mesh, "_mut_serial", None),
+        key = ("untagged", id(mesh), mesh.__dict__.get("_mut_serial"),
                _TAG_EPOCH)
         seen.add(key)
         if key in memo:
             return {}
     by_id: dict = {}
     if _holds_face_tags(mesh):
+        facts_key = mesh.__dict__['_bim_face_tags'][0]
+        cached = mesh.__dict__.get('_bim_tag_indices')
+        if cached is not None and cached[0] == facts_key:
+            return cached[1]
         from core.geometry_arrays import face_attributes
         for index, attrs in enumerate(face_attributes(mesh)):
             tag = attrs.get("ifc")
             if tag:
                 by_id.setdefault(tag.get("id"), (tag, []))[1].append(index)
+        mesh.__dict__['_bim_tag_indices'] = (facts_key, by_id)
     if key is not None and not by_id:
         memo[key] = True
     return by_id
@@ -320,9 +338,11 @@ def collect_objects(scene, memo: dict | None = None) -> list[dict]:
                     "tag_id": obj_id,
                 })
             continue
+        from core.geometry_arrays import owned_placements
+        placements = list(owned_placements(g, base))
         sig = None
         if memo is not None:
-            sig = _group_signature(g, base)
+            sig = _group_signature(g, base, placements)
             seen.add(sig)
             hit = memo.get(sig)
             if hit is not None and hit.get("group") is g:
@@ -330,9 +350,9 @@ def collect_objects(scene, memo: dict | None = None) -> list[dict]:
                 continue
         # Quantities are world-space, and a component's nested placements
         # are part of the object being measured.
-        from core.geometry_arrays import world_arrays, quantities
-        geometry = lambda g=g, base=base: world_arrays(g, base)
-        area, _, volume, _, _ = quantities(geometry())
+        from core.geometry_arrays import world_arrays, placement_quantities
+        geometry = lambda g=g, placements=placements: world_arrays(g, placements=placements)
+        area, _, volume, _, _ = placement_quantities(placements)
         obj = {
             "key": ("group", id(g)),
             "class": tag.get("class", ""),
