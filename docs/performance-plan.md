@@ -3076,3 +3076,94 @@ Final 4961×3508 resident capture: **0.318 s**. Interactive
 pixels and resident byte count were unchanged after capture on all three models.
 The original R3b 33 s includes a rebuild and uses a different camera/style;
 these figures must not be treated as a matched speedup.
+
+## R3c-2a bis — 2026-11-09: resident cut polygons and capture state
+
+**Partial acceptance: the 1.5 ms clip-plus-cap gate is not established.**
+The GL reference uses `core.section.fill_triangles` on closed cut rings,
+including holes, rather than stencil capping. Metal now uses that same
+algorithm and `hatch_segments`. Open cuts remain unfilled. The pusher's
+central X cut has zero closed-ring fill triangles; marquee has 987. The
+pusher comparison therefore proves boundaries, not filled-cap pixels.
+
+The new section helper intersects only visible placements whose transformed
+prototype bounds cross the plane. It caches chords and triangulation by
+resident scene/version, plane pose and visibility; hatch geometry is cached
+by spacing/pattern. Camera changes rebuild line-width quads, not intersections.
+It does not rebake or reupload model geometry. This follows GL's scene-level
+invalidation, not a per-edited-solid triangulation cache.
+
+The renderer draws cached coloured triangles with depth writes, no face
+culling and no stencil. Both single-sample and four-sample pipelines use the
+existing camera and attachments. MSAA colour/depth are retained through the
+edge pass when a section needs them. The section pass resolves its final
+colour to the normal target; it needs no additional depth resolve. Colours
+are converted from sRGB consistently with the face and edge shaders.
+
+GL has no separate configurable cut-width field: its boundary is approximately
+2.5 logical pixels in `edge_color`, with distance/FOV sizing and a lift toward
+the clipped side. Metal follows that construction. Solid, hatch and cross
+patterns respect the plane overrides and `section_fill` master switch.
+X-ray and wireframe suppress fills but retain boundaries, matching GL.
+The existing GL-painter section widgets remain in use.
+
+Offscreen rendering uploads temporary visibility/tint instance rows, accepts
+only changes to those fields, and restores the actual resident GPU rows even
+on failure. Inherited visibility, navigator filtering and saved-view tint are
+resolved without rebuilding geometry. Section buffers are also restored in a
+Python `finally` block and counted in GPU memory. Native pusher and marquee
+runs verify changed pixels for hidden/tinted captures, exact restoration of
+normal captures, byte-identical interactive pixels, and unchanged resident
+bytes. Native marquee capture verifies that disabling fill changes pixels;
+a generated closed box independently verifies offscreen shaded, hidden-line,
+monochrome and X-ray fill behaviour.
+
+Validation commands (worktree-local environment; no batch suite):
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_*.py tests/test_section_fill.py tests/test_sections.py
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --release --manifest-path rust/ingetrazo_render/Cargo.toml
+```
+Python: **139 passed**, four existing deprecation warnings. Rust: **33 passed**,
+zero doc tests. Tests cover polygon depth/no-stencil configuration, native
+pipeline validation, clip uniform layout and all clipping shader paths, fill
+colour/area/cache, hatch switching, saved visibility/filter/tint rows, and
+capture error restoration. Stencil-cap tests are intentionally replaced by
+polygon-cap configuration tests because GL uses polygon caps.
+
+`wgpu_sections_measure.py MODEL after` ran in external `subprocess.run`
+wrappers with `timeout=240`; `wgpu_section_smoke.py` used `timeout=120`.
+No other GUI processes were stopped. Measurements use 30 settle frames,
+a capture/readback drain, then 12 completed timestamp samples per variant;
+JSON retains every sample, medians and load averages. No-section and section
+variants share a process, camera and resident scene. GUI capture readback is
+excluded from the GPU pass timings. Both crates were built in release only.
+
+Comparison PNGs remain at
+[wgpu-sections-2026-11-09](benchmarks/wgpu-sections-2026-11-09/), with the
+existing `<model>-section-True-edges-<bool>-{gl,metal}.png` filenames. GL files
+that were pixel-identical did not change. The native images were inspected;
+GL's world axes remain a visible difference unrelated to section polygons.
+
+Remaining differences/limits: caps are rendered after AO and do not enter its
+input depth or the pick-ID pass; native hatching has geometry tests but no
+separate GL/Metal hatch image acceptance. Large plane edits still pay CPU
+ring construction, outside the steady-state GPU gate. Per-pass timestamps on
+Metal overlap; a lower total frame time cannot by itself certify a standalone
+cap-cost threshold. This is not a completed R3c-2a bis performance acceptance.
+
+Final ride medians at **2000×1400**, milliseconds:
+
+| Edges/profiles | Section | AA faces | AA edges | Cap pass | Frame span |
+| --- | --- | ---: | ---: | ---: | ---: |
+| False | False | 10.557 | 0.000 | 0.000 | 11.012 |
+| True | False | 10.666 | 17.450 | 0.000 | 24.722 |
+| False | True | 10.360 | 0.000 | 4.873 | 11.674 |
+| True | True | 11.424 | 17.194 | 6.944 | 26.386 |
+
+Load before sampling: [4.97509765625, 5.84912109375, 7.45947265625]. Per-variant loads: `{'section-False-edges-False': [4.65673828125, 5.7685546875, 7.42138671875], 'section-False-edges-True': [4.65673828125, 5.7685546875, 7.42138671875], 'section-True-edges-False': [4.80224609375, 5.759765625, 7.3984375], 'section-True-edges-True': [4.80224609375, 5.759765625, 7.3984375]}`.
+
+A3 300 dpi resident composer capture: **2.256 s**, 4961×3508, `tecnico`, scale 1:750, 420×297 mm. The harness uses R3b's saved-camera/fit-scale recipe with an active section and the shared resident renderer. R3b's approximately 33 s included rebuilding geometry; it is not a pure GPU speedup comparison.
