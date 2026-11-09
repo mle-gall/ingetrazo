@@ -8,6 +8,7 @@ mod antialias;
 mod edges;
 mod faces;
 mod xray;
+mod ao;
 use numpy::PyReadonlyArray1;
 use pyo3::{exceptions::PyValueError, prelude::*};
 use raw_window_handle::{
@@ -63,6 +64,7 @@ struct Renderer {
     textures: textures::Textures,
     textures_enabled: bool,
     texture_groups: Vec<wgpu::BindGroup>,
+    ao: ao::AmbientOcclusion,
     antialias: bool,
     ids_dirty: bool,
     camera_data: Vec<f32>,
@@ -143,7 +145,7 @@ fn texture(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgp
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     })
 }
@@ -406,6 +408,7 @@ impl Renderer {
         transparency.bind_textures(&device, &textures);
         Ok(Self {
             textures, texture_groups, textures_enabled: true,
+            ao: ao::AmbientOcclusion::new(&device, format),
             antialias: true,
             ids_dirty: true,
             camera_data: Vec::new(),
@@ -863,6 +866,7 @@ impl Renderer {
     fn set_style(&mut self, style: &Bound<'_, PyAny>) -> PyResult<()> {
         self.ids_dirty = true;
         let (mode, edges) = self.look.update(style, &self.queue)?;
+        self.ao.update(style)?;
         self.style = mode;
         let name = if let Ok(d) = style.cast::<pyo3::types::PyDict>() {
             d.get_item("face_mode")?.map(|v| v.extract::<String>()).transpose()?.unwrap_or_default()
@@ -891,6 +895,7 @@ impl Renderer {
         let correction = glam::Mat4::from_cols_array(&[
             1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0.5, 0., 0., 0., 0.5, 1.,
         ]);
+        self.ao.camera(correction * glam::Mat4::from_cols_array(&p));
         let vp = correction * glam::Mat4::from_cols_array(&p) * glam::Mat4::from_cols_array(&v);
         let mut data = vp.to_cols_array().to_vec();
         data.extend([
@@ -1039,7 +1044,11 @@ impl Renderer {
         self.stable_frames = self.stable_frames.saturating_add(1);
         let draw_ids = needs_id_pass(msaa, self.pick_pending, self.ids_dirty, self.stable_frames);
         if self.style == 1 { self.transparency.draw(&mut e, &color, s, self.multi); }
-        if draw_ids {
+
+        let ao_active = self.ao.active(self.style);
+        for edge_only in [false, true] {
+            if edge_only && !ao_active { break; }
+            if draw_ids || ao_active {
             let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[
@@ -1055,7 +1064,7 @@ impl Renderer {
                         view: &ids,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            load: if edge_only { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) },
                             store: wgpu::StoreOp::Store,
                         },
                     }),
@@ -1063,7 +1072,7 @@ impl Renderer {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.),
+                        load: if edge_only { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(1.) },
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -1071,10 +1080,11 @@ impl Renderer {
                 timestamp_writes: self
                     .queries
                     .as_ref()
+                    .filter(|_| !edge_only || !self.antialias)
                     .map(|q| wgpu::RenderPassTimestampWrites {
                         query_set: q,
-                        beginning_of_pass_write_index: Some(2),
-                        end_of_pass_write_index: if self.antialias && !self.pick_pending && self.style != 1 && self.look.data[6][2] == 0. { None } else { Some(3) },
+                        beginning_of_pass_write_index: if edge_only { None } else { Some(2) },
+                        end_of_pass_write_index: if (msaa && !self.pick_pending) || (!edge_only && ao_active) { None } else { Some(3) },
                     }),
                 occlusion_query_set: None,
             });
@@ -1096,7 +1106,7 @@ impl Renderer {
             pass.set_bind_group(2, &self.texture_groups[usize::from(self.style == 1)], &[]);
             pass.set_vertex_buffer(0, s.vertex.slice(..));
             pass.set_index_buffer(s.index.slice(..), wgpu::IndexFormat::Uint32);
-            if self.style != 4 {
+            if !edge_only && self.style != 4 {
                 if self.multi {
                     pass.multi_draw_indexed_indirect(&s.commands, 0, s.p);
                 } else {
@@ -1105,7 +1115,7 @@ impl Renderer {
                     }
                 }
             }
-            if self.edges || self.style == 4 {
+            if (edge_only || !ao_active) && (self.edges || self.style == 4) {
                 for hidden in [true, false] {
                     if hidden && self.style != 1 && self.look.data[6][2] == 0. { continue; }
                     pass.set_pipeline(if hidden { &self.xray_edge } else { &self.edge });
@@ -1125,11 +1135,17 @@ impl Renderer {
                     else { for k in s.p..s.p*2 { pass.draw_indirect(&s.commands, k as u64*20); } }
                 }
             }
+            drop(pass);
+            }
+            if msaa && !self.pick_pending {
+                self.aa.draw(&mut e, &color, s, self.style, self.edges, self.multi, self.queries.as_ref(), if ao_active { Some(edge_only) } else { None });
+            }
+            if !edge_only && ao_active {
+                let output = if msaa && !self.pick_pending { self.aa.color_view() } else { target.create_view(&Default::default()) };
+                self.ao.draw(&self.device, &self.queue, &mut e, target, &depth, &output, msaa && !self.pick_pending);
+            }
         }
-        if draw_ids { self.ids_dirty = false; }
-        if msaa && !self.pick_pending {
-            self.aa.draw(&mut e, &color, s, self.style, self.edges, self.multi, self.queries.as_ref());
-        }
+        if draw_ids || ao_active { self.ids_dirty = false; }
         self.overlay
             .draw(&mut e, &color, self.config.width, self.config.height);
         if let (Some(q), Some(k)) = (&self.queries, timing_slot) {
