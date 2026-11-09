@@ -8,8 +8,7 @@ def test_registry_and_published_coverage_agree():
     root = Path(__file__).resolve().parents[1]
     registered = registry(root)
     assert set(TOOL_DISPATCH) <= set(registered.values())
-    assert {key for key, cls in registered.items() if cls not in TOOL_DISPATCH} == {
-        'section'}
+    assert {key for key, cls in registered.items() if cls not in TOOL_DISPATCH} == set()
     rendered = table(root)
     for key in registered:
         assert f'| {key} |' in rendered

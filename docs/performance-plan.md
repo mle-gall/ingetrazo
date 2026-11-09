@@ -2943,7 +2943,7 @@ Native denotes routed, not exhaustive parity acceptance.
 | protractor | ProtractorTool | native | rubber_band_lines |
 | text | TextTool | native | pick_edge, pick_face_any, rubber_band_lines |
 | geopath | GeoPathTool | native | _world_to_pixel, rubber_band_lines |
-| section | SectionPlaneTool | inert with note — after the crate work | rubber_band_lines |
+| section | SectionPlaneTool | native — after the crate work | rubber_band_lines |
 | position_camera | PositionCameraTool | native | rubber_band_lines |
 | walk | WalkTool | native | rubber_band_lines |
 | look_around | LookAroundTool | native | rubber_band_lines |

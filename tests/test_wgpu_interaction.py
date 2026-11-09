@@ -75,12 +75,14 @@ def test_selection_modifiers_and_external_change(view):
     view.select_rows([0])
     assert view.scene.selection == {group}
     view.select_rows([0], Qt.ShiftModifier)
-    assert view.scene.selection == {group}
+    assert not view.scene.selection
     view.select_rows([0], Qt.ControlModifier)
+    assert view.scene.selection == {group}
+    view.select_rows([0], Qt.ControlModifier | Qt.ShiftModifier)
     assert not view.scene.selection
     view.scene.select([group])
     view.sync_selection()
-    assert calls[-1][0] == [0]
+    assert calls[-1][0] == []  # group edges are drawn by the selection overlay
 
 
 def test_rectangle_maps_to_selection(view):
