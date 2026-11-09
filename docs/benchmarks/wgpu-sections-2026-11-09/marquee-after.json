@@ -1,0 +1,168 @@
+{
+  "load_average": [
+    8.28369140625,
+    12.5224609375,
+    10.1220703125
+  ],
+  "passes": {
+    "section-False-edges-False": [
+      0.414958,
+      14.147791,
+      8.4e-05,
+      {
+        "antialias": 1.350166,
+        "antialias_edges": 0.0,
+        "ao_blur_x": 0.0,
+        "ao_blur_y": 0.0,
+        "ao_inputs": null,
+        "ao_kernel": 0.0,
+        "ao_upsample_composite": 0.0,
+        "background": 0.110417,
+        "culling": 0.018583,
+        "depth_prepass": 0.0,
+        "edge_quads": 0.0,
+        "faces": 0.0,
+        "frame": 14.147791,
+        "id": null,
+        "overlay": 0.0,
+        "present": null,
+        "profile_classification": null,
+        "profile_top": null,
+        "xray_accumulation": 0.0,
+        "xray_composite": 0.0
+      },
+      {
+        "culled_below_pixel": 0,
+        "culled_frustum": 0,
+        "depth_prepass": 0,
+        "edge_quads_input": 61325,
+        "edge_quads_surviving": 61325,
+        "instances_input": 237,
+        "instances_submitted": 237,
+        "texture_layers": 3,
+        "triangles_submitted": 198883
+      }
+    ],
+    "section-False-edges-True": [
+      0.37024999999999997,
+      9.978917,
+      0.0,
+      {
+        "antialias": 2.367709,
+        "antialias_edges": 2.2615,
+        "ao_blur_x": 0.0,
+        "ao_blur_y": 0.0,
+        "ao_inputs": null,
+        "ao_kernel": 0.0,
+        "ao_upsample_composite": 0.0,
+        "background": 3.896333,
+        "culling": 0.02525,
+        "depth_prepass": 0.0,
+        "edge_quads": 0.0,
+        "faces": 0.0,
+        "frame": 9.978917,
+        "id": null,
+        "overlay": 0.0,
+        "present": null,
+        "profile_classification": null,
+        "profile_top": null,
+        "xray_accumulation": 0.0,
+        "xray_composite": 0.0
+      },
+      {
+        "culled_below_pixel": 0,
+        "culled_frustum": 0,
+        "depth_prepass": 0,
+        "edge_quads_input": 198274,
+        "edge_quads_surviving": 198274,
+        "instances_input": 237,
+        "instances_submitted": 237,
+        "texture_layers": 3,
+        "triangles_submitted": 198883
+      }
+    ],
+    "section-True-edges-False": [
+      0.28800000000000003,
+      4.98,
+      4.1e-05,
+      {
+        "antialias": 3.851417,
+        "antialias_edges": 0.0,
+        "ao_blur_x": 0.0,
+        "ao_blur_y": 0.0,
+        "ao_inputs": null,
+        "ao_kernel": 0.0,
+        "ao_upsample_composite": 0.0,
+        "background": 0.439542,
+        "culling": 0.021167,
+        "depth_prepass": 0.0,
+        "edge_quads": 0.0,
+        "faces": 0.0,
+        "frame": 4.98,
+        "id": null,
+        "overlay": 0.0,
+        "present": null,
+        "profile_classification": null,
+        "profile_top": null,
+        "xray_accumulation": 0.0,
+        "xray_composite": 0.0
+      },
+      {
+        "culled_below_pixel": 0,
+        "culled_frustum": 0,
+        "depth_prepass": 0,
+        "edge_quads_input": 61325,
+        "edge_quads_surviving": 61325,
+        "instances_input": 237,
+        "instances_submitted": 237,
+        "texture_layers": 3,
+        "triangles_submitted": 198883
+      }
+    ],
+    "section-True-edges-True": [
+      0.31925,
+      5.22075,
+      0.0,
+      {
+        "antialias": 2.433584,
+        "antialias_edges": 2.784417,
+        "ao_blur_x": 0.0,
+        "ao_blur_y": 0.0,
+        "ao_inputs": null,
+        "ao_kernel": 0.0,
+        "ao_upsample_composite": 0.0,
+        "background": 0.105,
+        "culling": 0.022708,
+        "depth_prepass": 0.0,
+        "edge_quads": 0.0,
+        "faces": 0.0,
+        "frame": 5.22075,
+        "id": null,
+        "overlay": 0.0,
+        "present": null,
+        "profile_classification": null,
+        "profile_top": null,
+        "xray_accumulation": 0.0,
+        "xray_composite": 0.0
+      },
+      {
+        "culled_below_pixel": 0,
+        "culled_frustum": 0,
+        "depth_prepass": 0,
+        "edge_quads_input": 198274,
+        "edge_quads_surviving": 198274,
+        "instances_input": 237,
+        "instances_submitted": 237,
+        "texture_layers": 3,
+        "triangles_submitted": 198883
+      }
+    ]
+  },
+  "sheet_seconds": 0.01726112503092736,
+  "sheet_size": [
+    600,
+    400
+  ],
+  "interactive_pixels_restored": true,
+  "resident_bytes_unchanged": true
+}

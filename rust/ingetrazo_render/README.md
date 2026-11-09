@@ -287,3 +287,24 @@ The queue can still contain an earlier display frame: this is not an isolated
 GPU queue or a guarantee of sub-20-ms end-to-end latency. MSAA's single-sample
 AO input pass suppresses color writes and edge replay; resolved edges are
 rendered only by the MSAA pass.
+
+## R3c-2a section and resident capture foundation (2026-11-09)
+
+The style uniform now has eight float4 rows (128 bytes). The final row at
+byte 112 is the world-space section equation. A zero row disables cutting;
+fragments with negative signed distance are discarded, matching GL's
+`(-normal, dot(normal, point))` kept half-space with zero tolerance.
+Faces, depth/ID, weighted X-ray, MSAA and procedural edge/profile fragments
+share this equation. The geometry ABI is unchanged.
+
+`render_image(width, height, view, projection, style)` creates temporary
+color/depth/ID, AO, MSAA and transparency resources on the existing device.
+It uses the resident scene and material buffers without calling set_scene.
+It restores interactive attachments, camera/style uniforms, capture state
+and picking scheduling after success or a Python error. Targets and pipelines
+are currently allocated per capture. Initial Python capture still needs one
+scene upload if the view has never been initialized.
+
+This is partial section parity: cap fills, hatching and thick cut boundaries
+are not yet implemented. Saved-frame visibility/tint changes that differ
+from the resident scene also need a temporary instance-state path.
