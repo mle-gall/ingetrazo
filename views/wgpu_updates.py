@@ -176,6 +176,14 @@ class InstanceUpdates:
                     renderer.replace_prototype(code, vertices.view(np.uint8).reshape(-1),
                                                indices.view(np.uint8).reshape(-1),
                                                bounds.view(np.uint8).reshape(-1), int(face['count']))
+                if renderer is not None:
+                    material = np.empty(0, np.uint8)
+                    if uid is not None:
+                        header = baked.materials.view(np.uint32).reshape(-1, 4)[prototype]
+                        first, length = int(header[1]), int(header[2])
+                        if length:
+                            material = baked.materials[first*16:(first+length)*16]
+                    renderer.update_prototype_materials(code, material)
                 offset = len(self.packed.vertices)
                 self.packed.vertices = np.concatenate((self.packed.vertices, vertices))
                 self.packed.indices = np.concatenate((self.packed.indices, indices))

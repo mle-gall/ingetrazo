@@ -175,7 +175,7 @@ impl Antialias {
             }),
             timestamp_writes: queries.filter(|_| edge_only != Some(false)).map(|q| wgpu::RenderPassTimestampWrites {
                 query_set: q,
-                beginning_of_pass_write_index: Some(2),
+                beginning_of_pass_write_index: if edge_only.is_none() { Some(2) } else { None },
                 end_of_pass_write_index: Some(3),
             }),
             occlusion_query_set: None,

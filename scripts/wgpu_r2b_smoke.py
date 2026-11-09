@@ -18,6 +18,17 @@ view.set_scene(scene)
 view.show()
 app.processEvents()
 view.set_highlight([scene.groups[0].uid])
+# A settled ID image must be discarded by a resident matrix update.
+import numpy as np
+view.renderer.pick(0, 0)
+assert view.renderer.pick_cache_valid
+rows = view.packed.instances[:1].copy()
+rows['world'][0, 3, 0] += .2
+view.renderer.update_instances([0], rows.view(np.uint8).reshape(-1))
+assert not view.renderer.pick_cache_valid
+view.renderer.pick(0, 0)
+assert view.renderer.pick_cache_valid
+view.renderer.update_instances([0], view.packed.instances[:1].view(np.uint8).reshape(-1))
 for i in range(3):
     group = Group(mesh)
     group.xform = QMatrix4x4()

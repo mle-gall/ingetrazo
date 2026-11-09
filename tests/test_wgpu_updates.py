@@ -80,7 +80,7 @@ def test_shared_mutation_bakes_once(monkeypatch):
     updates.apply(*updates.diff(scene), renderer)
     assert len(calls) == 1
     assert len(calls[0].groups) == 1
-    assert [name for name, _ in renderer.calls] == ['replace_prototype']
+    assert [name for name, _ in renderer.calls] == ['replace_prototype', 'update_prototype_materials']
 
 
 def test_move_command_matches_gl_and_undo():
@@ -129,7 +129,7 @@ def test_new_prototype_preserves_resident_ids():
     updates.apply(*updates.diff(scene), renderer)
     assert updates.rows[group.uid] == 2
     assert updates.packed.instances['info'][2, 0] == 1
-    assert [name for name, _ in renderer.calls] == ['replace_prototype', 'update_instances']
+    assert [name for name, _ in renderer.calls] == ['replace_prototype', 'update_prototype_materials', 'update_instances']
 
 
 def test_dispatch_is_explicit():

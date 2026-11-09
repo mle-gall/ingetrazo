@@ -112,7 +112,7 @@ renderer.update_instances(ids.tolist(), original.view(np.uint8).reshape(-1))
 from types import SimpleNamespace
 from PySide6.QtCore import QPointF, Qt
 from tools.move import MoveTool
-source = SimpleNamespace(camera=view.camera, active_tool=MoveTool(), history=history,
+source = SimpleNamespace(scene=scene, _horizon_ndc_y=lambda mvp: 0., camera=view.camera, active_tool=MoveTool(), history=history,
     view_tint={}, inference=None, linear_inference_mode='all',
     flash_status=lambda *a: None, measurementChanged=SimpleNamespace(emit=lambda *a: None),
     _measurement_text=lambda: '', _effective_style=lambda: SimpleNamespace(face_mode='shaded', edges=True))

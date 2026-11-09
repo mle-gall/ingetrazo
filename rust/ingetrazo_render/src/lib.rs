@@ -32,6 +32,7 @@ struct TimingSlot {
 }
 struct Scene {
     material_shifts: Vec<i64>,
+    material_data: Vec<u8>,
     inst: wgpu::Buffer,
     flags: Vec<u32>,
     rows: Vec<u8>,
@@ -104,7 +105,6 @@ struct Renderer {
     last_acquire: f64,
     frame_stages: [f64; 5],
     read: wgpu::Buffer,
-    #[pyo3(get)]
     gpu_memory: u64,
     #[pyo3(get)]
     adapter: String,
@@ -611,6 +611,7 @@ impl Renderer {
             edge_data: expanded_v,
             edge_records,
             viewpoints,
+            material_data: vec![0; count*16],
             material_shifts,
             inst,
             rows: instances.to_vec(),
@@ -668,6 +669,11 @@ impl Renderer {
             s.p += 1;
             s.prototype_data.extend_from_slice(bounds);
             s.material_shifts.push(0);
+            for row in s.material_data[..old_p*16].chunks_exact_mut(16) {
+                let offset = u32::from_le_bytes(row[4..8].try_into().unwrap());
+                if offset != 0 { row[4..8].copy_from_slice(&(offset+1).to_le_bytes()); }
+            }
+            s.material_data.splice(old_p*16..old_p*16, [0;16]);
             s.template_data.splice(old_p*20..old_p*20, [0;20]);
             s.template_data.extend_from_slice(&[0;20]);
         }
@@ -917,10 +923,27 @@ impl Renderer {
     }
     /// Kept for the R2a measurement script: anti-aliasing now lives in the
     /// antialias module, so this is the same switch as ``set_antialias``.
+    fn update_prototype_materials(&mut self, id: usize, data: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
+        let data = data.as_slice()?;
+        let s = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("no scene"))?;
+        if id >= s.p as usize || data.len()%16 != 0 { return Err(PyValueError::new_err("invalid material rows")); }
+        let mut header = [0u32;4];
+        if !data.is_empty() {
+            let face: Command = bytemuck::pod_read_unaligned(&s.template_data[id*20..id*20+20]);
+            header = [face.base as u32, (s.material_data.len()/16) as u32, (data.len()/16) as u32, 0];
+        }
+        s.material_data[id*16..(id+1)*16].copy_from_slice(bytemuck::bytes_of(&header));
+        s.material_data.extend_from_slice(data);
+        self.textures.materials = buffer(&self.device, &s.material_data, wgpu::BufferUsages::STORAGE);
+        self.texture_groups = [&self.draw, &self.xray].iter().map(|p| self.textures.bind(&self.device,p)).collect();
+        self.aa.bind_textures(&self.device, &self.textures);
+        self.transparency.bind_textures(&self.device, &self.textures);
+        Ok(())
+    }
     fn set_materials(&mut self, data: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
         self.ids_dirty = true;
         let data = data.as_slice()?;
-        let scene = self.scene.as_ref().ok_or_else(|| PyValueError::new_err("no scene"))?;
+        let scene = self.scene.as_mut().ok_or_else(|| PyValueError::new_err("no scene"))?;
         if data.len() % 16 != 0 || data.len() < scene.p as usize * 16
             || data.len() as u64 > self.device.limits().max_storage_buffer_binding_size as u64 {
             return Err(PyValueError::new_err("invalid sparse material stream"));
@@ -930,6 +953,7 @@ impl Renderer {
             let base = u32::from_le_bytes(header[..4].try_into().unwrap());
             header[..4].copy_from_slice(&((i64::from(base) + shift) as u32).to_le_bytes());
         }
+        scene.material_data = resident.clone();
         let data = resident.as_slice();
         self.gpu_memory = self.gpu_memory.saturating_sub(self.textures.materials.size());
         self.textures.materials = buffer(&self.device, data, wgpu::BufferUsages::STORAGE);
@@ -1335,6 +1359,18 @@ impl Renderer {
         read.unmap();
         Ok(ids.into_iter().collect())
     }
+    #[getter]
+    fn gpu_memory(&self) -> u64 {
+        self.scene.as_ref().map_or(0, |s| {
+            [&s.vertex, &s.index, &s.edge_records, &s.inst, &s.protos,
+             &s.survivors, &s.viewpoints, &s.commands, &s.template, &s.hard_template]
+                .iter().map(|b| b.size()).sum::<u64>() + 96 + 416
+        }) + self.textures.bytes + self.textures.materials.size()
+    }
+
+    #[getter]
+    fn pick_cache_valid(&self) -> bool { !self.ids_dirty }
+
     fn pick(&mut self, x: u32, y: u32) -> PyResult<i64> {
         if x >= self.config.width || y >= self.config.height {
             return Ok(-1);

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ['INGETRAZO_RUST'] = '1'
 os.environ['INGETRAZO_TEXTURE_CACHE'] = str(Path('.look-tmp/textures').resolve())
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QImage, QPainter, QVector3D
 from PySide6.QtWidgets import QApplication
 from core.scene import Scene
 from formats.igz import load_into
@@ -74,6 +74,8 @@ if args.pitch is not None:
     metal.camera.pitch = math.radians(args.pitch)
 if args.section:
     metal.camera.distance *= 0.2
+camera_state = {k: QVector3D(v) if isinstance(v, QVector3D) else v
+                for k, v in vars(metal.camera).items()}
 gl = Viewport()
 gl.resize(1000, 700)
 gl.scene = scene
@@ -89,6 +91,7 @@ failed = []
 
 def capture():
     try:
+        vars(metal.camera).update(camera_state)
         metal.draw_frame()
         if args.highlight:
             # Instance highlight diagnostic; GL export intentionally omits its
