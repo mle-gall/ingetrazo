@@ -1,0 +1,87 @@
+{
+  "scale": 2.0,
+  "size": [
+    2000,
+    1400
+  ],
+  "rgb_mae": 0.14231583333333334,
+  "frames": {},
+  "prototypes": 15906,
+  "vertices": 31658602,
+  "material_bytes": 254496,
+  "resident_bytes": 1177975684,
+  "face_mode": "textures",
+  "edit_rest_fade": 0.75,
+  "edit_rest_mode": "fade",
+  "background": [
+    0.94,
+    0.94,
+    0.94
+  ],
+  "edit_path": [
+    "Groupe#310",
+    "Tie 93.1 | DS"
+  ],
+  "rest_write_ms": 6.109750014729798,
+  "rest_rows": 76008,
+  "uptime": "14:39  up 8 days,  8:28, 1 user, load averages: 16.38 16.68 15.60",
+  "edit_ab": {
+    "normal": [
+      {
+        "flag_write_ms": 5.7565419701859355,
+        "median_ms": [
+          8.001334,
+          53.429708,
+          4.2e-05
+        ]
+      },
+      {
+        "flag_write_ms": 4.468415980227292,
+        "median_ms": [
+          6.901584,
+          44.623333,
+          4.1e-05
+        ]
+      }
+    ],
+    "fade": [
+      {
+        "flag_write_ms": 4.951249924488366,
+        "median_ms": [
+          6.818958,
+          37.135916,
+          4.1e-05
+        ]
+      },
+      {
+        "flag_write_ms": 8.547000004909933,
+        "median_ms": [
+          7.280666,
+          46.019083,
+          4.1e-05
+        ]
+      }
+    ]
+  },
+  "camera": {
+    "target": [
+      10.923004150390625,
+      1.093404769897461,
+      37.58420181274414
+    ],
+    "distance": 261.2211883544922,
+    "yaw": -0.7853981633974483,
+    "pitch": 0.5235987755982988,
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "fov_deg": 45.0,
+    "aspect": 1.0,
+    "znear": 0.1,
+    "zfar": 10000.0,
+    "perspective": true,
+    "two_point": false
+  }
+}

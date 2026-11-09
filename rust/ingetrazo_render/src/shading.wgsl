@@ -3,7 +3,7 @@ override TEXTURED: bool = true;
 @group(2) @binding(1) var material_sampler: sampler;
 @group(2) @binding(2) var<storage, read> materials: array<vec4u>;
 // GL uses display-referred colors; explicitly decode for the sRGB surface.
-struct Style { front: vec4f, back: vec4f, edge: vec4f, background: vec4f, sky: vec4f, ground: vec4f, profiles: vec4f, section_plane: vec4f }
+struct Style { front: vec4f, back: vec4f, edge: vec4f, background: vec4f, sky: vec4f, ground: vec4f, profiles: vec4f, section_plane: vec4f, fade: vec4f }
 @group(1) @binding(0) var<uniform> style: Style;
 fn linear(c: vec3f) -> vec3f { return select(c/12.92,pow((c+0.055)/1.055,vec3f(2.4)),c>vec3f(0.04045)); }
 struct Instance { world: mat4x4f, info: vec4u }
@@ -26,7 +26,7 @@ struct Out { @location(8) section_distance: f32, @builtin(position) position: ve
  if camera.size.z == 2 || camera.size.z == 3 { o.color = style.front.rgb; }
  if (i.info.w >> 24u) != 0u { o.color = unpack4x8unorm(i.info.w).rgb; }
 
- o.decorated = select(0u,16u,dot(a,cross(b,c)) < 0.) | (i.info.z & 6u) | select(0u,32u,(i.info.z & 8u) != 0u) | select(0u,8u,(i.info.w >> 24u) != 0u);
+ o.decorated = select(0u,16u,dot(a,cross(b,c)) < 0.) | (i.info.z & 70u) | select(0u,32u,(i.info.z & 8u) != 0u) | select(0u,8u,(i.info.w >> 24u) != 0u);
  let header = materials[i.info.x];
  if header.z > 0u {
   let at = header.y + (vertex-header.x)*2u;
@@ -71,10 +71,11 @@ fn face_pixel(i: Out, facing: bool) -> Pixel {
   c = select(vec3f(0.95,0.45,0.16),vec3f(0.10,0.25,0.85),
              delta/max(high,0.001) >= 0.35 && high >= 0.35 && (hue <= 0.14 || hue >= 0.96));
  }
+ if (i.decorated & 64u) != 0u { c = mix(c, style.fade.rgb, style.fade.a); }
  var p: Pixel; p.color=vec4f(linear(c),select(1.,0.6,camera.size.z == 1)); p.id=i.id; return p;
 }
 
-fn edge_pixel(i: Out) -> Pixel { if i.section_distance < 0. { discard; } var p: Pixel; var c = style.edge.rgb; if (i.decorated & 2u) != 0u { c = vec3f(0.95,0.45,0.16); } else if (i.decorated & 4u) != 0u { c = vec3f(0.30,0.55,0.95); } p.color=vec4f(linear(c),1); p.id=i.id; return p; }
+fn edge_pixel(i: Out) -> Pixel { if i.section_distance < 0. { discard; } var p: Pixel; var c = style.edge.rgb; if (i.decorated & 2u) != 0u { c = vec3f(0.95,0.45,0.16); } else if (i.decorated & 4u) != 0u { c = vec3f(0.30,0.55,0.95); } if (i.decorated & 64u) != 0u { c = mix(c, style.fade.rgb, style.fade.a); } p.color=vec4f(linear(c),1); p.id=i.id; return p; }
 
 @fragment fn color_fs(i: Out, @builtin(front_facing) front: bool) -> @location(0) vec4f {
  return face_pixel(i,front).color;
@@ -100,7 +101,7 @@ fn edge_pixel(i: Out) -> Pixel { if i.section_distance < 0. { discard; } var p: 
 }
 @fragment fn hidden_edge_fs(i: Out) -> Pixel {
  var p = edge_pixel(i);
- if camera.size.z == 1. { p.color = vec4f(linear(mix(style.edge.rgb,style.background.rgb,0.6)),1.); }
+ if camera.size.z == 1. { var c = mix(style.edge.rgb,style.background.rgb,0.6); if (i.decorated & 64u) != 0u { c = mix(c, style.fade.rgb, style.fade.a); } p.color = vec4f(linear(c),1.); }
  else { if (i.distance % max(style.profiles.w*2.,1.)) >= style.profiles.w { discard; } }
  return p;
 }

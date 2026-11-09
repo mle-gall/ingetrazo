@@ -338,3 +338,26 @@ resolved in `views/wgpu_axes.py`, without changing global `core.axes` state.
 
 See `docs/benchmarks/billboards-axes/README.md` for bounded captures, targeted
 tests and same-session timing evidence.
+
+## Edit context fade and hide
+
+`set_rest(rows, mode)` uses flag 64 for the rest of the model and flag 128
+for edit-hidden rows. It accepts `fade`, `hide`, and `none` (`normal` is the
+GL preference alias). Selection, hover, billboard and document visibility
+bits survive both this operation and placement updates. A context change
+updates the CPU flags in O(placements), then performs one resident-buffer
+write; ordinary frames and fade-strength changes never rewrite those flags.
+The colour override byte remains reserved for view tints.
+
+The style uniform now contains nine float4 rows (144 bytes): section stays
+at byte 112; fade colour RGB and factor occupy byte 128. The face, textured,
+unlit billboard, MSAA and X-ray paths share the post-material fade, as do
+hard/profile/back edges. Fade does not change alpha or depth behavior.
+Edit-hidden rows are rejected before culling counters and survivor insertion,
+including in the independent picking pass.
+
+The Python view caches membership for the innermost open group's subtree,
+invalidating on repack/placement edits. Live mode/factor come from the GL
+viewport. The edit box reuses GL's oriented/padded corners and pixel hull,
+with the same physical dash length, colour and one-pixel width. As requested,
+the native box is a depth-free overlay (GL depth-tests its scaffold).

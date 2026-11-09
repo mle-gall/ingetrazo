@@ -19,6 +19,7 @@ class Primitive:
     width: float = 1.5
     text: str = ""
     fill: str | None = None
+    dash: tuple = ()
 
 
 def rasterize(primitives, width, height, scale, annotations=None):
@@ -33,7 +34,11 @@ def rasterize(primitives, width, height, scale, annotations=None):
         if annotations is not None:
             annotations(painter)
         for primitive in primitives:
-            painter.setPen(QPen(QColor(primitive.color), primitive.width))
+            pen = QPen(QColor(primitive.color), primitive.width)
+            if primitive.dash:
+                pen.setDashPattern(primitive.dash)
+                pen.setCapStyle(Qt.FlatCap)
+            painter.setPen(pen)
             painter.setBrush(QColor(primitive.fill) if primitive.fill else Qt.NoBrush)
             points = [QPointF(*p) for p in primitive.points]
             if primitive.kind == "polyline":

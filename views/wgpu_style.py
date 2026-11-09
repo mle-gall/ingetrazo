@@ -6,10 +6,13 @@ Unsupported controls remain explicit in the payload for subsequent passes.
 from core.style import Style, effective_back_color
 
 
-def style_payload(scene, override=None, *, horizon=2.0, scale=1.0):
+def style_payload(scene, override=None, *, horizon=2.0, scale=1.0, edit_rest_fade=0.0):
     """Return a fresh native payload, respecting the viewport override."""
     style = override or getattr(scene, 'display_style', None) or Style()
     result = style.to_dict()
+    from views.viewport import edit_fade_color
+    result['fade'] = float(edit_rest_fade)
+    result['fade_color'] = edit_fade_color(style.background)
     result['back_color'] = effective_back_color(style, scene)
     from views.ambient_occlusion import settings_for
     ao = settings_for(style)

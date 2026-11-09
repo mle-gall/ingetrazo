@@ -16,7 +16,7 @@ fn cull(@builtin(global_invocation_id) gid: vec3u) {
  let id = gid.x;
  if id >= arrayLength(&inst) { return; }
  let i = inst[id];
- if (i.info.z & 1u) != 0u { return; }
+ if (i.info.z & 129u) != 0u { return; }
  atomicAdd(&counters[4], commands[i.info.x + arrayLength(&proto)].count / 6u);
  let p = proto[i.info.x];
  let m = camera.vp * i.world;

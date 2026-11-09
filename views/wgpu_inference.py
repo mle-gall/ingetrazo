@@ -117,6 +117,8 @@ def surface(index, row, origin, direction):
 
 
 def snap(index, row, view, x, y, **options):
+    if view.resolve(row) is None:
+        return None
     origin, direction = view._pixel_to_ray(x, y)
     point = surface(index, row, origin, direction)
     on_face = point is not None
