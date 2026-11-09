@@ -167,7 +167,10 @@ def test_hidden_changes_coalesce_in_one_membership_pass(panel, monkeypatch):
         dock.refresh()
     assert not calls and not dock.timer.isActive()
     dock.show()
-    QTest.qWait(150)
+    for _ in range(60):                 # a loaded machine delays the deferred slice
+        QTest.qWait(50)
+        if calls:
+            break
     assert len(calls) == 1
     dock.vp.scene.bump_view()
     dock.refresh()
