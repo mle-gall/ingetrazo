@@ -115,6 +115,12 @@ def test_upload_borrows_contiguous_arrays():
             assert np.shares_memory(arrays[0], packed.vertices)
             assert np.shares_memory(instances, packed.instances)
             assert len(arrays[3]) == 40
+        def set_materials(self, materials):
+            assert materials.dtype == np.uint8 and materials.flags.c_contiguous
+            assert len(materials) == len(packed.vertices)*32
+        def set_textures(self, width, height, layers, levels):
+            assert (width, height, layers) == (1,1,1)
+            assert levels == [bytes([255])*4]
     packed.upload(Receiver())
 
 
@@ -261,3 +267,15 @@ def test_front_tint_remains_style_not_material():
     scene.groups[0].mesh.faces[0].attrs['color'] = (0.3, 0.7, 0.9)
     painted = pack_scene(scene)
     assert np.all(painted.vertices['color'][:3, 3] == 255)
+
+
+def test_nested_default_faces_inherit_gl_proxy_owner_paint():
+    child = Group(triangle())
+    root = Group(Mesh())
+    root.material = {'color': (0.0, 0.6, 0.5)}
+    root.children = [child]
+    packed = pack_scene(Scene(groups=[root]))
+    np.testing.assert_array_equal(packed.vertices['color'][:3], [[0,153,127,255]]*3)
+    backs = packed.materials.reshape(-1,32)[:3,16:20]
+    np.testing.assert_array_equal(backs, [[0,153,127,255]]*3)
+    assert getattr(child, 'owner', None) is None

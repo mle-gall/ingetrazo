@@ -1483,3 +1483,100 @@ ride. X-ray/back edges currently use single-sample rendering; authored hidden-ed
 metadata is absent from the existing upload. Complete GL parity is not claimed.
 
 [Comparison images, before/after cost table, commands and limitations](benchmarks/wgpu-look-2026-11-09/r-look-3c/README.md).
+
+## 2026-11-09 — R-look 3b: textures and back materials
+
+The grey pusher wheels are textured plastic, not missing named-material RGB.
+The archive contains `2038724_Plastic_02_1K_alb.png` (dark red) and
+`Metal028_4K-JPG_Color.jpg` (dark metal). The previous face pass never sampled
+these images. It also replaced all backs with the style tint and did not reverse
+front/back classification for mirrored placements as GL does.
+
+The resident bake now resolves face/container/layer paints through the GL
+`effective_attrs` rules, retaining explicit front colours and separate back
+paint. A separate 32-byte material stream carries front/back corner UVs, packed
+back colour and two texture layer IDs. The original 28-byte geometry and edge
+ABI remains unchanged. UV maps use `face_uv_axes`, including imported leaf
+`uvw` affines, before the native bake evaluates them at each triangle corner.
+Placement paint participates in prototype identity so different inherited
+texture mappings cannot share the wrong UVs.
+
+Images are uploaded once per scene as bottom-up RGBA array layers with repeat,
+linear magnification and trilinear minification. Both single-sample and MSAA
+face passes bind the same material data. Front-only paint retains the style back;
+`back=True`, separate colour backs, separate texture backs and container paint
+resolve independently. Mirrored placements reverse raster front/back classification.
+The GL renderer is unchanged.
+
+Limits: array layers share dimensions capped at 1024×1024, so higher resolution
+source images lose close-up detail. Shaded mode uses the final mip average, which
+can differ slightly from GL's 4×4 average. Translucent material opacity and GL's
+special low-coverage foliage filtering are not yet reproduced: sampled alpha
+uses a 0.5 cutout threshold. These are remaining material-parity differences.
+
+Validation commands (all paths relative to this worktree):
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work VIRTUAL_ENV=$PWD/.venv-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_core/Cargo.toml --lib
+CARGO_HOME=$PWD/.cargo-work cargo test --manifest-path rust/ingetrazo_render/Cargo.toml --lib
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest tests/test_wgpu_scene.py tests/test_wgpu_materials.py -q
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'
+```
+
+Both release builds succeeded; Rust core **6 passed**, renderer **6 passed**
+(including actual Metal pipeline validation); Python handoff **23 passed**.
+The full suite is run through a worktree-local wrapper imposing 30-minute batch
+limits and splitting any timed-out batch. Captures use `wgpu_look_compare.py`
+with a 280-second process limit and worktree-local texture extraction. A local
+copy adds `texture_memory` and `gpu_memory` to its JSON. The shared disk filled
+at the first capture attempt; only this worktree's completed debug build outputs
+were cleaned before retrying.
+
+The ride-section check additionally caught dropped nested container paint: GL's
+placement proxies carry the top-level paint owner and inherited layer. The wgpu
+handoff now uses those same proxies for paint resolution, without modifying
+source groups. A regression test checks the teal inherited colour on both sides.
+
+The full-ride GL comparison exceeded the 280-second limit (the process was
+terminated); its log also reported an NSOpenGLContext sharing warning. The
+comparison below therefore isolates the root named `Launch System | Launch_System.blend r3`.
+Full-ride timing and memory are measured separately in Metal with all original
+scene roots retained. Source documents were only read.
+
+Comparison images, GL left / Metal right:
+
+- [Pusher car](benchmarks/wgpu-look-2026-11-09/r-look-3b/pusher_car_rust-comparison.png): red wheels and dark fittings restored.
+- [Marquee](benchmarks/wgpu-look-2026-11-09/r-look-3b/marquee-comparison.png): textured masonry and mirrored gold fittings.
+- [Ride launch section](benchmarks/wgpu-look-2026-11-09/r-look-3b/space_asbuilt_ride-launch-section-comparison.png): nested container paint.
+
+Matching individual images and measurement JSON files are in the same directory.
+
+Full ride, 2000×1400 physical pixels, edges enabled: **27.56 ms GPU** without
+MSAA and **89.53 ms GPU** with 4× MSAA. CPU submission medians were 4.15 ms and
+7.70 ms respectively. Measurements discard ten warmup frames and take the median
+of 35 frames, paced by 120 ms so asynchronous GPU queries have completed; this
+pacing is not included in the reported submission time. Total resident GPU memory
+is **3,228,224,520 bytes**, including the separate material stream. The ride has
+no resolved image materials, so its array is only the **4-byte white fallback**.
+For textured documents the array uses **72,701,252 bytes** on pusher and
+**16,777,212 bytes** on marquee (including all mips and the fallback layer).
+
+[Full ride Metal frame and measurements](benchmarks/wgpu-look-2026-11-09/r-look-3b/space_asbuilt_ride-metal-only.json)
+are recorded separately from the launch-section comparison. Lighting/edge and
+background differences remain outside this material change; GL's reference also
+shows its axis overlay. No claim of pixel-identical final frames is made.
+
+Full offscreen suite completed in **2051 seconds**, all six batches:
+**7,150 passed, 18 failed, 142 skipped, 2 xfailed, 805 deselected**.
+All 18 failures match the supplied 19-failure baseline: 14 translation cases
+(including `[ar]`), cached cursor pick, extension-preview wrapping, hidden-panel
+retention and extension-toolbar bold text. The baseline swatch-tooltip failure
+did not reproduce. No new failures were observed. The longest batch was 534.51
+seconds; no batch reached 30 minutes and no split was needed.
+The final focused material/handoff run passed **23 tests** after the nested
+container-paint correction. The complete local suite log is
+`.look-tmp/full-suite.log` (not committed).

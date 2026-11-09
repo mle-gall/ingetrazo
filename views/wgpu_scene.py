@@ -31,11 +31,15 @@ class PackedScene:
     world_bounds: np.ndarray
     timings: dict | None = None
     groups: list | None = None
+    materials: np.ndarray | None = None
+    textures: tuple | None = None
 
     def upload(self, renderer):
         renderer.set_scene(tuple(a.view(np.uint8).reshape(-1) for a in
                                  (self.vertices, self.indices, self.bounds, np.concatenate((self.commands, self.edge_commands)))),
                            self.instances.view(np.uint8).reshape(-1))
+        renderer.set_materials(self.materials)
+        renderer.set_textures(*self.textures)
 
 
 def bake_mesh(mesh):
@@ -73,7 +77,7 @@ def bake_mesh(mesh):
 
 
 
-def _source_arrays(mesh):
+def _source_arrays(mesh, paint=None, texture_ids=None):
     """Use source topology directly; the resident renderer needs no welded Plan."""
     src = mesh.__dict__.get('_deferred_source')
     if src is not None:
@@ -82,7 +86,7 @@ def _source_arrays(mesh):
         flags = src['flags']
         if flags is None:
             flags = np.zeros(len(edges), np.uint8)
-        table = src['meta'].get('face_attrs') or []
+        table = _attrs_table(src)
         attr = np.asarray(src['face_attr'], np.int64)
     else:
         arrays = arrays_of(mesh)
@@ -101,21 +105,24 @@ def _source_arrays(mesh):
         flags = np.asarray([int(e.soft) | (int(e.hidden) << 1) for e in mesh.edges], np.uint8)
         table = [f.attrs for f in mesh.faces]
         attr = np.arange(len(table))
-    palette = np.full((len(table)+1, 4), 210, np.uint8)
+    from core.materials import effective_attrs
+    table = [effective_attrs(own, paint) or {} for own in [{}] + table]
+    palette = np.full((len(table), 4), 210, np.uint8)
     palette[:, 3] = 0
-    hidden = np.zeros(len(table)+1, bool)
-    hidden[1:] = [bool(own.get('hidden')) for own in table]
-    painted = [(k+1, own['color'][:3]) for k, own in enumerate(table)
+    hidden = np.array([bool(own.get("hidden")) for own in table])
+    painted = [(k, own['color'][:3]) for k, own in enumerate(table)
                if own.get('color') is not None]
     if painted:
         ids, rgb = zip(*painted)
         ids = np.asarray(ids, np.int64)
         palette[ids, :3] = np.clip(np.asarray(rgb)*255, 0, 255)
         palette[ids, 3] = 255
+    maps, paints = _material_columns(pos, corners, sizes, counts, table, attr+1,
+                                     texture_ids if texture_ids is not None else {})
     return (np.asarray(pos, np.float32), np.asarray(corners, np.int64),
             np.asarray(sizes, np.int64), np.asarray(counts, np.int64),
             np.asarray(edges, np.int64), np.asarray(flags, np.uint8),
-            palette, hidden[attr+1], attr+1)
+            palette, hidden[attr+1], attr+1, maps, paints)
 
 
 def _placement_state(scene):
@@ -159,6 +166,9 @@ def pack_scene(scene, view_tint=None):
         resource = None
     begin = perf_counter()
     state = _placement_state(scene)
+    from views.viewport import _paint_of, Viewport
+    vp = SimpleNamespace(scene=scene)
+    texture_ids = {}
     meshes, lookup, rows, uids, paints = [], {}, [], [], []
     groups = []
     placements = [(None, None, scene.loose_mesh, False)]
@@ -173,24 +183,34 @@ def pack_scene(scene, view_tint=None):
             parent_of[id(child)] = group
             map_parents(child)
     hidden_of = {}
+    paint_groups = {}
     for root in scene.groups:
         map_parents(root)
-        for g, matrix in iter_placements(root):
+        # GL proxies carry the top-level paint owner and inherited layer.
+        # Keep source groups for editing; use proxies only to resolve paint.
+        proxies = Viewport._expand_placements(vp, root)
+        for (g, matrix), proxy in zip(iter_placements(root), proxies):
+            paint_groups[id(g)] = proxy
             parent = parent_of.get(id(g))
             inherited = hidden_of.get(id(parent), False) if parent is not None else False
-            hidden_of[id(g)] = inherited or not state(g)[0]
+            hidden_of[id(g)] = inherited or not state(proxy)[0]
             placements.append((g, matrix, g.mesh, hidden_of[id(g)]))
     for group, matrix, mesh, hidden in placements:
-        key = id(mesh)
+        paint_group = paint_groups.get(id(group), group)
+        paint_attrs = _paint_of(vp, paint_group)
+        if paint_attrs and paint_attrs.get('front_only'):
+            paint_attrs = None  # style tint stays dynamic
+        # Include the entire paint: material_sig omits imported affine UVs.
+        key = (id(mesh), repr(paint_attrs))
         if key not in lookup:
-            arrays = _source_arrays(mesh)
+            arrays = _source_arrays(mesh, paint_attrs, texture_ids)
             lookup[key] = len(meshes) if len(arrays[0]) else -1
             if len(arrays[0]):
                 meshes.append(arrays)
         code = lookup[key]
         if code < 0:
             continue
-        visible, paint = state(group)
+        visible, paint = state(paint_group)
         world = np.eye(4, dtype=np.float32) if matrix is None else np.array(matrix.data(), np.float32).reshape(4, 4)
         rows.append((code, world, hidden or not visible))
         uids.append(getattr(group, 'uid', 'loose'))
@@ -209,8 +229,11 @@ def pack_scene(scene, view_tint=None):
                   if meshes else empty[8])
     arrays = [np.concatenate([m[k] for m in meshes]) if meshes else empty[k] for k in range(8)]
     handoff = perf_counter()
-    raw, indices, bounds, table = _native.available().bake_scene(
-        *arrays[:4], arrays[6], arrays[7], arrays[4], arrays[5], offsets, attributes, _native.qt_hypot())
+    raw, indices, bounds, table, materials = _native.available().bake_scene(
+        *arrays[:4], arrays[6], arrays[7], arrays[4], arrays[5], offsets, attributes, _native.qt_hypot(),
+        np.concatenate([m[9] for m in meshes]) if meshes else np.empty((0,16), np.float32),
+        np.concatenate([m[10] for m in meshes]) if meshes else np.empty((0,3), np.uint32))
+    textures = _texture_array(texture_ids)
     baked = perf_counter()
     vertices = raw.view(VERTEX)
     bounds = bounds.reshape(-1, 2, 4)
@@ -237,11 +260,84 @@ def pack_scene(scene, view_tint=None):
     if len(rows):
         shown = instances[instances['info'][:, 2] == 0]
         if not len(shown):
-            return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups)
+            return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures)
         b = bounds[shown['info'][:, 0], :, :3]
         center, extent = (b[:, 0]+b[:, 1])/2, (b[:, 1]-b[:, 0])/2
         mat = shown['world'].transpose(0, 2, 1)
         wc = np.einsum('nij,nj->ni', mat[:, :3, :3], center)+mat[:, :3, 3]
         we = np.einsum('nij,nj->ni', abs(mat[:, :3, :3]), extent)
         world_bounds = np.array([(wc-we).min(axis=0), (wc+we).max(axis=0)])
-    return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups)
+    return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures)
+
+
+def _material_columns(pos, corners, sizes, counts, table, attributes, texture_ids):
+    """Use the GL mapping and side resolution, before triangulation splits corners."""
+    from PySide6.QtGui import QVector3D
+    from core.materials import back_is_default
+    from core.texture import face_uv_axes
+    maps = np.zeros((len(counts), 16), np.float32)
+    paints = np.zeros((len(counts), 3), np.uint32)
+    palette = np.zeros((len(table), 3), np.uint32)
+    textures = []
+    for k, own in enumerate(table):
+        back = own.get('back')
+        if not isinstance(back, dict):
+            back = {} if back_is_default(own) else own
+        color = back.get('color')
+        if color is not None:
+            palette[k, 0] = np.array([*np.clip(np.array(color[:3])*255,0,255),255], np.uint8).view('<u4')[0]
+        sides = []
+        for side, attrs in enumerate((own, back)):
+            tex = attrs.get('texture')
+            sides.append(tex)
+            if tex and tex.get('path'):
+                path = tex['path']
+                if path not in texture_ids:
+                    texture_ids[path] = len(texture_ids)+1
+                palette[k, side+1] = texture_ids[path]
+        textures.append(sides)
+    paints[:] = palette[attributes]
+    textured = np.flatnonzero(np.any(paints[:,1:] != 0, axis=1))
+    if len(textured):
+        starts = np.concatenate(([0], np.cumsum(sizes)))
+        face_ring = np.concatenate(([0], np.cumsum(counts)))
+        points = np.asarray(pos)[corners]
+        following = np.roll(points, -1, axis=0)
+        following[starts[1:]-1] = points[starts[:-1]]
+        normals = np.add.reduceat(np.cross(points, following), starts[:-1])[face_ring[:-1]]
+        lengths = np.linalg.norm(normals, axis=1)
+        normals /= np.maximum(lengths[:,None], 1e-30)
+        pairs = np.column_stack((attributes[textured], normals[textured]))
+        unique, inverse = np.unique(pairs, axis=0, return_inverse=True)
+        resolved = np.zeros((len(unique),16), np.float32)
+        for j, row in enumerate(unique):
+            for side, tex in enumerate(textures[int(row[0])]):
+                if tex and tex.get('path'):
+                    gu, cu, gv, cv = face_uv_axes(tex, QVector3D(*row[1:]))
+                    resolved[j,side*8:side*8+8] = [*gu.toTuple(),cu,*gv.toTuple(),cv]
+        maps[textured] = resolved[inverse]
+    return maps, paints
+
+
+def _texture_array(paths):
+    """Bottom-up RGBA layers with a complete trilinear mip chain."""
+    from PySide6.QtGui import QImage
+    from PySide6.QtCore import Qt
+    images = [QImage(path).mirrored() for path in paths]
+    width = min(1024, max([1] + [im.width() for im in images]))
+    height = min(1024, max([1] + [im.height() for im in images]))
+    levels = []
+    w, h = width, height
+    while True:
+        layers = [bytes([255])*w*h*4]  # layer zero: no texture
+        for im in images:
+            if im.isNull():
+                layers.append(bytes([255])*w*h*4)
+            else:
+                scaled = im.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation).convertToFormat(QImage.Format_RGBA8888)
+                layers.append(bytes(scaled.constBits()))
+        levels.append(b''.join(layers))
+        if w == h == 1:
+            break
+        w, h = max(1,w//2), max(1,h//2)
+    return width, height, len(images)+1, levels
