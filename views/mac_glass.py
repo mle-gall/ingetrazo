@@ -171,6 +171,19 @@ class _Point(ctypes.Structure):
 # answers from the hidden title bar's tracking — never yes. For a glass
 # window it answers from a tracking area of ours over the three buttons.
 _hover: dict = {}                   # NSWindow pointer -> mouse over the room
+
+
+def _mac_major() -> int:
+    import platform
+    try:
+        return int((platform.mac_ver()[0] or "0").split(".")[0])
+    except ValueError:
+        return 0
+
+
+#: Whether the window buttons' glyphs need a reveal amount driven from our
+#: hover (macOS 26); 27 shows them itself and hides the button at reveal 0.
+_REVEAL_FADES = _mac_major() < 27
 _hover_hook: list = []
 
 
@@ -241,10 +254,15 @@ def _hover_owner():
                         if not b:
                             continue
                         # macOS 26 fades the glyphs in by a reveal amount
-                        # it sets from _mouseInGroup: here.
+                        # it sets from _mouseInGroup: here. macOS 27 keeps
+                        # the glyphs at full reveal at rest, and a reveal of
+                        # 0 there makes the whole button transparent and
+                        # lays it back out in the hidden title bar: the
+                        # lights vanished after the first hover (Maxence,
+                        # 2026-11-09, new Mac).
                         if _responds(b, "mouseEnteredOrExited"):
                             _send(b, "mouseEnteredOrExited", restype=None)
-                        if _responds(b, "setRevealAmount:"):
+                        if _REVEAL_FADES and _responds(b, "setRevealAmount:"):
                             _send(b, "setRevealAmount:", 1.0 if on else 0.0,
                                   restype=None, argtypes=(ctypes.c_double,))
                         _send(b, "setNeedsDisplay:", True, restype=None,
