@@ -6,6 +6,7 @@ mod style;
 mod background;
 mod antialias;
 mod edges;
+mod faces;
 mod xray;
 use numpy::PyReadonlyArray1;
 use pyo3::{exceptions::PyValueError, prelude::*};
@@ -29,12 +30,14 @@ struct TimingSlot {
     pending: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
 }
 struct Scene {
+    material_shifts: Vec<i64>,
     inst: wgpu::Buffer,
     flags: Vec<u32>,
     vertex: wgpu::Buffer,
     index: wgpu::Buffer,
     commands: wgpu::Buffer,
     template: wgpu::Buffer,
+    hard_template: wgpu::Buffer,
     compute: wgpu::BindGroup,
     draw: wgpu::BindGroup,
     edge_draw: wgpu::BindGroup,
@@ -209,7 +212,7 @@ impl Renderer {
         surface.configure(&device, &config);
         let camera = buffer(
             &device,
-            &[0; 80],
+            &[0; 96],
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         );
         let cs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -229,7 +232,6 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(concat!(include_str!("shading.wgsl"), "\n", include_str!("edges.wgsl")).into()),
         });
         let face_attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
-        let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4,3=>Float32x3,4=>Float32x3];
         let pipeline = |topology, fragment, compare, write, bias, samples| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: None,
@@ -238,11 +240,11 @@ impl Renderer {
                     module: &vs,
                     entry_point: Some(if fragment == "edge_fs" || fragment == "hidden_edge_fs" || fragment == "profile_fs" { "edge_vs" } else { "vs" }),
                     compilation_options: Default::default(),
-                    buffers: &{ let layouts = vec![wgpu::VertexBufferLayout {
-                        array_stride: 52,
+                    buffers: &{ let layouts = if fragment == "edge_fs" || fragment == "hidden_edge_fs" || fragment == "profile_fs" { vec![] } else { vec![wgpu::VertexBufferLayout {
+                        array_stride: 28,
                         step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: if fragment == "edge_fs" || fragment == "hidden_edge_fs" || fragment == "profile_fs" { &attrs } else { &face_attrs },
-                    }]; layouts },
+                        attributes: &face_attrs,
+                    }] }; layouts },
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &vs,
@@ -467,10 +469,15 @@ impl Renderer {
                 return Err(PyValueError::new_err("scene exceeds storage binding limit"));
             }
         }
-        // R-look 2: preserve the scene ABI and expand only uploaded edge commands.
-        let (expanded_v, expanded_ix, expanded_cmd) = edges::expand(v, ix, cmd, count)
+        // Preserve the scene ABI; pack unique edges separately from face vertices.
+        let (expanded_v, expanded_ix, mut expanded_cmd) = edges::expand(v, ix, cmd, count)
             .map_err(PyValueError::new_err)?;
-        let (v, ix, cmd) = (expanded_v.as_slice(), expanded_ix.as_slice(), expanded_cmd.as_slice());
+        let (face_v, face_ix, material_shifts) = faces::compact(v, &expanded_ix, &mut expanded_cmd, count);
+        let (v, ix, cmd) = (face_v.as_slice(), face_ix.as_slice(), expanded_cmd.as_slice());
+        if expanded_v.len() as u64 > self.device.limits().max_storage_buffer_binding_size as u64 {
+            return Err(PyValueError::new_err("edge records exceed storage binding limit"));
+        }
+        let edge_records = buffer(&self.device, &expanded_v, wgpu::BufferUsages::STORAGE);
         let vertex = buffer(&self.device, v, wgpu::BufferUsages::VERTEX);
         let index = buffer(&self.device, ix, wgpu::BufferUsages::INDEX);
         let protos = buffer(&self.device, p, wgpu::BufferUsages::STORAGE);
@@ -487,11 +494,18 @@ impl Renderer {
                 | wgpu::BufferUsages::COPY_DST,
         );
         let template = buffer(&self.device, cmd, wgpu::BufferUsages::COPY_SRC);
+        let mut hard_cmd = cmd.to_vec();
+        for row in hard_cmd.chunks_exact_mut(20).skip(count) {
+            let hard_count = row[16..20].to_vec();
+            row[..4].copy_from_slice(&hard_count);
+        }
+        let hard_template = buffer(&self.device, &hard_cmd, wgpu::BufferUsages::COPY_SRC);
         let survivors = buffer(&self.device, &vec![0; n * 4], wgpu::BufferUsages::STORAGE);
+        let viewpoints = buffer(&self.device, &vec![0; n * 16], wgpu::BufferUsages::STORAGE);
         let compute = bind(
             &self.device,
             &self.compute.get_bind_group_layout(0),
-            &[&self.camera, &inst, &protos, &commands, &survivors],
+            &[&self.camera, &inst, &protos, &commands, &survivors, &viewpoints],
         );
         let draw = bind(
             &self.device,
@@ -501,7 +515,7 @@ impl Renderer {
         let edge_draw = bind(
             &self.device,
             &self.edge.get_bind_group_layout(0),
-            &[&self.camera, &inst, &survivors],
+            &[&self.camera, &inst, &survivors, &edge_records, &viewpoints],
         );
         let xray_draw = bind(
             &self.device,
@@ -511,16 +525,17 @@ impl Renderer {
         let xray_edge_draw = bind(
             &self.device,
             &self.xray_edge.get_bind_group_layout(0),
-            &[&self.camera, &inst, &survivors],
+            &[&self.camera, &inst, &survivors, &edge_records, &viewpoints],
         );
-        let profile_draw = bind(&self.device, &self.profile_top.get_bind_group_layout(0), &[&self.camera, &inst, &survivors]);
+        let profile_draw = bind(&self.device, &self.profile_top.get_bind_group_layout(0), &[&self.camera, &inst, &survivors, &edge_records, &viewpoints]);
         self.transparency.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer);
-        self.aa.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer);
+        self.aa.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer, &edge_records, &viewpoints);
         self.gpu_memory =
-            (v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 416)
+            (v.len() + expanded_v.len() + ix.len() + p.len() + cmd.len() * 3 + instances.len() + n * 20 + 96 + 416)
                 as u64 + self.textures.bytes + self.textures.materials.size();
         self.ids_dirty = true;
         self.scene = Some(Scene {
+            material_shifts,
             inst,
             flags: instances
                 .chunks_exact(80)
@@ -530,6 +545,7 @@ impl Renderer {
             index,
             commands,
             template,
+            hard_template,
             compute,
             draw,
             edge_draw,
@@ -623,6 +639,9 @@ impl Renderer {
             self.style as f32,
             if self.textures_enabled { 0. } else { 1. },
         ]);
+        let inverse_view = glam::Mat4::from_cols_array(&v).inverse();
+        let eye = inverse_view * if p[15] == 0. { glam::Vec4::W } else { glam::Vec4::Z };
+        data.extend(eye.to_array());
         if self.camera_data != data {
             self.stable_frames = 0;
             self.ids_dirty = true;
@@ -641,6 +660,12 @@ impl Renderer {
             || data.len() as u64 > self.device.limits().max_storage_buffer_binding_size as u64 {
             return Err(PyValueError::new_err("invalid sparse material stream"));
         }
+        let mut resident = data.to_vec();
+        for (header, shift) in resident.chunks_exact_mut(16).zip(&scene.material_shifts) {
+            let base = u32::from_le_bytes(header[..4].try_into().unwrap());
+            header[..4].copy_from_slice(&((i64::from(base) + shift) as u32).to_le_bytes());
+        }
+        let data = resident.as_slice();
         self.gpu_memory = self.gpu_memory.saturating_sub(self.textures.materials.size());
         self.textures.materials = buffer(&self.device, data, wgpu::BufferUsages::STORAGE);
         self.gpu_memory += self.textures.materials.size();
@@ -733,7 +758,7 @@ impl Renderer {
         let ids = self.ids.create_view(&Default::default());
         let mut e = self.device.create_command_encoder(&Default::default());
         self.background.draw(&mut e, &color);
-        e.copy_buffer_to_buffer(&s.template, 0, &s.commands, 0, s.p as u64 * 40);
+        e.copy_buffer_to_buffer(if self.look.data[6][0] > 0. { &s.template } else { &s.hard_template }, 0, &s.commands, 0, s.p as u64 * 40);
         {
             let mut pass = e.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: None,
@@ -827,17 +852,17 @@ impl Renderer {
                     pass.set_bind_group(0, if hidden { &s.xray_edge_draw } else { &s.edge_draw }, &[]);
                     pass.set_bind_group(1, &self.look_groups[if hidden { 3 } else { 2 }], &[]);
                     if self.multi {
-                        pass.multi_draw_indexed_indirect(&s.commands, s.p as u64 * 20, s.p);
+                        for k in s.p..s.p*2 { pass.draw_indirect(&s.commands, k as u64*20); }
                     } else {
-                        for k in s.p..s.p * 2 { pass.draw_indexed_indirect(&s.commands, k as u64 * 20); }
+                        for k in s.p..s.p * 2 { pass.draw_indirect(&s.commands, k as u64 * 20); }
                     }
                 }
                 if self.style == 1 && self.look.data[6][0] > 0. {
                     pass.set_pipeline(&self.profile_top);
                     pass.set_bind_group(0, &s.profile_draw, &[]);
                     pass.set_bind_group(1, &self.look_groups[4], &[]);
-                    if self.multi { pass.multi_draw_indexed_indirect(&s.commands, s.p as u64*20, s.p); }
-                    else { for k in s.p..s.p*2 { pass.draw_indexed_indirect(&s.commands, k as u64*20); } }
+                    if self.multi { for k in s.p..s.p*2 { pass.draw_indirect(&s.commands, k as u64*20); } }
+                    else { for k in s.p..s.p*2 { pass.draw_indirect(&s.commands, k as u64*20); } }
                 }
             }
         }

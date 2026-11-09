@@ -38,7 +38,6 @@ impl Antialias {
             source: wgpu::ShaderSource::Wgsl(concat!(include_str!("shading.wgsl"), "\n", include_str!("edges.wgsl")).into()),
         });
         let face_attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
-        let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4,3=>Float32x3,4=>Float32x3];
         let pipelines = (0..4)
             .map(|k| {
                 let edge = k >= 2;
@@ -50,11 +49,11 @@ impl Antialias {
                         module: &shader,
                         entry_point: Some(if edge { "edge_vs" } else { "vs" }),
                         compilation_options: Default::default(),
-                        buffers: &{ let layouts = vec![wgpu::VertexBufferLayout {
-                            array_stride: 52,
+                        buffers: &{ let layouts = if edge { vec![] } else { vec![wgpu::VertexBufferLayout {
+                            array_stride: 28,
                             step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: if edge { &attrs } else { &face_attrs },
-                        }]; layouts },
+                            attributes: &face_attrs,
+                        }] }; layouts },
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
@@ -122,13 +121,16 @@ impl Antialias {
         inst: &wgpu::Buffer,
         survivors: &wgpu::Buffer,
         style: &wgpu::Buffer,
+        edges: &wgpu::Buffer,
+        viewpoints: &wgpu::Buffer,
     ) {
         self.groups = self
             .pipelines
             .iter()
-            .map(|p| {
+            .enumerate().map(|(k,p)| {
+                let buffers = [camera, inst, survivors, edges, viewpoints];
                 (
-                    crate::bind(d, &p.get_bind_group_layout(0), &[camera, inst, survivors]),
+                    crate::bind(d, &p.get_bind_group_layout(0), &buffers[..if k >= 2 { 5 } else { 3 }]),
                     crate::bind(d, &p.get_bind_group_layout(1), &[style]),
                 )
             })
@@ -188,7 +190,9 @@ impl Antialias {
             pass.set_bind_group(0, &self.groups[k].0, &[]);
             pass.set_bind_group(1, &self.groups[k].1, &[]);
             let first = if edge { scene.p } else { 0 };
-            if multi {
+            if edge {
+                for j in first..first + scene.p { pass.draw_indirect(&scene.commands, j as u64 * 20); }
+            } else if multi {
                 pass.multi_draw_indexed_indirect(&scene.commands, first as u64 * 20, scene.p);
             } else {
                 for j in first..first + scene.p {

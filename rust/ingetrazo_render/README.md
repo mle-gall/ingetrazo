@@ -211,3 +211,63 @@ resolve experiment while IDs remain single-sampled; X-ray stays single-sample.
 It costs a second scene raster pass and stays off by default after exceeding
 the ride's 60 Hz GPU budget. `scripts/wgpu_r2a_measure.py MODEL [--msaa]`
 records the comparison; externally bound each run to less than five minutes.
+
+## Compact resident layout (2026-11-09)
+
+The Python upload ABI stays at 28 bytes per vertex. Resident face vertices are
+also 28 bytes in every pass (including MSAA and weighted X-ray). Texture lookup
+continues through the existing sparse material table; no material index or
+adjacency is added to faces. The uploaded index buffer is unchanged.
+
+Edges use one 48-byte storage record per source hard edge or non-coplanar
+profile candidate, grouped by prototype. Little-endian offsets:
+
+| Offset | Type | Meaning |
+| --- | --- | --- |
+| 0 | float32[3] | endpoint A |
+| 12 | float32[3] | endpoint B |
+| 24 | float32[3] | adjacent normal 0, doubled for profile-only edges |
+| 36 | float32[3] | adjacent normal 1 |
+
+Zero normal 1 marks a boundary. Source hidden/soft flags have already been
+filtered by the unchanged bake ABI; the soft flag here marks synthesized
+profile candidates. Back/hidden-edge dashes remain style/depth decisions.
+Normal 0 has unit length for hard edges and length two for profile-only
+candidates. The shader tests squared length > 2 and multiplies by 0.5 to
+recover the original normal exactly. This power-of-two flag encoding keeps
+float32 classification precision within the 48-byte record budget. Degenerate
+zero normals occur only on hard edges; synthesized candidates have a nonzero
+first adjacency normal. Coincident source edges retain their individual dash
+directions; only synthesized profile candidates are welded by endpoint position.
+
+Commands remain 20-byte rows: P indexed face commands followed by P edge rows.
+Edge rows are **non-indexed indirect** arguments in the first 16 bytes:
+`(E * 6, visible_placements, first_edge * 6, S)`; the fifth word stores the hard-edge vertex count. A second command template
+uses that count when profiles are off, skipping all synthesized candidates.
+Empty ranges use vertex count zero. Cull increments edge instance count by one,
+while face counts and survivor slots are unchanged. Vertex_index/6 selects the
+edge record, and survivors[instance_index] selects its placement. Six procedural
+corners form each pixel-width quad. This instances a contiguous prototype quad
+range across placements, avoiding the measured Metal overhead of one instance
+per edge/placement pair. Edge draws loop at 20-byte offsets because
+multi_draw_indirect assumes 16-byte strides.
+
+Face upload drops edge-only tails and rebases face commands. Each prototype's
+corner order remains unchanged; set_materials applies the same vertex-base
+translation to its sparse header. The public handoff is unchanged.
+
+For in-place replacement, preserve each prototype's edge range and update its
+command templates (all edges and hard-only); reset indirect counts before culling. Update material-base
+translations if face ranges move.
+Placement matrix/flags and survivor layouts are unchanged. AO should consume
+28-byte face vertices and the existing face commands, never edge rows.
+
+Culling also writes a separate 16-byte `vec4f` viewpoint per placement, indexed
+by the original placement ID. Its xyz is the local camera position (w=1) or
+local orthographic direction toward the camera (w=0). The camera uniform is now
+96 bytes: VP at 0, existing size/style at 64, world camera position/direction at
+80. Compute binding 5 writes viewpoints; edge group 0 binding 4 reads them.
+This leaves the 80-byte instance and 48-byte edge records unchanged. A singular
+placement stores w=2 and uses the projected-area fallback. Profiles are tested
+with two normal dot products in the vertex shader; matrix inversion occurs
+once per visible placement in culling, not six times per edge.

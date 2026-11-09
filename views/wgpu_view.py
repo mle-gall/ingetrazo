@@ -1,7 +1,7 @@
 """Native Metal input and presentation sharing the document camera and selection."""
 import time
 import numpy as np
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QVector3D
 from PySide6.QtWidgets import QWidget
 from core.camera import OrbitCamera
@@ -28,6 +28,10 @@ class WgpuView(QWidget):
         self.hover_ms = 0.
         self.selection_ms = 0.
         self._selection_signature = None
+        self._settle_timer = QTimer(self)
+        self._settle_timer.setSingleShot(True)
+        self._settle_timer.timeout.connect(self.update)
+        self._last_camera = None
         self.renderer = None
         self.packed = None
         self._scene_dirty = False
@@ -143,7 +147,11 @@ class WgpuView(QWidget):
         if physical != getattr(self, '_physical_size', None):
             self.renderer.resize(*physical)
             self._physical_size = physical
-        self.renderer.set_camera(view.data(), projection.data())
+        camera_key = (tuple(view.data()), tuple(projection.data()))
+        if camera_key != self._last_camera:
+            self._last_camera = camera_key
+            self._settle_timer.start(80)
+        self.renderer.set_camera(*camera_key)
         # End R-look 3c camera/style work.
         if self.overlay_primitives or getattr(self, "_had_overlay", False):
             from views.wgpu_overlay import rasterize, pixels

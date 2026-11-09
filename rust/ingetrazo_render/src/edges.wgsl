@@ -6,9 +6,26 @@ fn facing(p: vec4f, q: vec4f, r: vec4f) -> f32 {
 }
 // Each endpoint carries its opposite endpoint, so expansion remains constant
 // in physical pixels under perspective and nonuniform instance transforms.
-@vertex fn edge_vs(@location(0) pos: vec3f, @location(1) other: vec3f,
-                   @location(2) corner: vec4f, @location(3) n0: vec3f, @location(4) n1: vec3f, @builtin(instance_index) index: u32) -> Out {
+// Scalar arrays keep this storage record tightly packed at 48 bytes.
+struct Edge { a: array<f32,3>, b: array<f32,3>, normals: array<f32,6> }
+@group(0) @binding(3) var<storage, read> edges: array<Edge>;
+@group(0) @binding(4) var<storage, read> viewpoints: array<vec4f>;
+@vertex fn edge_vs(@builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32) -> Out {
+ let first = vertex / 6u;
+ let edge = edges[first];
  let id = survivors[index];
+ let k = vertex % 6u;
+ let end = k == 2u || k == 4u || k == 5u;
+ let side_bit = k == 1u || k == 2u || k == 4u;
+ let a0 = vec3f(edge.a[0],edge.a[1],edge.a[2]);
+ let b0 = vec3f(edge.b[0],edge.b[1],edge.b[2]);
+ let pos = select(a0,b0,end);
+ let other = select(b0,a0,end);
+ let packed_normal = vec3f(edge.normals[0],edge.normals[1],edge.normals[2]);
+ let soft = dot(packed_normal,packed_normal) > 2.;
+ let n0 = packed_normal * select(1.,0.5,soft);
+ let n1 = vec3f(edge.normals[3],edge.normals[4],edge.normals[5]);
+ let corner = vec4f(select(0.,1.,side_bit),select(0.,1.,end),select(0.,1.,soft),0.);
  let world = inst[id].world;
  let transform = camera.vp * world;
  var a = transform * vec4f(pos, 1.);
@@ -17,9 +34,16 @@ fn facing(p: vec4f, q: vec4f, r: vec4f) -> f32 {
  // Hard edges need classification only when it can change their width.
  if style.profiles.x > 0. && (corner.b > 0.5 || style.profiles.y > style.edge.w) {
   let boundary = dot(n0,n0) > 0. && dot(n1,n1) == 0.;
-  let r0 = transform * vec4f(pos + cross(n0,other-pos),1.);
-  let r1 = transform * vec4f(pos + cross(n1,other-pos),1.);
-  profile = boundary || ((facing(a,b,r0)>0.) != (facing(a,b,r1)>0.));
+  let eye = viewpoints[id];
+  if eye.w <= 1. {
+   let direction = eye.xyz - pos * eye.w;
+   profile = boundary || ((dot(n0,direction)>0.) != (dot(n1,direction)>0.));
+  } else {
+   // Singular placements retain the projected-area fallback.
+   let r0 = transform * vec4f(pos + cross(n0,other-pos),1.);
+   let r1 = transform * vec4f(pos + cross(n1,other-pos),1.);
+   profile = boundary || ((facing(a,b,r0)>0.) != (facing(a,b,r1)>0.));
+  }
  }
  if corner.b > 0.5 && !profile {
   var hidden: Out;

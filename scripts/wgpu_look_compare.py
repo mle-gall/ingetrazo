@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ['INGETRAZO_RUST'] = '1'
 os.environ['INGETRAZO_TEXTURE_CACHE'] = str(Path('.look-tmp/textures').resolve())
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QImage, QPainter, QVector3D
 from PySide6.QtWidgets import QApplication
 from core.scene import Scene
 from formats.igz import load_into
@@ -74,6 +74,8 @@ metal.resize(1000, 700)
 metal.set_scene(scene)
 if args.pitch is not None:
     metal.camera.pitch = math.radians(args.pitch)
+camera_state = {k: QVector3D(v) if isinstance(v, QVector3D) else v
+                for k, v in vars(metal.camera).items()}
 gl = Viewport()
 gl.resize(1000, 700)
 gl.scene = scene
@@ -88,6 +90,9 @@ failed = []
 
 def capture():
     try:
+        # Native windows can receive navigation during the startup delay.
+        # Restore the fitted camera so paired captures stay comparable.
+        vars(metal.camera).update(camera_state)
         metal.draw_frame()
         metal.renderer.set_highlight([], None)
         if args.highlight:
@@ -119,6 +124,8 @@ def capture():
         a = np.frombuffer(reference.constBits(), np.uint8).reshape(h, w, 4)
         b = np.frombuffer(native.constBits(), np.uint8).reshape(h, w, 4)
         result = {'scale': scale, 'size': [w,h], 'rgb_mae': float(np.abs(a[:,:,:3].astype(float)-b[:,:,:3]).mean()), 'frames': {}, 'prototypes': len(metal.packed.bounds), 'vertices': len(metal.packed.vertices), 'material_bytes': metal.packed.materials.nbytes, 'resident_bytes': metal.renderer.gpu_memory}
+        result['camera'] = {k: ([v.x(), v.y(), v.z()] if isinstance(v, QVector3D) else v)
+                            for k, v in camera_state.items() if isinstance(v, (QVector3D, float, int, bool, str))}
         for aa in (() if args.capture_only else (False, True)):
             metal.renderer.set_antialias(aa)
             for edges in (False, True):

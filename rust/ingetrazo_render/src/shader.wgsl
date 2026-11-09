@@ -1,12 +1,13 @@
 struct Prototype { lo: vec4f, hi: vec4f }
 struct Instance { world: mat4x4f, info: vec4u }
-struct Camera { vp: mat4x4f, size: vec4f }
+struct Camera { vp: mat4x4f, size: vec4f, eye: vec4f }
 struct Command { count: u32, instances: atomic<u32>, first: u32, base: i32, start: u32 }
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var<storage, read> inst: array<Instance>;
 @group(0) @binding(2) var<storage, read> proto: array<Prototype>;
 @group(0) @binding(3) var<storage, read_write> commands: array<Command>;
 @group(0) @binding(4) var<storage, read_write> survivors: array<u32>;
+@group(0) @binding(5) var<storage, read_write> viewpoints: array<vec4f>;
 @compute @workgroup_size(64)
 fn cull(@builtin(global_invocation_id) gid: vec3u) {
  let id = gid.x;
@@ -28,7 +29,15 @@ fn cull(@builtin(global_invocation_id) gid: vec3u) {
  }
  if any(outside == vec3u(8)) || any(outside2 == vec3u(8)) { return; }
  if !crosses && all((high-low)*camera.size.xy*0.5 < vec2f(1)) { return; }
- atomicAdd(&commands[i.info.x + arrayLength(&proto)].instances, 1u);
+ let a = i.world[0].xyz; let b = i.world[1].xyz; let c = i.world[2].xyz;
+ let determinant = dot(a,cross(b,c));
+ let r = camera.eye.xyz - i.world[3].xyz * camera.eye.w;
+ viewpoints[id] = vec4f(0.,0.,0.,2.);
+ if abs(determinant) > 1e-20 {
+  viewpoints[id] = vec4f(vec3f(dot(cross(b,c),r),dot(cross(c,a),r),dot(cross(a,b),r))/determinant,camera.eye.w);
+ }
+ let edge_command = i.info.x + arrayLength(&proto);
+ atomicAdd(&commands[edge_command].instances, 1u);
  let slot = atomicAdd(&commands[i.info.x].instances, 1u);
  survivors[commands[i.info.x].start+slot] = id;
 }

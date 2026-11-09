@@ -25,6 +25,9 @@ def triangle():
 
 def test_layout():
     assert (VERTEX.itemsize, INSTANCE.itemsize, COMMAND.itemsize) == (28, 80, 20)
+    assert {name: VERTEX.fields[name][1] for name in VERTEX.names} == {
+        'pos': 0, 'normal': 12, 'color': 24}
+    assert VERTEX.names == ('pos', 'normal', 'color')
     assert INSTANCE.fields['info'][1] == 64
     assert COMMAND.fields['start'][1] == 16
 
