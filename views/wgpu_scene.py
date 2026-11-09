@@ -202,7 +202,8 @@ def pack_scene(scene, view_tint=None):
             paint_attrs = None  # style tint stays dynamic
         # Only inherited texture mapping changes baked corner UVs. Plain
         # container colors already live in the instance's packed RGBA word.
-        baked_paint = paint_attrs if paint_attrs and (paint_attrs.get('texture') or paint_attrs.get('by_layer') or paint_attrs.get('layer_fx')) else None
+        baked_paint = ({k: paint_attrs[k] for k in ('texture', 'by_layer', 'layer_fx')
+                        if k in paint_attrs} if paint_attrs else None) or None
         key = (id(mesh), repr(baked_paint))
         if key not in lookup:
             arrays = _source_arrays(mesh, baked_paint, texture_ids)

@@ -52,6 +52,7 @@ struct Renderer {
     antialias: bool,
     ids_dirty: bool,
     camera_data: Vec<f32>,
+    stable_frames: u32,
     pick_pending: bool,
     aa: antialias::Antialias,
     transparency: xray::Xray,
@@ -350,6 +351,7 @@ impl Renderer {
             antialias: true,
             ids_dirty: true,
             camera_data: Vec::new(),
+            stable_frames: 0,
             pick_pending: false,
             aa,
             look, background, look_groups,
@@ -620,6 +622,7 @@ impl Renderer {
             if self.textures_enabled { 0. } else { 1. },
         ]);
         if self.camera_data != data {
+            self.stable_frames = 0;
             self.ids_dirty = true;
             self.queue.write_buffer(&self.camera, 0, bytemuck::cast_slice(&data));
             self.camera_data = data;
@@ -744,7 +747,8 @@ impl Renderer {
             pass.dispatch_workgroups(s.n.div_ceil(64), 1, 1);
         }
         let msaa = self.antialias && self.style != 1 && self.look.data[6][2] == 0.;
-        let draw_ids = needs_id_pass(msaa, self.pick_pending);
+        self.stable_frames = self.stable_frames.saturating_add(1);
+        let draw_ids = needs_id_pass(msaa, self.pick_pending, self.ids_dirty, self.stable_frames);
         if self.style == 1 { self.transparency.draw(&mut e, &color, s, self.multi); }
         if draw_ids {
             let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1210,18 +1214,20 @@ mod reference_tests {
 }
 
 // The single-sample path supplies color and IDs together. MSAA only needs
-// the extra single-sample pass when an explicit pick requests fresh IDs.
-fn needs_id_pass(msaa: bool, pick_pending: bool) -> bool {
-    !msaa || pick_pending
+// the extra pass for an explicit pick or once after the camera settles.
+fn needs_id_pass(msaa: bool, pick_pending: bool, dirty: bool, stable_frames: u32) -> bool {
+    !msaa || pick_pending || (dirty && stable_frames >= 2)
 }
 
 #[cfg(test)]
 mod id_schedule_tests {
     #[test]
     fn multisample_color_does_not_replay_geometry_for_idle_picking() {
-        assert!(!super::needs_id_pass(true, false));
-        assert!(super::needs_id_pass(true, true));
-        assert!(super::needs_id_pass(false, false));
-        assert!(super::needs_id_pass(false, true));
+        assert!(!super::needs_id_pass(true, false, true, 1));
+        assert!(super::needs_id_pass(true, true, true, 0));
+        assert!(super::needs_id_pass(false, false, true, 0));
+        assert!(super::needs_id_pass(false, true, true, 0));
+        assert!(super::needs_id_pass(true, false, true, 2));
+        assert!(!super::needs_id_pass(true, false, false, 3));
     }
 }
