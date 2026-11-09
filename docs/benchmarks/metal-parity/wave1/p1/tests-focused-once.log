@@ -1,0 +1,571 @@
+..................................F..................................... [ 29%]
+......F................................F................................ [ 58%]
+...........FFFFFF.F.F...........FFF..................................... [ 87%]
+....................sssssssss..s                                         [100%]
+=================================== FAILURES ===================================
+_________________ test_selection_modifiers_and_external_change _________________
+
+view = <views.wgpu_view.WgpuView(0x7a30dba680) at 0x110c83f00>
+
+    def test_selection_modifiers_and_external_change(view):
+        group = view.scene.groups[0]
+        calls = []
+        view.renderer.set_highlight = lambda *args: calls.append(args)
+        view.select_rows([0])
+        assert view.scene.selection == {group}
+        view.select_rows([0], Qt.ShiftModifier)
+>       assert view.scene.selection == {group}
+E       AssertionError: assert set() == {Group('place...ces, 4 edges)}
+E         
+E         Extra items in the right set:
+E         Group('placed' instance: 1 faces, 4 edges)
+E         Use -v to get more diff
+
+tests/test_wgpu_interaction.py:78: AssertionError
+__________________ test_committed_protractor_guide_rasterizes __________________
+
+    def test_committed_protractor_guide_rasterizes():
+        from views.wgpu_overlay import rasterize
+        scene, _, native, _ = prepare(ProtractorTool())
+        native.width = lambda: 1000
+        native.height = lambda: 700
+        for point in [(0, 0, 0), (2, 0, 0), (0, 2, 0)]:
+            click(native, point)
+            native.tool.on_release(native)
+        assert scene.guides
+>       image = rasterize([], 1000, 700, 1., native.draw_annotations)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_wgpu_last_tier.py:254: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+views/wgpu_overlay.py:35: in rasterize
+    annotations(painter)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <views.wgpu_tools.NativeTools object at 0x1154a65d0>
+painter = <PySide6.QtGui.QPainter object at 0x1128d1a00>
+
+    def draw_annotations(self, painter):
+        from views.viewport import Viewport
+        self._hover_entity = getattr(self, '_mesh_hover', None)
+>       self.view._draw_selection_marks(painter)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'types.SimpleNamespace' object has no attribute '_draw_selection_marks'
+
+views/wgpu_mesh_tools.py:260: AttributeError
+____________________ test_annotations_rasterize_without_gl _____________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x134e93ad0>
+
+    def test_annotations_rasterize_without_gl(monkeypatch):
+        from core.dimension import Dimension
+        from core.textlabel import TextLabel
+        from views.wgpu_overlay import rasterize, pixels
+        scene, _, native, _ = prepare(DimensionTool())
+        scene.dimensions.append(Dimension(QVector3D(10, 10, 0), QVector3D(70, 10, 0),
+                                          QVector3D(0, 20, 0)))
+        scene.text_labels.append(TextLabel(QVector3D(10, 10, 0), QVector3D(30, 40, 0), 'Label'))
+        native._is_occluded = lambda p: False
+>       image = rasterize([], 100, 100, 1., native.draw_annotations)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_wgpu_remaining_tools.py:192: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+views/wgpu_overlay.py:35: in rasterize
+    annotations(painter)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <views.wgpu_tools.NativeTools object at 0x134f77350>
+painter = <PySide6.QtGui.QPainter object at 0x134d39780>
+
+    def draw_annotations(self, painter):
+        from views.viewport import Viewport
+        self._hover_entity = getattr(self, '_mesh_hover', None)
+>       self.view._draw_selection_marks(painter)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'types.SimpleNamespace' object has no attribute '_draw_selection_marks'
+
+views/wgpu_mesh_tools.py:260: AttributeError
+_ test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.NoModifier-0] _
+
+pin = 0, modifiers = <KeyboardModifier.NoModifier: 0>
+
+    @pytest.mark.parametrize('pin', [0, 1, 2])
+    @pytest.mark.parametrize('modifiers', [Qt.NoModifier, Qt.ControlModifier])
+    def test_gesture_commit_equals_gl_and_one_prototype_undo_redo(pin, modifiers):
+        scene, history, native, tracker, calls = setup()
+        face = native.tool.face
+        from views.viewport import Viewport
+        gl = Viewport(None)
+        gl.flash_status = lambda *a: None
+        gl._world_to_pixel = native._world_to_pixel
+        gl._pixel_to_ray = native._pixel_to_ray
+        gl_face = gl.scene.mesh.add_face(list(face.vertices))
+        gl_face.attrs = {'texture': dict(face.attrs['texture'])}
+        direct = TexturePositionTool()
+        gl.set_active_tool(direct)
+        direct.begin(gl, gl_face, QVector3D(.2, .2, 0))
+        start = native.tool.pins()[pin]
+        end = start + QVector3D(.3, .4, 0)
+        for tool, viewport in ((direct, gl), (native.tool, native)):
+            for handler, point in ((tool.on_click, start), (tool.on_hover, end)):
+                ctx = ToolContext(viewport, point, QPointF(*native._world_to_pixel(point)), modifiers, None)
+                if viewport is native:
+                    native.view.last_snap = SimpleNamespace(point=point, kind=None)
+                    event = SimpleNamespace(position=lambda: ctx.screen, modifiers=lambda: modifiers)
+                    (native.click if handler == tool.on_click else native.hover)(event)
+                else:
+                    handler(ctx)
+            tool.on_release(viewport)
+        expected = direct.result_texture()
+        original = dict(face.attrs['texture'])
+        assert face.attrs['texture'] == original  # preview does not edit the face
+        native.tool.commit(native)
+        direct.commit(gl)
+        assert face.attrs['texture'] == gl_face.attrs['texture'] == expected
+        assert type(history.undo_stack[-1]) is type(gl.history.undo_stack[-1])
+>       assert len(tracker.changed) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = <views.wgpu_updates.InstanceUpdates object at 0x135dba7b0>.changed
+
+tests/test_wgpu_texture_position.py:81: AssertionError
+----------------------------- Captured stderr call -----------------------------
+QOpenGLWidget is not supported on this platform.
+_ test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.NoModifier-1] _
+
+pin = 1, modifiers = <KeyboardModifier.NoModifier: 0>
+
+    @pytest.mark.parametrize('pin', [0, 1, 2])
+    @pytest.mark.parametrize('modifiers', [Qt.NoModifier, Qt.ControlModifier])
+    def test_gesture_commit_equals_gl_and_one_prototype_undo_redo(pin, modifiers):
+        scene, history, native, tracker, calls = setup()
+        face = native.tool.face
+        from views.viewport import Viewport
+        gl = Viewport(None)
+        gl.flash_status = lambda *a: None
+        gl._world_to_pixel = native._world_to_pixel
+        gl._pixel_to_ray = native._pixel_to_ray
+        gl_face = gl.scene.mesh.add_face(list(face.vertices))
+        gl_face.attrs = {'texture': dict(face.attrs['texture'])}
+        direct = TexturePositionTool()
+        gl.set_active_tool(direct)
+        direct.begin(gl, gl_face, QVector3D(.2, .2, 0))
+        start = native.tool.pins()[pin]
+        end = start + QVector3D(.3, .4, 0)
+        for tool, viewport in ((direct, gl), (native.tool, native)):
+            for handler, point in ((tool.on_click, start), (tool.on_hover, end)):
+                ctx = ToolContext(viewport, point, QPointF(*native._world_to_pixel(point)), modifiers, None)
+                if viewport is native:
+                    native.view.last_snap = SimpleNamespace(point=point, kind=None)
+                    event = SimpleNamespace(position=lambda: ctx.screen, modifiers=lambda: modifiers)
+                    (native.click if handler == tool.on_click else native.hover)(event)
+                else:
+                    handler(ctx)
+            tool.on_release(viewport)
+        expected = direct.result_texture()
+        original = dict(face.attrs['texture'])
+        assert face.attrs['texture'] == original  # preview does not edit the face
+        native.tool.commit(native)
+        direct.commit(gl)
+        assert face.attrs['texture'] == gl_face.attrs['texture'] == expected
+        assert type(history.undo_stack[-1]) is type(gl.history.undo_stack[-1])
+>       assert len(tracker.changed) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = <views.wgpu_updates.InstanceUpdates object at 0x135db98b0>.changed
+
+tests/test_wgpu_texture_position.py:81: AssertionError
+----------------------------- Captured stderr call -----------------------------
+QOpenGLWidget is not supported on this platform.
+_ test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.NoModifier-2] _
+
+pin = 2, modifiers = <KeyboardModifier.NoModifier: 0>
+
+    @pytest.mark.parametrize('pin', [0, 1, 2])
+    @pytest.mark.parametrize('modifiers', [Qt.NoModifier, Qt.ControlModifier])
+    def test_gesture_commit_equals_gl_and_one_prototype_undo_redo(pin, modifiers):
+        scene, history, native, tracker, calls = setup()
+        face = native.tool.face
+        from views.viewport import Viewport
+        gl = Viewport(None)
+        gl.flash_status = lambda *a: None
+        gl._world_to_pixel = native._world_to_pixel
+        gl._pixel_to_ray = native._pixel_to_ray
+        gl_face = gl.scene.mesh.add_face(list(face.vertices))
+        gl_face.attrs = {'texture': dict(face.attrs['texture'])}
+        direct = TexturePositionTool()
+        gl.set_active_tool(direct)
+        direct.begin(gl, gl_face, QVector3D(.2, .2, 0))
+        start = native.tool.pins()[pin]
+        end = start + QVector3D(.3, .4, 0)
+        for tool, viewport in ((direct, gl), (native.tool, native)):
+            for handler, point in ((tool.on_click, start), (tool.on_hover, end)):
+                ctx = ToolContext(viewport, point, QPointF(*native._world_to_pixel(point)), modifiers, None)
+                if viewport is native:
+                    native.view.last_snap = SimpleNamespace(point=point, kind=None)
+                    event = SimpleNamespace(position=lambda: ctx.screen, modifiers=lambda: modifiers)
+                    (native.click if handler == tool.on_click else native.hover)(event)
+                else:
+                    handler(ctx)
+            tool.on_release(viewport)
+        expected = direct.result_texture()
+        original = dict(face.attrs['texture'])
+        assert face.attrs['texture'] == original  # preview does not edit the face
+        native.tool.commit(native)
+        direct.commit(gl)
+        assert face.attrs['texture'] == gl_face.attrs['texture'] == expected
+        assert type(history.undo_stack[-1]) is type(gl.history.undo_stack[-1])
+>       assert len(tracker.changed) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = <views.wgpu_updates.InstanceUpdates object at 0x135dbaf30>.changed
+
+tests/test_wgpu_texture_position.py:81: AssertionError
+----------------------------- Captured stderr call -----------------------------
+QOpenGLWidget is not supported on this platform.
+_ test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.ControlModifier-0] _
+
+pin = 0, modifiers = <KeyboardModifier.ControlModifier: 67108864>
+
+    @pytest.mark.parametrize('pin', [0, 1, 2])
+    @pytest.mark.parametrize('modifiers', [Qt.NoModifier, Qt.ControlModifier])
+    def test_gesture_commit_equals_gl_and_one_prototype_undo_redo(pin, modifiers):
+        scene, history, native, tracker, calls = setup()
+        face = native.tool.face
+        from views.viewport import Viewport
+        gl = Viewport(None)
+        gl.flash_status = lambda *a: None
+        gl._world_to_pixel = native._world_to_pixel
+        gl._pixel_to_ray = native._pixel_to_ray
+        gl_face = gl.scene.mesh.add_face(list(face.vertices))
+        gl_face.attrs = {'texture': dict(face.attrs['texture'])}
+        direct = TexturePositionTool()
+        gl.set_active_tool(direct)
+        direct.begin(gl, gl_face, QVector3D(.2, .2, 0))
+        start = native.tool.pins()[pin]
+        end = start + QVector3D(.3, .4, 0)
+        for tool, viewport in ((direct, gl), (native.tool, native)):
+            for handler, point in ((tool.on_click, start), (tool.on_hover, end)):
+                ctx = ToolContext(viewport, point, QPointF(*native._world_to_pixel(point)), modifiers, None)
+                if viewport is native:
+                    native.view.last_snap = SimpleNamespace(point=point, kind=None)
+                    event = SimpleNamespace(position=lambda: ctx.screen, modifiers=lambda: modifiers)
+                    (native.click if handler == tool.on_click else native.hover)(event)
+                else:
+                    handler(ctx)
+            tool.on_release(viewport)
+        expected = direct.result_texture()
+        original = dict(face.attrs['texture'])
+        assert face.attrs['texture'] == original  # preview does not edit the face
+        native.tool.commit(native)
+        direct.commit(gl)
+        assert face.attrs['texture'] == gl_face.attrs['texture'] == expected
+        assert type(history.undo_stack[-1]) is type(gl.history.undo_stack[-1])
+>       assert len(tracker.changed) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = <views.wgpu_updates.InstanceUpdates object at 0x135dbbd40>.changed
+
+tests/test_wgpu_texture_position.py:81: AssertionError
+----------------------------- Captured stderr call -----------------------------
+QOpenGLWidget is not supported on this platform.
+_ test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.ControlModifier-1] _
+
+pin = 1, modifiers = <KeyboardModifier.ControlModifier: 67108864>
+
+    @pytest.mark.parametrize('pin', [0, 1, 2])
+    @pytest.mark.parametrize('modifiers', [Qt.NoModifier, Qt.ControlModifier])
+    def test_gesture_commit_equals_gl_and_one_prototype_undo_redo(pin, modifiers):
+        scene, history, native, tracker, calls = setup()
+        face = native.tool.face
+        from views.viewport import Viewport
+        gl = Viewport(None)
+        gl.flash_status = lambda *a: None
+        gl._world_to_pixel = native._world_to_pixel
+        gl._pixel_to_ray = native._pixel_to_ray
+        gl_face = gl.scene.mesh.add_face(list(face.vertices))
+        gl_face.attrs = {'texture': dict(face.attrs['texture'])}
+        direct = TexturePositionTool()
+        gl.set_active_tool(direct)
+        direct.begin(gl, gl_face, QVector3D(.2, .2, 0))
+        start = native.tool.pins()[pin]
+        end = start + QVector3D(.3, .4, 0)
+        for tool, viewport in ((direct, gl), (native.tool, native)):
+            for handler, point in ((tool.on_click, start), (tool.on_hover, end)):
+                ctx = ToolContext(viewport, point, QPointF(*native._world_to_pixel(point)), modifiers, None)
+                if viewport is native:
+                    native.view.last_snap = SimpleNamespace(point=point, kind=None)
+                    event = SimpleNamespace(position=lambda: ctx.screen, modifiers=lambda: modifiers)
+                    (native.click if handler == tool.on_click else native.hover)(event)
+                else:
+                    handler(ctx)
+            tool.on_release(viewport)
+        expected = direct.result_texture()
+        original = dict(face.attrs['texture'])
+        assert face.attrs['texture'] == original  # preview does not edit the face
+        native.tool.commit(native)
+        direct.commit(gl)
+        assert face.attrs['texture'] == gl_face.attrs['texture'] == expected
+        assert type(history.undo_stack[-1]) is type(gl.history.undo_stack[-1])
+>       assert len(tracker.changed) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = <views.wgpu_updates.InstanceUpdates object at 0x13622cc80>.changed
+
+tests/test_wgpu_texture_position.py:81: AssertionError
+----------------------------- Captured stderr call -----------------------------
+QOpenGLWidget is not supported on this platform.
+_ test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.ControlModifier-2] _
+
+pin = 2, modifiers = <KeyboardModifier.ControlModifier: 67108864>
+
+    @pytest.mark.parametrize('pin', [0, 1, 2])
+    @pytest.mark.parametrize('modifiers', [Qt.NoModifier, Qt.ControlModifier])
+    def test_gesture_commit_equals_gl_and_one_prototype_undo_redo(pin, modifiers):
+        scene, history, native, tracker, calls = setup()
+        face = native.tool.face
+        from views.viewport import Viewport
+        gl = Viewport(None)
+        gl.flash_status = lambda *a: None
+        gl._world_to_pixel = native._world_to_pixel
+        gl._pixel_to_ray = native._pixel_to_ray
+        gl_face = gl.scene.mesh.add_face(list(face.vertices))
+        gl_face.attrs = {'texture': dict(face.attrs['texture'])}
+        direct = TexturePositionTool()
+        gl.set_active_tool(direct)
+        direct.begin(gl, gl_face, QVector3D(.2, .2, 0))
+        start = native.tool.pins()[pin]
+        end = start + QVector3D(.3, .4, 0)
+        for tool, viewport in ((direct, gl), (native.tool, native)):
+            for handler, point in ((tool.on_click, start), (tool.on_hover, end)):
+                ctx = ToolContext(viewport, point, QPointF(*native._world_to_pixel(point)), modifiers, None)
+                if viewport is native:
+                    native.view.last_snap = SimpleNamespace(point=point, kind=None)
+                    event = SimpleNamespace(position=lambda: ctx.screen, modifiers=lambda: modifiers)
+                    (native.click if handler == tool.on_click else native.hover)(event)
+                else:
+                    handler(ctx)
+            tool.on_release(viewport)
+        expected = direct.result_texture()
+        original = dict(face.attrs['texture'])
+        assert face.attrs['texture'] == original  # preview does not edit the face
+        native.tool.commit(native)
+        direct.commit(gl)
+        assert face.attrs['texture'] == gl_face.attrs['texture'] == expected
+        assert type(history.undo_stack[-1]) is type(gl.history.undo_stack[-1])
+>       assert len(tracker.changed) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = <views.wgpu_updates.InstanceUpdates object at 0x13622da90>.changed
+
+tests/test_wgpu_texture_position.py:81: AssertionError
+----------------------------- Captured stderr call -----------------------------
+QOpenGLWidget is not supported on this platform.
+________ test_slow_preview_defers_until_release_and_back_material_undo _________
+
+    def test_slow_preview_defers_until_release_and_back_material_undo():
+        scene, history, native, tracker, calls = setup()
+        tool = native.tool
+        face = tool.face
+        face.attrs['back'] = {'texture': dict(face.attrs['texture'])}
+        tool.begin(native, face, QVector3D(.2, .2, 0), side='back')
+        preview = native.view._texture_preview
+        preview.overlay_only = True
+        count = len(calls)
+        tool._drag = ('texture', tool.map.copy(), list(tool.pin_uv))
+        tool.map.R += QVector3D(.1, .2, 0)
+        preview.update(tool)
+        assert len(calls) == count
+        tool._drag = None
+        preview.update(tool)
+        assert len(calls) == count + 1
+        expected = tool.result_texture()
+        tool.commit(native)
+        assert face.attrs['back']['texture'] == expected
+>       assert len(tracker.changed) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+E        +    where [] = <views.wgpu_updates.InstanceUpdates object at 0x13622ec60>.changed
+
+tests/test_wgpu_texture_position.py:135: AssertionError
+__________________ test_registry_and_published_coverage_agree __________________
+
+    def test_registry_and_published_coverage_agree():
+        root = Path(__file__).resolve().parents[1]
+        registered = registry(root)
+        assert set(TOOL_DISPATCH) <= set(registered.values())
+>       assert {key for key, cls in registered.items() if cls not in TOOL_DISPATCH} == {
+            'section'}
+E       AssertionError: assert set() == {'section'}
+E         
+E         Extra items in the right set:
+E         'section'
+E         Use -v to get more diff
+
+tests/test_wgpu_tool_coverage.py:11: AssertionError
+_____________ test_native_move_preview_then_history_commit[click] ______________
+
+completion = 'click'
+
+    @pytest.mark.parametrize("completion", ["click", "escape", "enter"])
+    def test_native_move_preview_then_history_commit(completion):
+        from core.history import History
+        from tools.move import MoveTool
+        from views.wgpu_tools import NativeTools
+        scene, updates = fixture_scene()
+        scene.select([scene.groups[0]])
+        history = History(scene)
+        source = SimpleNamespace(active_tool=MoveTool(), history=history,
+                                 flash_status=lambda *a: None, notify_scene_changed=lambda: None,
+                                 measurementChanged=SimpleNamespace(emit=lambda *a: None))
+        view = SimpleNamespace(scene=scene, packed=updates.packed, renderer=Renderer(),
+                               source_viewport=source, overlay_primitives=[],
+                               uid_rows={uid: [row] for uid, row in updates.rows.items()},
+                               _instance_updates=updates, update=lambda: None,
+                               _world_to_pixel=lambda point: (point.x(), point.y()),
+                               set_scene=lambda scene: updates.apply(*updates.diff(scene)))
+        native = NativeTools(view)
+        event = SimpleNamespace(position=lambda: QPointF(), modifiers=lambda: Qt.NoModifier)
+        view.last_snap = SimpleNamespace(point=QVector3D(), kind='endpoint')
+>       native.click(event)
+
+tests/test_wgpu_updates.py:197: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+views/wgpu_tools.py:128: in click
+    self.tool.on_hover(ctx)
+tools/move.py:540: in on_hover
+    ctx.viewport.update()
+views/wgpu_tools.py:257: in update
+    self.view.set_scene(self.scene)
+                        ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <views.wgpu_tools.NativeTools object at 0x134f75f10>, name = 'scene'
+
+    def __getattr__(self, name):
+>       return getattr(self.view.source_viewport, name)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'types.SimpleNamespace' object has no attribute 'scene'
+
+views/wgpu_tools.py:305: AttributeError
+_____________ test_native_move_preview_then_history_commit[escape] _____________
+
+completion = 'escape'
+
+    @pytest.mark.parametrize("completion", ["click", "escape", "enter"])
+    def test_native_move_preview_then_history_commit(completion):
+        from core.history import History
+        from tools.move import MoveTool
+        from views.wgpu_tools import NativeTools
+        scene, updates = fixture_scene()
+        scene.select([scene.groups[0]])
+        history = History(scene)
+        source = SimpleNamespace(active_tool=MoveTool(), history=history,
+                                 flash_status=lambda *a: None, notify_scene_changed=lambda: None,
+                                 measurementChanged=SimpleNamespace(emit=lambda *a: None))
+        view = SimpleNamespace(scene=scene, packed=updates.packed, renderer=Renderer(),
+                               source_viewport=source, overlay_primitives=[],
+                               uid_rows={uid: [row] for uid, row in updates.rows.items()},
+                               _instance_updates=updates, update=lambda: None,
+                               _world_to_pixel=lambda point: (point.x(), point.y()),
+                               set_scene=lambda scene: updates.apply(*updates.diff(scene)))
+        native = NativeTools(view)
+        event = SimpleNamespace(position=lambda: QPointF(), modifiers=lambda: Qt.NoModifier)
+        view.last_snap = SimpleNamespace(point=QVector3D(), kind='endpoint')
+>       native.click(event)
+
+tests/test_wgpu_updates.py:197: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+views/wgpu_tools.py:128: in click
+    self.tool.on_hover(ctx)
+tools/move.py:540: in on_hover
+    ctx.viewport.update()
+views/wgpu_tools.py:257: in update
+    self.view.set_scene(self.scene)
+                        ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <views.wgpu_tools.NativeTools object at 0x115322b10>, name = 'scene'
+
+    def __getattr__(self, name):
+>       return getattr(self.view.source_viewport, name)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'types.SimpleNamespace' object has no attribute 'scene'
+
+views/wgpu_tools.py:305: AttributeError
+_____________ test_native_move_preview_then_history_commit[enter] ______________
+
+completion = 'enter'
+
+    @pytest.mark.parametrize("completion", ["click", "escape", "enter"])
+    def test_native_move_preview_then_history_commit(completion):
+        from core.history import History
+        from tools.move import MoveTool
+        from views.wgpu_tools import NativeTools
+        scene, updates = fixture_scene()
+        scene.select([scene.groups[0]])
+        history = History(scene)
+        source = SimpleNamespace(active_tool=MoveTool(), history=history,
+                                 flash_status=lambda *a: None, notify_scene_changed=lambda: None,
+                                 measurementChanged=SimpleNamespace(emit=lambda *a: None))
+        view = SimpleNamespace(scene=scene, packed=updates.packed, renderer=Renderer(),
+                               source_viewport=source, overlay_primitives=[],
+                               uid_rows={uid: [row] for uid, row in updates.rows.items()},
+                               _instance_updates=updates, update=lambda: None,
+                               _world_to_pixel=lambda point: (point.x(), point.y()),
+                               set_scene=lambda scene: updates.apply(*updates.diff(scene)))
+        native = NativeTools(view)
+        event = SimpleNamespace(position=lambda: QPointF(), modifiers=lambda: Qt.NoModifier)
+        view.last_snap = SimpleNamespace(point=QVector3D(), kind='endpoint')
+>       native.click(event)
+
+tests/test_wgpu_updates.py:197: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+views/wgpu_tools.py:128: in click
+    self.tool.on_hover(ctx)
+tools/move.py:540: in on_hover
+    ctx.viewport.update()
+views/wgpu_tools.py:257: in update
+    self.view.set_scene(self.scene)
+                        ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <views.wgpu_tools.NativeTools object at 0x1150e7050>, name = 'scene'
+
+    def __getattr__(self, name):
+>       return getattr(self.view.source_viewport, name)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'types.SimpleNamespace' object has no attribute 'scene'
+
+views/wgpu_tools.py:305: AttributeError
+=============================== warnings summary ===============================
+tests/test_metal_parity_input.py::test_context_group_and_locked_target
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-5390928e/tests/test_metal_parity_input.py:191: DeprecationWarning: Function: 'QContextMenuEvent.QContextMenuEvent(QContextMenuEvent.Reason reason, const QPoint &pos)' is marked as deprecated, please check the documentation for more information.
+    event = QContextMenuEvent(QContextMenuEvent.Mouse, QPoint(400, 300))
+
+tests/test_metal_parity_input.py: 2 warnings
+tests/test_wgpu_billboards.py: 1 warning
+tests/test_wgpu_materials.py: 1 warning
+tests/test_wgpu_texture_position.py: 17 warnings
+tests/test_wgpu_updates.py: 3 warnings
+  /Users/legallmaxence/.t3/worktrees/ingetrazo/t3-5390928e/views/wgpu_scene.py:347: DeprecationWarning: Function: 'QImage.mirrored(bool horizontally, bool vertically)' is marked as deprecated, please check the documentation for more information.
+    images = [QImage(path).mirrored() for path in paths]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_wgpu_interaction.py::test_selection_modifiers_and_external_change
+FAILED tests/test_wgpu_last_tier.py::test_committed_protractor_guide_rasterizes
+FAILED tests/test_wgpu_remaining_tools.py::test_annotations_rasterize_without_gl
+FAILED tests/test_wgpu_texture_position.py::test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.NoModifier-0]
+FAILED tests/test_wgpu_texture_position.py::test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.NoModifier-1]
+FAILED tests/test_wgpu_texture_position.py::test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.NoModifier-2]
+FAILED tests/test_wgpu_texture_position.py::test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.ControlModifier-0]
+FAILED tests/test_wgpu_texture_position.py::test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.ControlModifier-1]
+FAILED tests/test_wgpu_texture_position.py::test_gesture_commit_equals_gl_and_one_prototype_undo_redo[KeyboardModifier.ControlModifier-2]
+FAILED tests/test_wgpu_texture_position.py::test_slow_preview_defers_until_release_and_back_material_undo
+FAILED tests/test_wgpu_tool_coverage.py::test_registry_and_published_coverage_agree
+FAILED tests/test_wgpu_updates.py::test_native_move_preview_then_history_commit[click]
+FAILED tests/test_wgpu_updates.py::test_native_move_preview_then_history_commit[escape]
+FAILED tests/test_wgpu_updates.py::test_native_move_preview_then_history_commit[enter]
+14 failed, 224 passed, 10 skipped, 25 warnings in 44.20s

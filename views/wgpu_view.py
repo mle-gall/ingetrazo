@@ -6,6 +6,7 @@ from PySide6.QtGui import QColor, QVector3D
 from PySide6.QtWidgets import QWidget
 from core.camera import OrbitCamera
 from views.wgpu_scene import pack_scene
+from tools.select import selection_mode
 
 
 def _paint_key(scene):
@@ -16,7 +17,9 @@ def _paint_key(scene):
     by_layer = (bool(getattr(style, 'color_by_layer', False))
                 and getattr(style, 'face_mode', None) in ('textures', 'shaded', 'xray'))
     from core.layers import layer_color
-    return (by_layer, tuple(
+    # TODO(P3/P2): pack hidden-reveal metadata and render ghost/hidden edges.
+    return (by_layer, bool(getattr(scene, 'show_hidden_geometry', False)),
+            bool(getattr(scene, 'show_hidden_objects', False)), tuple(
         (ly.name, tuple(layer_color(ly)) if by_layer else None,
          float(getattr(ly, 'opacity', 1.0)), bool(getattr(ly, 'locked', False)))
         for ly in getattr(scene, 'layers', ())))
@@ -93,7 +96,7 @@ class WgpuView(QWidget):
         allowed = getattr(scene, '_navigator_allowed', None)
         token = (id(scene), scene._bounds_key(),
                  None if allowed is None else frozenset(allowed))
-        paint_key = _paint_key(scene)
+        paint_key = (_paint_key(scene), frozenset(id(f) for f in getattr(self, 'suppressed_faces', ())))
         if (token == getattr(self, "_content_token", None)
                 and paint_key == getattr(self, "_paint_key", None)):
             self.update()
@@ -149,7 +152,10 @@ class WgpuView(QWidget):
             self.build_seconds = time.perf_counter() - start
             self.update()
             return
-        self.packed = pack_scene(scene, getattr(self.source_viewport, 'view_tint', None))
+        suppressed = getattr(self, 'suppressed_faces', ())
+        self.packed = pack_scene(scene, getattr(self.source_viewport, 'view_tint', None),
+                                 face_overrides={id(f): dict(f.attrs, hidden=True) for f in suppressed}
+                                 if suppressed else None)
         from views.wgpu_billboards import Billboards
         self._billboards = Billboards(self.packed)
         self._scene_dirty = True
@@ -200,6 +206,8 @@ class WgpuView(QWidget):
         self._prepare_inference()
 
     def _prepare_inference(self):
+        if getattr(self, '_closed', False):
+            return
         from concurrent.futures import ThreadPoolExecutor
         from views.wgpu_inference import prepare
         if not hasattr(self, '_inference_worker'):
@@ -326,13 +334,14 @@ class WgpuView(QWidget):
             self.renderer.set_axes(*axes)
             self._axes_state = axes
         # End R-look 3c camera/style work.
-        annotations = bool(self.scene.dimensions or self.scene.text_labels
-                           or (type(self.tools.tool).__name__ == 'TexturePositionTool'
-                               and self.tools.tool.active))
+        # Guides and tool-owned overlays exist without dimensions or labels.
+        annotations = self.source_viewport is not None
         # R3c-2a: section widgets share GL's painter implementation.
         from views.wgpu_sections import sync
         sync(self)
         section_widgets = bool(getattr(self.scene, 'section_planes', ())) and getattr(self.scene, 'show_section_planes', True)
+        if self.tools.mode == 'mesh' and not self.overlay_primitives:
+            self.tools.mesh_feedback()
         primitives = self._edit_box_primitives() + self.overlay_primitives
         if annotations or primitives or section_widgets or getattr(self, "_had_overlay", False):
             from views.wgpu_overlay import rasterize, pixels
@@ -375,6 +384,7 @@ class WgpuView(QWidget):
         from views.wgpu_style import style_payload
 
         source = self.source_viewport
+        self.tools.sync()
         if height_px is None:
             height_px = round(width_px * self.height() / max(1, self.width()))
         width_px, height_px = int(width_px), int(height_px)
@@ -414,20 +424,44 @@ class WgpuView(QWidget):
         if billboards is not None:
             rows['world'][billboards.ids] = billboards.base
         Billboards(capture).update(camera)
+        # Capture rows may change tint/visibility only. Install the camera-facing
+        # matrices through the resident API, restoring them even on failure.
+        billboard_ids = [] if billboards is None else billboards.ids.tolist()
+        resident_world = self.packed.instances['world'][billboard_ids].copy()
         old_axes = getattr(self, '_axes_state', None) or axes_state(source.scene, self.camera, source)
         previous = getattr(self, '_section_uploaded', np.empty(0, np.uint8))
         data = geometry(self, source.scene, source._effective_style(), camera, height_px, rows)
         try:
+            if billboard_ids:
+                self.renderer.set_instance_world(billboard_ids, rows['world'][billboard_ids].reshape(-1))
             self.renderer.set_axes(*axes_state(source.scene, camera, source))
             self.renderer.set_section_geometry(data)
             pixels = bytes(self.renderer.render_image(
                 width_px, height_px, tuple(view.data()), tuple(projection.data()), payload,
                 rows.view(np.uint8).reshape(-1)))
         finally:
+            if billboard_ids:
+                self.renderer.set_instance_world(billboard_ids, resident_world.reshape(-1))
             self.renderer.set_axes(*old_axes)
             self.renderer.set_section_geometry(previous)
-        return QImage(pixels, width_px, height_px, width_px * 4,
-                      QImage.Format_RGBA8888).copy()
+        image = QImage(pixels, width_px, height_px, width_px * 4,
+                       QImage.Format_RGBA8888).copy()
+        if overlays:
+            from PySide6.QtGui import QPainter
+            from views.wgpu_overlay import rasterize
+            # Draw at view logical dimensions and scale to the export target;
+            # export helpers can override annotation layout without mapping a window.
+            # TODO(P4): export_annotations(view, painter, width, height) for sheet layout.
+            layer = rasterize(self._edit_box_primitives() + self.overlay_primitives,
+                              self.width(), self.height(), 1., self.tools.draw_annotations)
+            if getattr(source.scene, 'show_section_planes', True):
+                self._paint_section_widgets(layer)
+            painter = QPainter(image)
+            try:
+                painter.drawImage(image.rect(), layer)
+            finally:
+                painter.end()
+        return image
         # End R3c-2a offscreen entry point.
 
     def paintEvent(self, event):
@@ -461,11 +495,19 @@ class WgpuView(QWidget):
         from views.wgpu_inference import snap
         from views.wgpu_overlay import snap_glyph, Primitive
         start = time.perf_counter()
+        self.tools.sync()
         self.hovered_row = self.pick_row(x, y)
         self.hover_rows = self._hover_highlight_rows(self.hovered_row)
         self.last_snap = None
         self.overlay_primitives = []
         source = self.source_viewport
+        if self.tools.mode == 'select' and not getattr(source, 'nav_mode', None):
+            from tools.select import SelectTool
+            from core.mesh import Face
+            entity = SelectTool()._pick(self.tools, x, y) if source is not None else None
+            self.tools.set_hover(None if isinstance(entity, Face) else entity)
+            self.update()
+            return None
         if self.tools.sync() == 'mesh':
             self.tools.work_point(x, y)
         tool = getattr(source, 'active_tool', None)
@@ -581,8 +623,118 @@ class WgpuView(QWidget):
         signature = (selected, hover)
         if signature != self._selection_signature:
             indices = [i for uid in selected for i in self.uid_rows.get(uid, ())]
-            self.renderer.set_highlight(indices, list(hover))
+            # TODO(P2): edge-only group flags; face stipple belongs to loose faces.
+            self.renderer.set_highlight([], [])
             self._selection_signature = signature
+
+    def _draw_selection_marks(self, painter):
+        """Loose topology has no placement UID; mark entities in screen space.
+
+        Group selections use their wireframe, never the face stipple flag.
+        TODO(P2): replace the cached sampled face marks with a native
+        depth-tested transient highlight pass (same GL-colored screen-space dots).
+        """
+        from core.mesh import Face, Edge
+        from core.group import Group, iter_placements
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QPainterPath, QPen
+        selected = list(self.scene.selection)
+        hovered = getattr(self.tools, '_mesh_hover', getattr(self.source_viewport, '_hover_entity', None))
+        entities = [(e, False) for e in selected]
+        if hovered is not None and hovered not in self.scene.selection:
+            entities.append((hovered, True))
+        painter.save()
+        try:
+            for entity, hover in entities:
+                color = QColor.fromRgbF(*((.30, .55, .95) if hover else (.95, .45, .16)))
+                painter.setPen(QPen(color, 1.5))
+                segments = []
+                if isinstance(entity, Face) and not hover:
+                    if self.inference_index is None:
+                        continue  # wait for depth queries; never flash through solids
+                    choose = getattr(self.source_viewport, '_selection_dot_colors', None)
+                    if choose is not None:
+                        front, back = choose(entity)
+                        facing = QVector3D.dotProduct(entity.normal(), self.camera.eye()-entity.vertices[0]) > 0
+                        color = QColor.fromRgbF(*(front if facing else back))
+                    path = QPainterPath()
+                    path.setFillRule(Qt.OddEvenFill)
+                    for loop in (entity.loop, *entity.hole_loops):
+                        pts = [self._world_to_pixel(v.position) for v in loop]
+                        if not pts or any(p is None for p in pts):
+                            continue
+                        path.moveTo(QPointF(*pts[0]))
+                        for point in pts[1:]:
+                            path.lineTo(QPointF(*point))
+                        path.closeSubpath()
+                    # Sample screen-space dots against native picked surfaces.
+                    # Unlike a filled painter polygon this cannot cover objects
+                    # in front, or show a selected back face through its solid.
+                    key = (id(entity), id(self.packed), self.scene.version,
+                           tuple(self.camera.view_matrix().data()),
+                           tuple(self.camera.projection_matrix().data()),
+                           self.width(), self.height())
+                    cache = getattr(self, '_face_mark_cache', {})
+                    if key not in cache:
+                        box = path.boundingRect()
+                        normal, anchor = entity.normal(), entity.vertices[0]
+                        dots = []
+                        index = self.inference_index
+                        visible = np.flatnonzero((self.packed.instances['info'][:, 2] & 129) == 0)
+                        changed = ([] if index is None else [int(row) for row in visible
+                                   if row in index.rows or int(self.packed.instances['info'][row, 0]) in index.changed])
+                        static = np.asarray([row for row in visible if row not in changed], np.int64)
+                        from views.viewport import _moller_trumbore
+                        def occluded(origin, direction, depth):
+                            if index is None:
+                                return False
+                            ray = (origin.toTuple(), direction.toTuple(), depth - 1e-4)
+                            candidates = [index.base.ray_cands(static, *ray)]
+                            candidates.extend(index.ray_cands(np.array([row], np.int64), *ray)
+                                              for row in changed)
+                            for _, _, v0, e1, e2 in candidates:
+                                if len(v0):
+                                    ts, hits = _moller_trumbore(np.asarray(ray[0]), np.asarray(ray[1]), v0, e1, e2)
+                                    if np.any(hits & (ts < depth - 1e-4)):
+                                        return True
+                            return False
+                        for y in range(max(0, int(box.top())) // 4 * 4,
+                                       min(self.height(), int(box.bottom()) + 1), 4):
+                            for x in range(max(0, int(box.left())) // 4 * 4,
+                                           min(self.width(), int(box.right()) + 1), 4):
+                                point = QPointF(x, y)
+                                if not path.contains(point):
+                                    continue
+                                origin, direction = self._pixel_to_ray(x, y)
+                                denom = QVector3D.dotProduct(direction, normal)
+                                if abs(denom) < 1e-9:
+                                    continue
+                                t = QVector3D.dotProduct(anchor-origin, normal) / denom
+                                if t > 0 and not occluded(origin, direction, t):
+                                    dots.append(point)
+                        # Keep only the current frame's selected-face entries.
+                        self._face_mark_cache = {k: v for k, v in cache.items()
+                                                 if k[1:] == key[1:]}
+                        self._face_mark_cache[key] = dots
+                    painter.setPen(QPen(color, 1.))
+                    painter.drawPoints(self._face_mark_cache[key])
+                elif isinstance(entity, Edge):
+                    segments.append((entity.a, entity.b))
+                elif isinstance(entity, Group):
+                    for group, matrix in iter_placements(entity):
+                        segments.extend((matrix.map(e.a), matrix.map(e.b))
+                                        for e in group.mesh.edges
+                                        if not e.hidden and not e.soft)
+                for a, b in segments:
+                    pa, pb = self._world_to_pixel(a), self._world_to_pixel(b)
+                    if pa is not None and pb is not None:
+                        # Conservative edge visibility until P2 supplies native
+                        # edge-only highlight flags and clipped depth segments.
+                        if isinstance(entity, Group) and self.tools._is_occluded((a+b)*.5):
+                            continue
+                        painter.drawLine(QPointF(*pa), QPointF(*pb))
+        finally:
+            painter.restore()
 
     def _mirror_cursor(self):
         """Wear the cursor the tools set on the (hidden) GL viewport: the
@@ -665,8 +817,7 @@ class WgpuView(QWidget):
         groups = {self.context_placement(self.packed.groups[i])
                   for i in rows if self.resolve(i) is not None}
         groups = [g for g in groups if g is not None and self.scene.entity_selectable(g)]
-        mode = ('toggle' if modifiers & (Qt.ControlModifier | Qt.MetaModifier)
-                else 'add' if modifiers & Qt.ShiftModifier else 'replace')
+        mode = selection_mode(modifiers)
         self.scene.select(groups, mode=mode)
         self.sync_selection()
         if self.source_viewport is not None:
@@ -722,9 +873,19 @@ class WgpuView(QWidget):
             self.hover(event.position().x(), event.position().y(), event.modifiers())
             self.tools.hover(event)
         elif event.buttons() & Qt.LeftButton and (self.tools.mode == 'select' or mode == 'zoom_window'):
-            from views.wgpu_overlay import Primitive
-            self.overlay_primitives = [Primitive('rectangle',
-                ((self.press.x(), self.press.y()), (self.last.x(), self.last.y())))]
+            from views import wgpu_overlay
+            # TODO(P4): selection_rectangle(start, end, zoom=False) -> Primitive.
+            helper = getattr(wgpu_overlay, 'selection_rectangle', None)
+            if helper is not None:
+                primitive = helper(self.press, self.last, zoom=mode == 'zoom_window')
+            else:
+                crossing = self.last.x() < self.press.x()
+                color = ('#d29628' if mode == 'zoom_window' else
+                         '#289e5c' if crossing else '#3366c7')
+                primitive = wgpu_overlay.Primitive('rectangle',
+                    ((self.press.x(), self.press.y()), (self.last.x(), self.last.y())),
+                    color, fill='#183366c7', dash=(4, 2) if crossing or mode == 'zoom_window' else ())
+            self.overlay_primitives = [primitive]
         self.update()
 
     @property
@@ -757,41 +918,20 @@ class WgpuView(QWidget):
                 from views.viewport import Viewport
                 Viewport._zoom_to_box(self, self.press, event.position())
         elif event.button() == Qt.LeftButton and self.tools.sync() == 'select':
-            start = time.perf_counter()
-            annotation = (self.tools.pick_text_label(event.position().x(), event.position().y())
-                          or self.tools.pick_dimension(event.position().x(), event.position().y()))
-            if annotation is not None and (event.position()-self.press).manhattanLength() < 3:
-                selection_mode = ('toggle' if event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)
-                                  else 'add' if event.modifiers() & Qt.ShiftModifier else 'replace')
-                self.scene.select([annotation], mode=selection_mode)
-                self.source_viewport.notify_scene_changed()
-                self.last = None
-                self.update()
-                return
-            if (event.position()-self.press).manhattanLength() < 3:
-                row = self.pick_row(event.position().x(), event.position().y())
-                rows = [] if row is None else [row]
-                resolved = self.resolve(row)
-                if ((resolved is None or self.context_placement(resolved[0]) is None)
-                        and self._leave_edit_on_empty_click(
-                            event.position().x(), event.position().y(), event.modifiers())):
-                    self.last = None
-                    return
-                if resolved is not None and (resolved[0] is self.scene.edit_group or
-                        (resolved[0] is None and self.scene.edit_group is None)):
-                    entity = (self.tools.pick_visible_edge(event.position().x(), event.position().y())
-                              or self.tools.pick_face(event.position().x(), event.position().y()))
-                    mode = ('toggle' if event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)
-                            else 'add' if event.modifiers() & Qt.ShiftModifier else 'replace')
-                    self.scene.select([] if entity is None else [entity], mode=mode)
-                    self.source_viewport.notify_scene_changed()
-                    self.last = None
-                    self.update()
-                    return
+            from tools.select import SelectTool
+            from tools.base import ToolContext
+            tool = self.tools.tool or SelectTool()
+            end = event.position()
+            if (end-self.press).manhattanLength() < 3:
+                tool.on_click(ToolContext(self.tools, QVector3D(), end, event.modifiers(), None))
             else:
-                rows = self.rect_rows(self.press.x(), self.press.y(), event.position().x(), event.position().y())
-            self.select_rows(rows, event.modifiers())
-            self.selection_ms = (time.perf_counter()-start)*1000
+                rect = (min(self.press.x(), end.x()), min(self.press.y(), end.y()),
+                        max(self.press.x(), end.x()), max(self.press.y(), end.y()))
+                tool.on_box_select(self.tools, rect, end.x() < self.press.x(),
+                                   mode=selection_mode(event.modifiers()))
+            if self.source_viewport is not None:
+                self.source_viewport.notify_scene_changed()
+            self.sync_selection()
         if self.tools.mode == 'mesh':
             self.tools.tool.on_release(self.tools)
             self.tools.update()
@@ -813,11 +953,12 @@ class WgpuView(QWidget):
             return
         point = event.pos()
         source._context_pixel = (point.x(), point.y())
-        face = self.tools.pick_face(point.x(), point.y())
-        if face is not None and face not in self.scene.selection:
-            self.scene.select([face])
+        picked = self.tools._context_pick(point.x(), point.y())
+        under = self.tools.pick_locked_image_plane(point.x(), point.y())
         window = source.window()
-        window.show_viewport_context_menu(event.globalPos())
+        window.show_viewport_context_menu(
+            event.globalPos(), locked_image=under if under is not picked else None,
+            locked_group=self.tools.pick_locked_group(point.x(), point.y()))
 
     def mouseDoubleClickEvent(self, event):
         mode = self.tools.sync()
@@ -833,12 +974,11 @@ class WgpuView(QWidget):
             return
         if mode != 'select':
             return
-        row = self.pick_row(event.position().x(), event.position().y())
-        resolved = self.resolve(row)
-        if resolved is not None and resolved[0] is not None and self.source_viewport is not None:
-            self.source_viewport.begin_group_edit(resolved[0])
-            self.source_viewport.notify_scene_changed()
-            self.update()
+        from tools.select import SelectTool
+        from tools.base import ToolContext
+        (self.tools.tool or SelectTool()).on_double_click(ToolContext(
+            self.tools, QVector3D(), event.position(), event.modifiers(), None))
+        self.update()
 
     def event(self, event):
         if event.type() == QEvent.ShortcutOverride and hasattr(self, 'tools'):

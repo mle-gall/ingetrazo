@@ -1,0 +1,2 @@
+UNSUPPORTED (log once): POSSIBLE ISSUE: unit 0 GLD_TEXTURE_INDEX_2D is unloadable and bound to sampler type (Float) - using zero texture because texture unloadable
+{"load_seconds": 0.04086312488652766, "capture_seconds": {"gl": 0.12831312499474734, "wgpu": 0.446360458037816}, "pack_seconds": 0.0678277499973774, "rss_peak_bytes": 191873024, "resident_bytes": 142532, "size": [1000, 700], "method": "unshown interactive passes, state injected", "case": "box-window", "overlays": false, "live_frame": true, "gl_first_capture_seconds": 0.12271616607904434}
