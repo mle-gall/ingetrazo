@@ -43,6 +43,11 @@ def measure():
             view.renderer.pick(1000,700)
             picks.append((time.perf_counter()-start)*1000)
         result['pick_ms']=picks
+        view.camera.yaw += 0.01
+        view.draw_frame()
+        start=time.perf_counter()
+        view.renderer.pick(1000,700)
+        result['cold_pick_ms']=(time.perf_counter()-start)*1000
         (out/(Path(sys.argv[1]).stem+'-metal-only.json')).write_text(json.dumps(result,indent=2))
         print(json.dumps(result),flush=True)
     except Exception as exc:
