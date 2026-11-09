@@ -28,6 +28,7 @@ TOOL_DISPATCH['ChangeAxesTool'] = 'mesh'
 TOOL_DISPATCH['ScaleManagerTool'] = 'mesh'
 TOOL_DISPATCH['PositionCameraTool'] = 'mesh'
 TOOL_DISPATCH['WalkTool'] = 'mesh'
+TOOL_DISPATCH['LookAroundTool'] = 'mesh'
 
 def move_command(groups, delta):
     commands = [MoveGroupCommand(group, delta) for group in groups]
