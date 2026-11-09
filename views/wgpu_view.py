@@ -255,32 +255,47 @@ class WgpuView(QWidget):
         self.renderer.set_camera(*camera_key)
         # End R-look 3c camera/style work.
         annotations = bool(self.scene.dimensions or self.scene.text_labels)
-        if annotations or self.overlay_primitives or getattr(self, "_had_overlay", False):
+        # R3c-2a: section widgets share GL's painter implementation.
+        section_widgets = bool(getattr(self.scene, 'section_planes', ())) and getattr(self.scene, 'show_section_planes', True)
+        if annotations or self.overlay_primitives or section_widgets or getattr(self, "_had_overlay", False):
             from views.wgpu_overlay import rasterize, pixels
             before = time.perf_counter()
             image = rasterize(self.overlay_primitives, self.width(), self.height(), self.devicePixelRatioF(),
                               self.tools.draw_annotations if annotations else None)
+            if section_widgets:
+                self._paint_section_widgets(image)
             self.renderer.set_overlay(image.width(), image.height(), pixels(image))
             self.overlay_ms = (time.perf_counter() - before) * 1000
-            self._had_overlay = annotations or bool(self.overlay_primitives)
+            self._had_overlay = annotations or bool(self.overlay_primitives) or section_widgets
+        # End R3c-2a section widgets.
         cpu, gpu = self.renderer.render()
         wall = (time.perf_counter()-start)*1000
         self.frameReady.emit(cpu, gpu, wall)
         return cpu, gpu, wall
 
+    def _paint_section_widgets(self, image):
+        """R3c-2a: reuse GL's frame, brackets and symbols at Metal's size."""
+        from types import SimpleNamespace
+        from PySide6.QtGui import QPainter
+        from views.viewport import Viewport
+        context = SimpleNamespace(scene=self.scene, camera=self.camera,
+                                  width=self.width, height=self.height)
+        context.section_plane_frame = lambda sp: Viewport.section_plane_frame(context, sp)
+        context._clip_segment_front = lambda a, b: Viewport._clip_segment_front(context, a, b)
+        context._world_to_pixel = lambda p: Viewport._world_to_pixel(context, p)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.Antialiasing)
+        try:
+            Viewport._draw_section_planes(context, painter)
+        finally:
+            painter.end()
+
     def render_image(self, width_px, height_px=None, overlays=False,
                      sharp_shadows=False):
-        """Render sheet pixels without touching the interactive GPU or camera.
-
-        A temporary native host owns a separate device and scene upload. It is
-        never shown: capture targets the renderer's offscreen texture. Sections
-        are not supported by the Metal pipeline yet; fail instead of silently
-        printing an uncut model.
-        """
+        """R3c-2a: render sheet targets using this view's resident scene."""
         from copy import copy
         from PySide6.QtGui import QImage
         from views.wgpu_style import style_payload
-        import ingetrazo_render
 
         source = self.source_viewport
         if height_px is None:
@@ -288,37 +303,28 @@ class WgpuView(QWidget):
         width_px, height_px = int(width_px), int(height_px)
         if width_px <= 0 or height_px <= 0:
             raise ValueError("Image dimensions must be positive")
-        scene = source.scene
-        if scene.active_section() is not None and scene.show_section_cuts:
-            raise NotImplementedError("Metal sheet section cuts are not implemented")
+        if self.renderer is None:
+            import ingetrazo_render
+            self.renderer = ingetrazo_render.Renderer(
+                int(self.winId()), max(1, self.width()), max(1, self.height()), 1.)
+            if self.packed is None:
+                self.packed = pack_scene(source.scene, getattr(source, 'view_tint', None))
+            self.packed.upload(self.renderer)
+            self._scene_dirty = False
+        elif self._scene_dirty:
+            self._upload()
         camera = copy(source.camera)
         camera.aspect = width_px / height_px
-        host = QWidget()
-        host.setAttribute(Qt.WA_NativeWindow)
-        renderer = None
-        try:
-            renderer = ingetrazo_render.Renderer(int(host.winId()), width_px, height_px, 1.)
-            packed = pack_scene(scene, getattr(source, 'view_tint', None))
-            if not len(packed.instances):
-                image = QImage(width_px, height_px, QImage.Format_RGBA8888)
-                image.fill(QColor.fromRgbF(*source._effective_style().background))
-                return image
-            packed.upload(renderer)
-            view, projection = camera.view_matrix(), camera.projection_matrix()
-            payload = style_payload(scene, source._effective_style(),
-                                    horizon=source._horizon_ndc_y(projection * view))
-            payload['edge_width'] = float(getattr(source, '_export_edge_px', 1))
-            payload['profile_width'] = float(getattr(source, '_export_profile_px', 1))
-            renderer.set_style(payload)
-            renderer.set_camera(tuple(view.data()), tuple(projection.data()))
-            renderer.request_capture()
-            renderer.render(False)
-            pixels = bytes(renderer.take_capture())
-            return QImage(pixels, width_px, height_px, width_px * 4,
-                          QImage.Format_RGBA8888).copy()
-        finally:
-            renderer = None
-            host.destroy()
+        view, projection = camera.view_matrix(), camera.projection_matrix()
+        payload = style_payload(source.scene, source._effective_style(),
+                                horizon=source._horizon_ndc_y(projection * view))
+        payload['edge_width'] = float(getattr(source, '_export_edge_px', 1))
+        payload['profile_width'] = float(getattr(source, '_export_profile_px', 1))
+        pixels = bytes(self.renderer.render_image(
+            width_px, height_px, tuple(view.data()), tuple(projection.data()), payload))
+        return QImage(pixels, width_px, height_px, width_px * 4,
+                      QImage.Format_RGBA8888).copy()
+        # End R3c-2a offscreen entry point.
 
     def paintEvent(self, event):
         self.draw_frame()

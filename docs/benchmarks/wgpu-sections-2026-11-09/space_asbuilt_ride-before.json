@@ -1,0 +1,85 @@
+{
+  "load_average": [
+    7.98193359375,
+    8.03076171875,
+    7.75537109375
+  ],
+  "passes": {
+    "section-False-edges-False": [
+      1.229625,
+      13.258459,
+      0.000167,
+      {
+        "antialias": 12.702125,
+        "antialias_edges": 0.0,
+        "ao_blur_x": 0.0,
+        "ao_blur_y": 0.0,
+        "ao_inputs": null,
+        "ao_kernel": 0.0,
+        "ao_upsample_composite": 0.0,
+        "background": 0.087375,
+        "culling": 0.295,
+        "depth_prepass": 0.0,
+        "edge_quads": 0.0,
+        "faces": 0.0,
+        "frame": 13.258459,
+        "id": null,
+        "overlay": 0.0,
+        "present": null,
+        "profile_classification": null,
+        "profile_top": null,
+        "xray_accumulation": 0.0,
+        "xray_composite": 0.0
+      },
+      {
+        "culled_below_pixel": 28051,
+        "culled_frustum": 0,
+        "depth_prepass": 0,
+        "edge_quads_input": 7774875,
+        "edge_quads_surviving": 6114949,
+        "instances_input": 76029,
+        "instances_submitted": 38823,
+        "texture_layers": 1,
+        "triangles_submitted": 15365613
+      }
+    ],
+    "section-False-edges-True": [
+      3.9944170000000003,
+      27.835125,
+      4.2e-05,
+      {
+        "antialias": 8.763958,
+        "antialias_edges": 18.08375,
+        "ao_blur_x": 0.0,
+        "ao_blur_y": 0.0,
+        "ao_inputs": null,
+        "ao_kernel": 0.0,
+        "ao_upsample_composite": 0.0,
+        "background": 9.493458,
+        "culling": 0.094834,
+        "depth_prepass": 0.0,
+        "edge_quads": 0.0,
+        "faces": 0.0,
+        "frame": 27.835125,
+        "id": null,
+        "overlay": 0.0,
+        "present": null,
+        "profile_classification": null,
+        "profile_top": null,
+        "xray_accumulation": 0.0,
+        "xray_composite": 0.0
+      },
+      {
+        "culled_below_pixel": 28051,
+        "culled_frustum": 0,
+        "depth_prepass": 0,
+        "edge_quads_input": 15279416,
+        "edge_quads_surviving": 12868162,
+        "instances_input": 76029,
+        "instances_submitted": 38823,
+        "texture_layers": 1,
+        "triangles_submitted": 15365613
+      }
+    ]
+  }
+}

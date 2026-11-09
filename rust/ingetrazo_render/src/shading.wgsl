@@ -3,7 +3,7 @@ override TEXTURED: bool = true;
 @group(2) @binding(1) var material_sampler: sampler;
 @group(2) @binding(2) var<storage, read> materials: array<vec4u>;
 // GL uses display-referred colors; explicitly decode for the sRGB surface.
-struct Style { front: vec4f, back: vec4f, edge: vec4f, background: vec4f, sky: vec4f, ground: vec4f, profiles: vec4f }
+struct Style { front: vec4f, back: vec4f, edge: vec4f, background: vec4f, sky: vec4f, ground: vec4f, profiles: vec4f, section_plane: vec4f }
 @group(1) @binding(0) var<uniform> style: Style;
 fn linear(c: vec3f) -> vec3f { return select(c/12.92,pow((c+0.055)/1.055,vec3f(2.4)),c>vec3f(0.04045)); }
 struct Instance { world: mat4x4f, info: vec4u }
@@ -11,12 +11,13 @@ struct Camera { vp: mat4x4f, size: vec4f }
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var<storage, read> inst: array<Instance>;
 @group(0) @binding(2) var<storage, read> survivors: array<u32>;
-struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f, @location(1) @interpolate(flat) id: u32, @location(2) shade: f32, @location(3) @interpolate(flat) decorated: u32, @location(7) @interpolate(linear) distance: f32, @location(4) uv: vec4f, @location(5) @interpolate(flat) back: vec4f, @location(6) @interpolate(flat) textures: vec2u }
+struct Out { @location(8) section_distance: f32, @builtin(position) position: vec4f, @location(0) color: vec3f, @location(1) @interpolate(flat) id: u32, @location(2) shade: f32, @location(3) @interpolate(flat) decorated: u32, @location(7) @interpolate(linear) distance: f32, @location(4) uv: vec4f, @location(5) @interpolate(flat) back: vec4f, @location(6) @interpolate(flat) textures: vec2u }
 @vertex fn vs(@location(0) pos: vec3f, @location(1) normal: vec3f, @location(2) color: vec4f, @builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32) -> Out {
  let id = survivors[index]; let i = inst[id];
  let a=i.world[0].xyz; let b=i.world[1].xyz; let c=i.world[2].xyz;
  let n = normalize(mat3x3f(cross(b,c),cross(c,a),cross(a,b))*normal);
  var o: Out; o.position = camera.vp*i.world*vec4f(pos,1);
+ o.section_distance = dot(i.world * vec4f(pos,1.), style.section_plane);
  o.shade = 0.62+0.38*abs(dot(n,normalize(vec3f(0.35,0.25,1.))));
  let tint = unpack4x8unorm(i.info.y);
  var base = select(color.rgb, tint.rgb, color.a < 0.5);
@@ -40,6 +41,7 @@ struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f, @loc
 }
 struct Pixel { @location(0) color: vec4f, @location(1) id: u32 }
 fn face_pixel(i: Out, facing: bool) -> Pixel {
+ if i.section_distance < 0. { discard; }
  let front = facing != ((i.decorated & 16u) != 0u);
  var c = i.color;
  if !front && camera.size.z != 2 && (i.decorated & 8u) == 0u { c = select(style.back.rgb, i.back.rgb, i.back.a > 0.5 && camera.size.z != 3) * select(i.shade,1.,camera.size.z == 3); }
@@ -72,7 +74,7 @@ fn face_pixel(i: Out, facing: bool) -> Pixel {
  var p: Pixel; p.color=vec4f(linear(c),select(1.,0.6,camera.size.z == 1)); p.id=i.id; return p;
 }
 
-fn edge_pixel(i: Out) -> Pixel { var p: Pixel; var c = style.edge.rgb; if (i.decorated & 2u) != 0u { c = vec3f(0.95,0.45,0.16); } else if (i.decorated & 4u) != 0u { c = vec3f(0.30,0.55,0.95); } p.color=vec4f(linear(c),1); p.id=i.id; return p; }
+fn edge_pixel(i: Out) -> Pixel { if i.section_distance < 0. { discard; } var p: Pixel; var c = style.edge.rgb; if (i.decorated & 2u) != 0u { c = vec3f(0.95,0.45,0.16); } else if (i.decorated & 4u) != 0u { c = vec3f(0.30,0.55,0.95); } p.color=vec4f(linear(c),1); p.id=i.id; return p; }
 
 @fragment fn color_fs(i: Out, @builtin(front_facing) front: bool) -> @location(0) vec4f {
  return face_pixel(i,front).color;
@@ -84,6 +86,7 @@ fn edge_pixel(i: Out) -> Pixel { var p: Pixel; var c = style.edge.rgb; if (i.dec
 
 // IDs require alpha rejection, never lighting, color conversion or selection dots.
 @fragment fn depth_fs(i: Out, @builtin(front_facing) facing: bool) -> Pixel {
+ if i.section_distance < 0. { discard; }
  let front = facing != ((i.decorated & 16u) != 0u);
  let tex = select(i.textures.y,i.textures.x,front);
  let uv = select(i.uv.zw,i.uv.xy,front);

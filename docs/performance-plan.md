@@ -3005,3 +3005,74 @@ Remaining R3c-1 acceptance work:
 After these gaps, R3c-2 still covers section planes after crate work, the
 Metal default switch, GL fallback and preference migration. This increment
 alone does not justify changing the default renderer. No push or PR.
+## R3c-2a — 2026-11-09: clipping and resident capture foundation (partial)
+
+**Not accepted as complete R3c-2a.** Metal now clips the single active
+world-space plane using GL's kept side and zero tolerance. The shared face,
+depth/ID and edge fragment functions cover MSAA, X-ray, profiles and the
+depth consumed by AO. The style uniform grows by one float4, leaving the
+resident vertex/instance/edge ABI unchanged. Plane frames, brackets and
+symbols reuse GL's painter implementation on the Metal overlay image.
+
+Resident sheet capture uses the existing device, geometry, instances and
+materials. Temporary targets and pass resources are restored after capture,
+along with camera/style and capture/picking state; the surface is not
+reconfigured. Cold initialization still uploads the scene once. Repeated
+captures do not bake or upload it again. The native pusher-car check verifies
+byte-identical interactive pixels before/after capture and unchanged owned
+resident bytes.
+
+Outstanding R3c-2a work:
+- GL's closed-ring cap fills, hatch/cross-hatch and thick section boundaries.
+  The comparison images intentionally expose this missing parity.
+- Temporary saved-frame visibility, navigator filtering and tint must be
+  applied to resident instances and restored; current captures use resident
+  instance state. Existing R3b dispatch/restoration unit tests passing is
+  not evidence of native saved-frame visibility parity.
+- A controlled, timestamp-drained repeated comparison proving the <1 ms
+  ride clip gate. The asynchronous ring and changing system load make the
+  first before/after run unsuitable for that acceptance claim.
+- The exact R3b A3 composer/scale scenario. The measurement here exercises
+  the resident entry point at A3 300 dpi dimensions with the live camera,
+  not R3b's saved technical view.
+
+Comparison images and JSON per-pass timings are under
+[wgpu-sections-2026-11-09](benchmarks/wgpu-sections-2026-11-09/).
+The pusher car and marquee each have GL/Metal images with an active central
+X-normal section, edges/profiles both off and both on. Frames are 1600×1200
+physical pixels. GL fills remain enabled, so these are gap comparisons,
+not parity approvals. The later harness drains the timestamp ring before
+recording each variant and suppresses the section widget for geometry costs.
+
+Commands (all in the isolated worktree):
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_*.py
+PYO3_PYTHON=$PWD/.venv-work/bin/python CARGO_HOME=$PWD/.cargo-work cargo test --release --manifest-path rust/ingetrazo_render/Cargo.toml
+```
+
+Python: **98 passed**, four existing deprecation warnings. Render crate:
+**32 passed**, including Metal pipeline validation; zero doc tests. No batch
+suite was run. Native measurements use
+`scripts/wgpu_sections_measure.py MODEL before|after`, each launched by
+`subprocess.run(..., timeout=240, check=True)`. Load averages are printed and
+stored in JSON. No debug Cargo builds were made.
+
+R3c-2b remains the default-renderer switch, GL fallback and preference
+migration, after the outstanding R3c-2a parity issues are resolved.
+
+Ride diagnostic cost table (ms, individual completed GPU samples; not an acceptance result):
+
+| Variant | Original, uncut | Updated, uncut | Updated, cut |
+| --- | ---: | ---: | ---: |
+| Edges/profiles off | 13.26 | 30.36 | 23.64 |
+| Edges/profiles on | 27.84 | 61.26 | 44.62 |
+
+Load averages before: [7.98193359375, 8.03076171875, 7.75537109375]; final: [7.68359375, 11.98876953125, 10.01171875].
+Final 4961×3508 resident capture: **0.318 s**. Interactive
+pixels and resident byte count were unchanged after capture on all three models.
+The original R3b 33 s includes a rebuild and uses a different camera/style;
+these figures must not be treated as a matched speedup.

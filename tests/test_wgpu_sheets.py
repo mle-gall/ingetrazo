@@ -65,19 +65,21 @@ def test_offscreen_size_and_live_camera_unchanged(monkeypatch):
     from core.scene import Scene
     from core.camera import OrbitCamera
     class Renderer:
-        def __init__(self, handle, w, h, scale): self.size = w, h
-        def set_style(self, payload): pass
-        def set_camera(self, *args): pass
-        def request_capture(self): pass
-        def render(self, present): assert present is False
-        def take_capture(self): return bytes(self.size[0]*self.size[1]*4)
-    monkeypatch.setitem(sys.modules, 'ingetrazo_render', SimpleNamespace(Renderer=Renderer))
-    monkeypatch.setattr(module, 'pack_scene', lambda *a: SimpleNamespace(instances=[1], upload=lambda r: None))
+        def render_image(self, w, h, view, projection, payload):
+            assert len(view) == len(projection) == 16
+            assert 'section_plane' in payload
+            return bytes(w*h*4)
+    monkeypatch.setattr(module, 'pack_scene', lambda *a: pytest.fail('resident scene rebuilt'))
     source = SimpleNamespace(scene=Scene(), camera=OrbitCamera(), plano_style=None,
                              style_override=None, _horizon_ndc_y=lambda m: 2.)
     source._effective_style = lambda: Viewport._effective_style(source)
     view = module.WgpuView()
     view.source_viewport = source
+    view.renderer = Renderer()
+    view._scene_dirty = False
+    from core.section import SectionPlane
+    from PySide6.QtGui import QVector3D
+    source.scene.section_planes = [SectionPlane(QVector3D(), QVector3D(1,0,0), active=True)]
     before = dict(source.camera.__dict__)
     image = view.render_image(123, 47)
     assert (image.width(), image.height()) == (123, 47)
