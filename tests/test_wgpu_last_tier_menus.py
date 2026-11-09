@@ -55,10 +55,15 @@ def test_shared_menus_and_dock_selection(monkeypatch):
         browser._items[id(group)].setSelected(False)
         browser._items[id(group)].setSelected(True)
         assert group in scene.selection
-        nav = win.navigator_dock
-        monkeypatch.setattr(nav, 'isVisible', lambda: True)
-        nav.refresh()
-        nav.select_all()
+        dock = win.structure_dock
+        monkeypatch.setattr(dock, 'isVisible', lambda: True)
+        dock.visibility(True)
+        dock.refresh()
+        dock.review.setExpanded(True)
+        row = dock.review.child(0)
+        scene.clear_selection()
+        row.setSelected(True)
+        dock.clicked(row, 0)
         assert group in scene.selection
         dialog = ScaleDialog(win, group)
         dialog.fields[0].setText('2')
