@@ -1,0 +1,98 @@
+[
+  {
+    "case": "glyphs",
+    "returncode": 0,
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "glyphs",
+      "--p4-overlays",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p4"
+    ]
+  },
+  {
+    "case": "box-window",
+    "returncode": 0,
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "box-window",
+      "--p4-overlays",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p4"
+    ]
+  },
+  {
+    "case": "box-crossing",
+    "returncode": 0,
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "box-crossing",
+      "--p4-overlays",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p4"
+    ]
+  },
+  {
+    "case": "zoom-window",
+    "returncode": 0,
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "zoom-window",
+      "--p4-overlays",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p4"
+    ]
+  },
+  {
+    "case": "guides-only",
+    "returncode": 0,
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "guides-only",
+      "--p4-overlays",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p4"
+    ]
+  },
+  {
+    "case": "export-overlays",
+    "returncode": 0,
+    "command": [
+      ".venv-work/bin/python",
+      "scripts/wgpu_look_compare.py",
+      "docs/benchmarks/metal-parity/synthetic.igz",
+      "--capture-only",
+      "--live-frame",
+      "--audit-case",
+      "export-overlays",
+      "--p4-overlays",
+      "--output",
+      "docs/benchmarks/metal-parity/wave1/p4"
+    ]
+  }
+]

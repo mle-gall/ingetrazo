@@ -44,6 +44,8 @@ parser.add_argument('--audit-case', default='baseline')
 parser.add_argument('--overlays', action='store_true')
 parser.add_argument('--live-frame', action='store_true', help='Unshown interactive passes, including selection and overlays')
 parser.add_argument('--measure-audit', action='store_true')
+parser.add_argument('--p4-overlays', action='store_true',
+                    help='Audit P4 helpers before P1 scheduling integration (capture-only live)')
 
 args = parser.parse_args()
 if args.capture_only and args.highlight:
@@ -51,6 +53,8 @@ if args.capture_only and args.highlight:
                  '(or hover-group); export paths omit interaction highlights')
 if args.measure_audit and not (args.capture_only and args.live_frame):
     parser.error('--measure-audit requires --capture-only --live-frame')
+if args.p4_overlays and not (args.capture_only and args.live_frame):
+    parser.error("--p4-overlays requires --capture-only --live-frame")
 out = args.output
 out.mkdir(parents=True, exist_ok=True)
 source = args.model
@@ -162,6 +166,58 @@ if args.capture_only:
         sys.path.insert(0, str(Path('docs/benchmarks/metal-parity').resolve()))
         from fixture import live_setup
         live_setup(scene, gl, metal, args.audit_case)
+    if args.p4_overlays:
+        # Audit-only integration: production scheduling belongs to P1.
+        import views.wgpu_overlay as p4_overlay
+        from views.wgpu_annotations import draw_annotations, draw_tool_overlays
+        from views.wgpu_annotations import composite_annotations
+        from core.snap import SnapResult, COLOR_ENDPOINT
+        from types import SimpleNamespace
+        original_rasterize = p4_overlay.rasterize
+        def glyph_gallery(painter, native):
+            painter.fillRect(0, 0, 1000, 700, Qt.white)
+            kinds = ('endpoint', 'midpoint', 'on_edge', 'on_face', 'intersection',
+                     'center', 'axis', 'component_origin', 'tangent')
+            project = lambda p: (p.x(), p.y())
+            clip = lambda a, b: (a, b)
+            reference = SimpleNamespace(_world_to_pixel=project, _clip_pixel_line=clip,
+                                        _SNAP_LABELS=Viewport._SNAP_LABELS)
+            for i, kind in enumerate(kinds):
+                y = 40 + i * 70
+                snap = SnapResult(kind=kind, point=QVector3D(200, y, 0),
+                                  color=COLOR_ENDPOINT,
+                                  guide=(QVector3D(400, y, 0), QVector3D(950, y, 0)))
+                painter.setPen(Qt.black)
+                painter.drawText(20, y, kind)
+                if native:
+                    p4_overlay.draw_snap_indicator(painter, snap, project, clip)
+                else:
+                    Viewport._draw_snap_indicator(reference, painter, snap)
+        if args.audit_case == 'glyphs':
+            gl._draw_overlay = lambda: None  # gallery is painted on readback below
+        def p4_annotations(painter):
+            if args.audit_case == 'export-overlays':
+                return  # composite_annotations is exercised after capture below
+            if args.audit_case == 'glyphs':
+                glyph_gallery(painter, True)
+                return
+            draw_annotations(painter, scene, metal.camera, (1000, 700))
+            draw_tool_overlays(painter, metal.tools)
+        def p4_rasterize(primitives, width, height, scale, annotations=None):
+            # Tool synchronization clears injected primitives during the first
+            # frame; insert the test rectangle at the actual raster boundary.
+            primitives = list(primitives)
+            if args.audit_case in ('box-window', 'box-crossing', 'zoom-window'):
+                a, b = (250, 250), (650, 550)
+                if args.audit_case == 'box-crossing':
+                    a, b = b, a
+                primitives.append(p4_overlay.selection_rectangle(
+                    a, b, zoom=args.audit_case == 'zoom-window'))
+            return original_rasterize(primitives, width, height, scale, p4_annotations)
+        p4_overlay.rasterize = p4_rasterize
+        metal._paint_section_widgets = lambda image: None  # included above
+        # A suppressed axis marker ensures the old scheduler runs on guides-only.
+        metal.overlay_primitives = [p4_overlay.snap_glyph((0, 0), 'axis')]
     for name, view in [('gl', gl), ('wgpu', metal)]:
         start = time.perf_counter()
         if args.live_frame and name == 'gl':
@@ -202,6 +258,14 @@ if args.capture_only:
             result = QImage(rgba, 1000, 700, QImage.Format_RGBA8888).copy()
         else:
             result = view.render_image(1000, 700, overlays=args.overlays)
+        if args.p4_overlays and args.audit_case == 'glyphs' and name == 'gl':
+            painter = QPainter(result)
+            painter.setRenderHint(QPainter.Antialiasing)
+            glyph_gallery(painter, False)
+            painter.end()
+        if args.p4_overlays and args.audit_case == 'export-overlays' and name == 'wgpu':
+            result = composite_annotations(result, scene, metal.camera,
+                                           logical_size=(1000, 700))
         timings[name] = time.perf_counter() - start
         if result is None or result.isNull():
             raise RuntimeError(name + ' returned no image')
