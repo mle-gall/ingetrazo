@@ -98,7 +98,11 @@ def test_hidden_placements_reside_with_a_gpu_flag():
     hidden.hidden = True
     packed = pack_scene(Scene(groups=[hidden, Group(triangle())]))
     assert len(packed.instances) == 2
-    assert packed.instances['info'][:, 2].tolist() == [1, 0]
+    flags = packed.instances['info'][:, 2].tolist()
+    assert [f & 1 for f in flags] == [1, 0]
+    # Bit 4 (P3): the object is hidden by its own flag, so «Show hidden
+    # objects» may reveal it; a tag turned off does not set it.
+    assert [bool(f & 16) for f in flags] == [True, False]
 
 
 def test_hard_edges_exclude_soft_and_hidden():
@@ -173,7 +177,11 @@ def test_batch_matches_reference_with_holes_concavity_and_legacy(tmp_path, monke
         np.testing.assert_array_equal(packed.vertices[offset:offset+len(reference)], reference)
         assert packed.commands[i]['count'] == len(reference)
         assert packed.commands[i]['first'] == packed.commands[i]['base'] == offset
-        offset += int(packed.commands[i]['count'] + packed.edge_commands[i]['count'])
+        # Per prototype: visible faces, visible edges, then the hidden faces
+        # and edges the pack keeps for «Show hidden geometry» (P3).
+        offset += int(packed.commands[i]['count'] + packed.edge_commands[i]['count']
+                      + packed.hidden_commands[i]['count']
+                      + packed.hidden_edge_commands[i]['count'])
     assert offset == len(packed.indices) == len(packed.vertices)
     assert packed.edge_commands['count'].tolist() == [24, 6]
 
@@ -245,7 +253,7 @@ def test_nested_placements_inherit_hidden_state_and_tag_visibility():
     off = Layer('off'); off.visible = False
     scene.layers.append(off)
     packed = pack_scene(scene)
-    flags = dict(zip(packed.uids, packed.instances['info'][:, 2].tolist()))
+    flags = {uid: f & 1 for uid, f in zip(packed.uids, packed.instances['info'][:, 2].tolist())}
     assert flags[root.uid] == 0 and flags[plain.uid] == 0
     assert flags[hidden_child.uid] == 1 and flags[grandchild.uid] == 1
     assert flags[tagged.uid] == 1
@@ -297,13 +305,15 @@ def test_container_colors_share_geometry_without_material_vertices():
     assert not packed.materials.any()
 
 
-def test_matching_back_uses_color_flag_without_material_rows():
+def test_matching_back_uses_a_material_record_and_an_opaque_alpha():
+    # The alpha byte now carries the effective opacity (P3: 0 unpainted,
+    # 1–255 painted), so «back matches front» lives in a material record
+    # instead of the old alpha-254 flag.
     mesh = triangle()
     mesh.faces[0].attrs.update(color=(1, 0, 0), back=True)
     packed = pack_scene(Scene(groups=[Group(mesh)]))
-    assert len(packed.materials) == 16
-    assert not packed.materials.any()
-    np.testing.assert_array_equal(packed.vertices['color'][:3], [[255, 0, 0, 254]]*3)
+    assert packed.materials.any()
+    np.testing.assert_array_equal(packed.vertices['color'][:3], [[255, 0, 0, 255]]*3)
 
 
 def test_distinct_back_allocates_only_face_material_rows():

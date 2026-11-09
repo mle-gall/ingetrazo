@@ -204,13 +204,15 @@ def test_selection_marks_and_preview_bridge(view):
     view.scene.select([f])
     image = rasterize([], 800, 600, 1, view._draw_selection_marks)
     assert np.any(pixels(image)[3::4])
-    count = len(view.packed.vertices)
+    # The pack keeps suppressed faces as hidden ranges (P3), so the visible
+    # face count drops while the vertex stream stays.
+    visible = int(view.packed.commands['count'].sum())
     view.tools.set_suppressed_faces([f])
     assert view.suppressed_faces == (f,)
     assert not f.attrs.get('hidden')
-    assert len(view.packed.vertices) < count
+    assert int(view.packed.commands['count'].sum()) < visible
     view.tools.set_suppressed_faces([])
-    assert len(view.packed.vertices) == count
+    assert int(view.packed.commands['count'].sum()) == visible
 
 
 
