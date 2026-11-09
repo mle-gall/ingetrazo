@@ -236,7 +236,8 @@ Normals have maximum component quantization error 1/65534.
 
 Commands remain 20-byte rows: P indexed face commands followed by P edge rows.
 Edge rows are **non-indexed indirect** arguments in the first 16 bytes:
-`(E * 6, visible_placements, first_edge * 6, S)`; the fifth word retains S.
+`(E * 6, visible_placements, first_edge * 6, S)`; the fifth word stores the hard-edge vertex count. A second command template
+uses that count when profiles are off, skipping all synthesized candidates.
 Empty ranges use vertex count zero. Cull increments edge instance count by one,
 while face counts and survivor slots are unchanged. Vertex_index/6 selects the
 edge record, and survivors[instance_index] selects its placement. Six procedural
@@ -250,7 +251,7 @@ corner order remains unchanged; set_materials applies the same vertex-base
 translation to its sparse header. The public handoff is unchanged.
 
 For in-place replacement, preserve each prototype's edge range and update its
-command template; reset indirect counts before culling. Update material-base
+command templates (all edges and hard-only); reset indirect counts before culling. Update material-base
 translations if face ranges move.
 Placement matrix/flags and survivor layouts are unchanged. AO should consume
 28-byte face vertices and the existing face commands, never edge rows.

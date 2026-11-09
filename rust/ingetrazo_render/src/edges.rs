@@ -32,6 +32,7 @@ pub fn expand(
                 pairs.push((a, b, false));
             }
         }
+        let hard_count = pairs.len();
         for (k, n) in &adjacency {
             if !hard.contains(k)
                 && (n[1] == [0.; 3] || glam::Vec3::from(n[0]).dot(glam::Vec3::from(n[1])) < 0.99999)
@@ -55,6 +56,7 @@ pub fn expand(
         c.first = u32::try_from(first * 6).map_err(|_| "edge buffer too large")?;
         c.count = u32::try_from(count * 6).map_err(|_| "edge buffer too large")?;
         c.base = c.start as i32; // Non-indexed first_instance addresses survivors.
+        c.start = u32::try_from(hard_count * 6).map_err(|_| "edge buffer too large")?;
         row.copy_from_slice(bytemuck::bytes_of(&c));
     }
     if v.is_empty() { v.resize(40, 0); } // Valid storage binding for face-only scenes.
@@ -203,6 +205,28 @@ mod compact_tests {
                 assert!((pixels - width).abs() < 1e-5);
             }
         }
+    }
+
+    #[test]
+    fn packs_normals_flags_and_hard_only_count() {
+        let mut vertices = Vec::new();
+        for p in [[0f32,0.,0.],[1.,0.,0.],[0.,1.,0.]] {
+            vertices.extend_from_slice(bytemuck::cast_slice(&p));
+            vertices.extend_from_slice(&[0;16]);
+        }
+        let commands = [
+            crate::Command { count:3, instances:0, first:0, base:0, start:7 },
+            crate::Command { count:4, instances:0, first:3, base:0, start:7 },
+        ];
+        // Reversed duplicate hard edge is represented once.
+        let (v, _, cmd) = super::expand(&vertices, bytemuck::cast_slice(&[0u32,1,2,0,1,1,0]),
+            bytemuck::cast_slice(&commands), 1).unwrap();
+        assert_eq!(v.len(), 3*40);
+        let edge: crate::Command = bytemuck::pod_read_unaligned(&cmd[20..]);
+        assert_eq!((edge.count,edge.base,edge.start), (18,7,6));
+        assert_eq!(i16::from_le_bytes(v[28..30].try_into().unwrap()),32767);
+        assert_eq!(i16::from_le_bytes(v[38..40].try_into().unwrap()),0);
+        assert_eq!(i16::from_le_bytes(v[78..80].try_into().unwrap()),32767);
     }
 
     #[test]

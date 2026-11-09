@@ -37,6 +37,7 @@ struct Scene {
     index: wgpu::Buffer,
     commands: wgpu::Buffer,
     template: wgpu::Buffer,
+    hard_template: wgpu::Buffer,
     compute: wgpu::BindGroup,
     draw: wgpu::BindGroup,
     edge_draw: wgpu::BindGroup,
@@ -493,6 +494,12 @@ impl Renderer {
                 | wgpu::BufferUsages::COPY_DST,
         );
         let template = buffer(&self.device, cmd, wgpu::BufferUsages::COPY_SRC);
+        let mut hard_cmd = cmd.to_vec();
+        for row in hard_cmd.chunks_exact_mut(20).skip(count) {
+            let hard_count = row[16..20].to_vec();
+            row[..4].copy_from_slice(&hard_count);
+        }
+        let hard_template = buffer(&self.device, &hard_cmd, wgpu::BufferUsages::COPY_SRC);
         let survivors = buffer(&self.device, &vec![0; n * 4], wgpu::BufferUsages::STORAGE);
         let compute = bind(
             &self.device,
@@ -523,7 +530,7 @@ impl Renderer {
         self.transparency.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer);
         self.aa.bind_scene(&self.device, &self.camera, &inst, &survivors, &self.look.buffer, &edge_records);
         self.gpu_memory =
-            (v.len() + expanded_v.len() + ix.len() + p.len() + cmd.len() * 2 + instances.len() + n * 4 + 80 + 416)
+            (v.len() + expanded_v.len() + ix.len() + p.len() + cmd.len() * 3 + instances.len() + n * 4 + 80 + 416)
                 as u64 + self.textures.bytes + self.textures.materials.size();
         self.ids_dirty = true;
         self.scene = Some(Scene {
@@ -537,6 +544,7 @@ impl Renderer {
             index,
             commands,
             template,
+            hard_template,
             compute,
             draw,
             edge_draw,
@@ -746,7 +754,7 @@ impl Renderer {
         let ids = self.ids.create_view(&Default::default());
         let mut e = self.device.create_command_encoder(&Default::default());
         self.background.draw(&mut e, &color);
-        e.copy_buffer_to_buffer(&s.template, 0, &s.commands, 0, s.p as u64 * 40);
+        e.copy_buffer_to_buffer(if self.look.data[6][0] > 0. { &s.template } else { &s.hard_template }, 0, &s.commands, 0, s.p as u64 * 40);
         {
             let mut pass = e.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: None,
