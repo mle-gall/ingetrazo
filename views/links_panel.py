@@ -17,7 +17,7 @@ class LinksPanel(QWidget):
         self.tree.setHeaderLabels(['Source', 'Status', 'Subset', 'Stable UIDs'])
         # The tree takes what the buttons leave and asks for no minimum of
         # its own, so the tab stays as short as the Model tab.
-        self.tree.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        self.tree.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         layout.addWidget(self.tree)
         # Two columns: eight buttons one under the other gave this tab a
         # minimum height that outgrew the Model tab's and, while the trays
@@ -32,6 +32,10 @@ class LinksPanel(QWidget):
                    ('Pack / unpack', self.pack), ('Move registry to project…', self.move_registry)]
         for i, (label, action) in enumerate(actions):
             button = QPushButton(label)
+            # Two long labels side by side must not set the side tray's
+            # minimum width (the window's floor grew past the sheet tabs'
+            # test): the buttons take the width they get, elided by Qt.
+            button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             button.clicked.connect(lambda checked=False, fn=action: self.run(fn))
             grid.addWidget(button, i // 2, i % 2)
 
