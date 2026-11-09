@@ -51,6 +51,8 @@ class PackedScene:
     profile_exclusions: tuple = ()
     reveal_hidden: tuple = (False, False)
 
+    prototype_lookup: dict | None = None
+
     def upload(self, renderer):
         renderer.set_scene(tuple(a.view(np.uint8).reshape(-1) for a in
                                  (self.vertices, self.indices, self.bounds, np.concatenate((self.commands, self.edge_commands)))),
@@ -221,6 +223,41 @@ def _placement_state(scene):
     return state
 
 
+def _placement_records(scene, roots, vp, state):
+    from views.viewport import Viewport
+    # Visibility is inherited down the tree, as the GL proxies do it: a
+    # placement inside a hidden group, or inside a group whose tag is off,
+    # is hidden whatever its own flags say. Taking only the root's state
+    # drew the ride's hidden concrete volumes and context walls (R-look).
+    parent_of = {}
+
+    def map_parents(group):
+        for child in getattr(group, 'children', None) or ():
+            parent_of[id(child)] = group
+            map_parents(child)
+    hidden_of = {}
+    object_hidden_of = {}
+    filtered_of = {}
+
+    for root in roots:
+        map_parents(root)
+        # GL proxies carry the top-level paint owner and inherited layer.
+        # Keep source groups for editing; use proxies only to resolve paint.
+        proxies = Viewport._expand_placements(vp, root)
+        for (g, matrix), proxy in zip(iter_placements(root), proxies):
+            parent = parent_of.get(id(g))
+            inherited = hidden_of.get(id(parent), False) if parent is not None else False
+            hidden_of[id(g)] = inherited or not state(proxy)[0]
+            object_hidden_of[id(g)] = bool(getattr(g, 'hidden', False)) or object_hidden_of.get(id(parent), False)
+            allowed = getattr(scene, '_navigator_allowed', None)
+            filtered_of[id(g)] = (filtered_of.get(id(parent), False)
+                or not scene._layer_state(proxy)[0] or scene.similar_hidden(proxy)
+                or (allowed is not None and g.uid not in allowed))
+            flags = (int(hidden_of[id(g)]) | (OBJECT_HIDDEN if object_hidden_of[id(g)] else 0)
+                     | (VISIBILITY_FILTERED if filtered_of[id(g)] else 0))
+            yield g, matrix, proxy, flags
+
+
 def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=True):
     from time import perf_counter
     try:
@@ -235,39 +272,10 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
     meshes, lookup, rows, uids, paints = [], {}, [], [], []
     billboard_codes = set()
     groups = []
-    placements = [(None, None, scene.loose_mesh, False)]
-    # Visibility is inherited down the tree, as the GL proxies do it: a
-    # placement inside a hidden group, or inside a group whose tag is off,
-    # is hidden whatever its own flags say. Taking only the root's state
-    # drew the ride's hidden concrete volumes and context walls (R-look).
-    parent_of = {}
-
-    def map_parents(group):
-        for child in getattr(group, 'children', None) or ():
-            parent_of[id(child)] = group
-            map_parents(child)
-    hidden_of = {}
-    object_hidden_of = {}
-    filtered_of = {}
-    paint_groups = {}
-    for root in scene.groups:
-        map_parents(root)
-        # GL proxies carry the top-level paint owner and inherited layer.
-        # Keep source groups for editing; use proxies only to resolve paint.
-        proxies = Viewport._expand_placements(vp, root)
-        for (g, matrix), proxy in zip(iter_placements(root), proxies):
-            paint_groups[id(g)] = proxy
-            parent = parent_of.get(id(g))
-            inherited = hidden_of.get(id(parent), False) if parent is not None else False
-            hidden_of[id(g)] = inherited or not state(proxy)[0]
-            object_hidden_of[id(g)] = bool(getattr(g, 'hidden', False)) or object_hidden_of.get(id(parent), False)
-            allowed = getattr(scene, '_navigator_allowed', None)
-            filtered_of[id(g)] = (filtered_of.get(id(parent), False)
-                or not scene._layer_state(proxy)[0] or scene.similar_hidden(proxy)
-                or (allowed is not None and g.uid not in allowed))
-            placements.append((g, matrix, g.mesh, hidden_of[id(g)]))
-    for group, matrix, mesh, hidden in placements:
-        paint_group = paint_groups.get(id(group), group)
+    from itertools import chain
+    placements = chain([(None, None, None, 0)], _placement_records(scene, scene.groups, vp, state))
+    for group, matrix, paint_group, flags in placements:
+        mesh = scene.loose_mesh if group is None else group.mesh
         paint_attrs = _paint_of(vp, paint_group)
         if paint_attrs and paint_attrs.get('front_only'):
             paint_attrs = None  # style tint stays dynamic
@@ -286,11 +294,9 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
             continue
         if billboard:
             billboard_codes.add(code)
-        visible, paint = state(paint_group)
+        _, paint = state(paint_group)
         world = np.eye(4, dtype=np.float32) if matrix is None else np.array(matrix.data(), np.float32).reshape(4, 4)
-        rows.append((code, world, int(hidden or not visible) | (8 if billboard else 0)
-                     | (OBJECT_HIDDEN if object_hidden_of.get(id(group), False) else 0)
-                     | (VISIBILITY_FILTERED if filtered_of.get(id(group), False) else 0)))
+        rows.append((code, world, flags | (8 if billboard else 0)))
         uids.append(getattr(group, 'uid', 'loose'))
         groups.append(group)
         paints.append(paint)
@@ -358,7 +364,7 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
         shown = instances[(instances['info'][:, 2] & 1) == 0]
         if not len(shown):
             return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures, tuple(texture_ids), hidden_commands, hidden_edge_commands, profile_exclusions,
-                               (bool(getattr(scene, 'show_hidden_geometry', False)), bool(getattr(scene, 'show_hidden_objects', False))))
+                               (bool(getattr(scene, 'show_hidden_geometry', False)), bool(getattr(scene, 'show_hidden_objects', False))), lookup)
         b = bounds[shown['info'][:, 0], :, :3]
         center, extent = (b[:, 0]+b[:, 1])/2, (b[:, 1]-b[:, 0])/2
         mat = shown['world'].transpose(0, 2, 1)
@@ -366,7 +372,7 @@ def pack_scene(scene, view_tint=None, *, face_overrides=None, texture_images=Tru
         we = np.einsum('nij,nj->ni', abs(mat[:, :3, :3]), extent)
         world_bounds = np.array([(wc-we).min(axis=0), (wc+we).max(axis=0)])
     return PackedScene(vertices, indices, bounds, commands, edge_commands, instances, uids, world_bounds, dict(handoff=handoff-begin, native=baked-handoff, finish=perf_counter()-baked, peak_build_rss_bytes=(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource is not None else None)), groups, materials, textures, tuple(texture_ids), hidden_commands, hidden_edge_commands, profile_exclusions,
-                               (bool(getattr(scene, 'show_hidden_geometry', False)), bool(getattr(scene, 'show_hidden_objects', False))))
+                               (bool(getattr(scene, 'show_hidden_geometry', False)), bool(getattr(scene, 'show_hidden_objects', False))), lookup)
 
 
 def _material_columns(pos, corners, sizes, counts, table, attributes, texture_ids):

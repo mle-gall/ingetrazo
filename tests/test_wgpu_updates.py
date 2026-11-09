@@ -276,7 +276,7 @@ def test_history_insert_undo_redo_keeps_one_row(monkeypatch):
     added = Group(scene.groups[0].mesh)
     added.xform = QMatrix4x4()
     visited = []
-    monkeypatch.setattr('views.wgpu_updates.iter_placements',
+    monkeypatch.setattr('views.wgpu_scene.iter_placements',
                         lambda group: (visited.append(group), iter_placements(group))[1])
     history.execute(InsertGroupCommand(added))
     ids, rows = updates.diff(scene)
@@ -393,3 +393,38 @@ def test_mesh_history_journal_does_not_walk_placements(monkeypatch):
     history.redo()
     updates.apply(*updates.diff(scene))
     assert len(updates.changed) == 1
+
+
+def test_nested_row_edits_preserve_painted_variants_and_inherited_flags():
+    scene, _ = fixture_scene()
+    a, b = scene.groups
+    root = Group()
+    root.adopt([a])
+    root.material = {'opacity': .5, 'color': [.2, .3, .4]}
+    scene.groups[:] = [root, b]
+    updates = InstanceUpdates(scene, pack_scene(scene))
+    root.xform.translate(1, 2, 3)
+    root.hidden = True
+    ids, rows = updates.diff(scene)
+    assert ids.tolist() == [updates.rows[a.uid]]
+    updates.apply(ids, rows)
+    np.testing.assert_array_equal(updates.packed.instances, pack_scene(scene).instances)
+    a.mesh.move_vertex(a.mesh.vertices[0], QVector3D(0, 0, 2))
+    assert updates.diff(scene) is None
+
+
+def test_hide_command_on_nested_container_updates_only_instance_flags():
+    from core.history import History, HideCommand
+    scene, _ = fixture_scene()
+    root = Group()
+    root.adopt(scene.groups[:1])
+    scene.groups[0] = root
+    updates = InstanceUpdates(scene, pack_scene(scene))
+    history = History(scene)
+    updates.observe(history)
+    history.execute(HideCommand([root]))
+    updates.apply(*updates.diff(scene))
+    np.testing.assert_array_equal(updates.packed.instances, pack_scene(scene).instances)
+    history.undo()
+    updates.apply(*updates.diff(scene))
+    np.testing.assert_array_equal(updates.packed.instances, pack_scene(scene).instances)

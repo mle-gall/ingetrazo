@@ -341,3 +341,95 @@ def test_move_facade_reads_document_from_native_view(view):
         assert group.xform.column(3).x() == 0
     finally:
         view.source_viewport = old
+
+
+def test_context_click_uses_current_frame_and_ignores_faded_occluder(view):
+    def triangle(z):
+        mesh = Mesh()
+        mesh.add_face([QVector3D(0, 0, z), QVector3D(3, 0, z), QVector3D(0, 3, z)])
+        return Group(mesh)
+
+    child, outside = triangle(0), triangle(1)
+    root = Group()
+    root.adopt([child])
+    view.scene.groups.extend([root, outside])
+    view.scene.version += 1
+    view.set_scene(view.scene)
+    resident = view.packed
+    view.inference_index = prepare(resident)
+    shown = []
+    def present():
+        shown.append(view.scene.edit_group)
+        view._pick_frame_dirty = False
+    view.draw_frame = present
+    view.renderer = SimpleNamespace(
+        render=present, set_rest=lambda *_: None, set_highlight=lambda *_: None,
+        pick=lambda *_: resident.groups.index(outside if shown[-1] else child))
+    p = pixel(view, QVector3D(1, 1, 0))
+    QTest.mouseDClick(view, Qt.LeftButton, Qt.NoModifier, p)
+    assert view.scene.edit_group is root
+    view.set_scene(view.scene)
+    QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, p)
+    assert shown == [None, root]
+    assert view.scene.selection == {child}
+    mouse_move(view, p)
+    assert not view.hover_rows
+    view.source_viewport.end_one_group_edit()
+    view.set_scene(view.scene)
+    assert view.scene.edit_group is None
+    assert view.packed is resident
+
+
+def test_transformed_component_retains_resident_row_and_picks_world_copy(view):
+    mesh = Mesh()
+    mesh.add_face([QVector3D(0, 0, 0), QVector3D(2, 0, 0), QVector3D(0, 2, 0)])
+    group = Group(mesh)
+    group.xform = QMatrix4x4()
+    group.xform.translate(1, 0, 0)
+    view.scene.groups.append(group)
+    view.scene.version += 1
+    view.set_scene(view.scene)
+    resident = view.packed
+    view.pick_row = lambda *_: 0
+    view.scene.begin_group_edit(group)
+    view.set_scene(view.scene)
+    assert view.packed is resident
+    p = pixel(view, QVector3D(1.25, .25, 0))
+    assert view.tools.pick_face(p.x(), p.y()) is group.mesh.faces[0]
+    view.scene.end_one_group_edit()
+    view.set_scene(view.scene)
+    assert view.packed is resident
+    assert group.mesh is mesh
+
+
+def test_geometry_repack_keeps_previous_frame_until_upload(view, monkeypatch):
+    from views import wgpu_view
+    scene = view.scene
+    mesh = Mesh()
+    mesh.add_edge(QVector3D(), QVector3D(1, 0, 0))
+    root = Group()
+    root.adopt([Group(mesh)])
+    scene.groups.append(root)
+    scene.version += 1
+    view.set_scene(scene)
+    old = view.packed
+    events = []
+    pack = wgpu_view.pack_scene
+
+    def replacement(*args):
+        assert view.packed is old
+        events.append("pack")
+        return pack(*args)
+
+    def upload():
+        assert view.packed is not old
+        assert len(view.packed.instances) == 1
+        events.append("upload")
+
+    monkeypatch.setattr(wgpu_view, 'pack_scene', replacement)
+    monkeypatch.setattr(view, '_upload', upload)
+    monkeypatch.setattr(view, 'blank', lambda: pytest.fail("cleared resident frame"))
+    mesh.add_edge(QVector3D(1, 0, 0), QVector3D(2, 0, 0))
+    scene.version += 1
+    view.set_scene(scene)
+    assert events == ["pack", "upload"]

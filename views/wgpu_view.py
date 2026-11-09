@@ -93,11 +93,18 @@ class WgpuView(QWidget):
         self._observe_tool_source()
         self.scene = scene
         allowed = getattr(scene, '_navigator_allowed', None)
-        token = (id(scene), scene._bounds_key(),
+        version, stack, _, similar, layers = scene._bounds_key()
+        token = (id(scene), (version - scene._placement_context_bumps,
+                             stack if similar else (), similar, layers),
                  None if allowed is None else frozenset(allowed))
         paint_key = _paint_key(scene)
-        if (token == getattr(self, "_content_token", None)
+        resident_copies = getattr(self, '_resident_edit_copies', ())
+        sharing_restored = any(group.mesh is not mesh for group, mesh in resident_copies)
+        if (not sharing_restored and token == getattr(self, "_content_token", None)
                 and paint_key == getattr(self, "_paint_key", None)):
+            tracker = getattr(self, '_instance_updates', None)
+            if tracker is not None:
+                tracker.version = version  # only the context bump was skipped
             self.update()
             return
         if getattr(self, "_billboards", None) is not None:
@@ -107,12 +114,18 @@ class WgpuView(QWidget):
         # per-face colours are baked into the resident vertices, so the
         # scene packs again (the row delta below only moves placements).
         repaint = paint_key != getattr(self, "_paint_key", None)
-        self._content_token = token
-        self._paint_key = paint_key
+        self._resident_edit_copies = [(level['group'], level['world_copy'])
+                                      for level in scene._edit_stack if level.get('world_copy')]
+        self._selection_rows = {}
+        self._selection_signature = None
+        self._container_boxes = {}
+        self._pick_frame_dirty = True
         start = time.perf_counter()
         tracker = getattr(self, '_instance_updates', None)
         if tracker is not None:
-            if previous_token is not None and (previous_token[1][1:], previous_token[2]) != (token[1][1:], token[2]):
+            visibility_changed = previous_token is not None and (
+                previous_token[1][1:] != token[1][1:] or previous_token[2] != token[2])
+            if sharing_restored or visibility_changed:
                 tracker.journal_valid = False
             tracker.observe(getattr(self.source_viewport, 'history', None))
         delta = (tracker.diff(scene) if tracker is not None and len(self.packed.instances)
@@ -155,6 +168,8 @@ class WgpuView(QWidget):
                     if not getattr(self, '_inference_queued', False):
                         self._inference_queued = True
                         QTimer.singleShot(0, self._refresh_inference)
+            self._content_token = token
+            self._paint_key = paint_key
             self.build_seconds = time.perf_counter() - start
             self.update()
             return
@@ -173,6 +188,13 @@ class WgpuView(QWidget):
         self._resident_count = len(self.packed.instances)
         self._instance_updates = InstanceUpdates(scene, self.packed)
         self._instance_updates.observe(getattr(self.source_viewport, 'history', None))
+        # Compute expensive edit boxes in the load pass. The world geometry
+        # and the group's own axes survive entering/leaving a container.
+        if len(self.packed.instances) > 4096:
+            from views.viewport import Viewport
+            for group in scene.groups:
+                if group.children and len(self._rows_for_group(group)) > 4096:
+                    self._container_boxes[group] = Viewport._compute_obb(group)
         self._prepare_inference()
         self.build_seconds = time.perf_counter()-start
         lo, hi = self.packed.world_bounds
@@ -180,6 +202,8 @@ class WgpuView(QWidget):
             self.camera.target = QVector3D(*((lo+hi)/2))
             self.camera.distance = max(float(np.linalg.norm(hi-lo))*1.4, 1.)
         self._upload()
+        self._content_token = token
+        self._paint_key = paint_key
 
     def blank(self):
         """Only the background, while another document loads into this
@@ -190,6 +214,10 @@ class WgpuView(QWidget):
         if tracker is not None and tracker.unsubscribe is not None:
             tracker.unsubscribe()
         self._instance_updates = None
+        self._container_boxes = {}
+        self._selection_rows = {}
+        self._resident_edit_copies = ()
+        self._parent_map = None
         self.packed = pack_scene(Scene())
         from views.wgpu_billboards import Billboards
         self._billboards = Billboards(self.packed)
@@ -272,6 +300,7 @@ class WgpuView(QWidget):
             self._billboards.key = None
         self.upload_seconds = time.perf_counter()-start
         self._scene_dirty = False
+        self._pick_frame_dirty = True
         self.update()
 
     def showEvent(self, event):
@@ -286,8 +315,15 @@ class WgpuView(QWidget):
         self.update()
 
     def draw_frame(self):
-        if self.renderer is None:
+        if self.renderer is None or getattr(self, '_drawing_frame', False):
             return None
+        self._drawing_frame = True
+        try:
+            return self._present_frame()
+        finally:
+            self._drawing_frame = False
+
+    def _present_frame(self):
         start = time.perf_counter()
         # A scene packed since the last frame goes up BEFORE anything is
         # written per instance: the override write below is sized by the
@@ -376,6 +412,7 @@ class WgpuView(QWidget):
             self._had_overlay = annotations or bool(primitives) or section_widgets
         # End R3c-2a section widgets.
         cpu, gpu = self.renderer.render()
+        self._pick_frame_dirty = False
         wall = (time.perf_counter()-start)*1000
         self.frameReady.emit(cpu, gpu, wall)
         return cpu, gpu, wall
@@ -485,10 +522,22 @@ class WgpuView(QWidget):
             return None
         return self.packed.groups[row], int(self.packed.instances['info'][row, 0])
 
+    def _prepare_pick_frame(self):
+        if getattr(self, '_drawing_frame', False):
+            return  # overlay occlusion reads IDs during this very presentation
+        if self._scene_dirty and self.isVisible():
+            self._upload()
+        timer = getattr(self, '_refresh_timer', None)
+        if timer is not None and timer.isActive():
+            self.set_scene(self.scene)
+        self.sync_edit_context()
+        if getattr(self, '_pick_frame_dirty', False) and hasattr(self.renderer, 'render'):
+            self.draw_frame()
+
     def pick_row(self, x, y):
         if self.renderer is None or x < 0 or y < 0:
             return None
-        self.sync_edit_context()
+        self._prepare_pick_frame()
         scale = self.devicePixelRatioF()
         row = self.renderer.pick(int(x*scale), int(y*scale))
         return row if self.resolve(row) is not None else None
@@ -506,12 +555,16 @@ class WgpuView(QWidget):
         from views.wgpu_overlay import snap_glyph, Primitive
         start = time.perf_counter()
         self.tools.sync()
-        self.hovered_row = self.pick_row(x, y)
-        self.hover_rows = self._hover_highlight_rows(self.hovered_row)
+        # Select's priority walk already queries the row for its group pick.
+        self.hovered_row = None
+        selecting = self.tools.mode == 'select' and not getattr(self.source_viewport, 'nav_mode', None)
+        if not selecting or self.source_viewport is None:
+            self.hovered_row = self.pick_row(x, y)
+        self.hover_rows = ()  # GL paints hovered edges and annotations only.
         self.last_snap = None
         self.overlay_primitives = []
         source = self.source_viewport
-        if self.tools.mode == 'select' and not getattr(source, 'nav_mode', None):
+        if selecting:
             from tools.select import SelectTool
             from core.mesh import Face
             entity = SelectTool()._pick(self.tools, x, y) if source is not None else None
@@ -587,12 +640,17 @@ class WgpuView(QWidget):
         flags &= np.uint32(~(64 | 128) & 0xffffffff)
         if mode in ('fade', 'hide'):
             flags[rows] |= np.uint32(64 | (128 if mode == 'hide' else 0))
+        self._pick_frame_dirty = True
         self._rest_signature = signature
         from views.wgpu_parity import hidden_geometry
         hidden_geometry(self)
 
     def _group_obb(self, group):
-        return self.source_viewport._group_obb(group)
+        from views.viewport import Viewport
+        boxes = self.__dict__.setdefault('_container_boxes', {})
+        if group not in boxes:
+            boxes[group] = Viewport._compute_obb(group)
+        return boxes[group]
 
     def _edit_group_box_corners(self):
         from views.viewport import Viewport
@@ -619,19 +677,20 @@ class WgpuView(QWidget):
         if self.renderer is None:
             return
         from core.mesh import Face, Edge
-        from core.group import Group, iter_placements
+        from core.group import Group
         from views.wgpu_parity import face_marks
         selected = self.scene.selection
-        uids = {g.uid for root in selected if isinstance(root, Group)
-                for g, _ in iter_placements(root)}
         hover = tuple(getattr(self, 'hover_rows', ()) or ())
         faces = [f for f in selected if isinstance(f, Face)]
         hovered = getattr(self.tools, '_mesh_hover', getattr(self.source_viewport, '_hover_entity', None))
         signature = (frozenset(map(id, selected)), hover, id(hovered), id(self.packed),
                      tuple(self.camera.eye().toTuple()) if faces else ())
         if signature != self._selection_signature:
-            indices = [i for uid in uids for i in self.uid_rows.get(uid, ())]
-            self.renderer.set_highlight(indices, list(hover))
+            indices = set()
+            for root in selected:
+                if isinstance(root, Group):
+                    indices.update(self._rows_for_group(root))
+            self.renderer.set_highlight(list(indices), list(hover))
             if hasattr(self.renderer, 'set_face_marks'):
                 self.renderer.set_face_marks(face_marks(self, faces))
             if self.tools.mode == 'select' and hasattr(self.renderer, 'set_preview_mesh'):
@@ -723,24 +782,17 @@ class WgpuView(QWidget):
                 return chain[i-1] if i > 0 else None
         return None
 
-    def _hover_highlight_rows(self, row):
-        """The rows the cursor marks: only under the Select tool (Orbit,
-        Paint and the rest mark nothing, as in GL), and the whole placement
-        a click would select at this level — never a nested child on its
-        own, never loose faces (#832)."""
-        if row is None or getattr(self.tools, 'mode', None) != 'select':
-            return ()
-        if getattr(self.source_viewport, 'nav_mode', None):
-            return ()           # Orbit, Pan, Zoom ride over Select: no marks
-        resolved = self.resolve(row)
-        if resolved is None or resolved[0] is None:
-            return ()
-        top = self.context_placement(resolved[0])
-        if top is None or not self.scene.entity_selectable(top):
-            return ()
-        from core.group import iter_placements
-        return tuple(i for g, _ in iter_placements(top)
-                     for i in self.uid_rows.get(getattr(g, 'uid', None), ()))
+    def _rows_for_group(self, group):
+        cache = self.__dict__.setdefault('_selection_rows', {})
+        if group not in cache:
+            rows = []
+            pending = [group]
+            while pending:
+                child = pending.pop()
+                rows.extend(self.uid_rows.get(child.uid, ()))
+                pending.extend(child.children or ())
+            cache[group] = rows
+        return cache[group]
 
     def select_rows(self, rows, modifiers=Qt.NoModifier):
         start = time.perf_counter()
@@ -920,7 +972,6 @@ class WgpuView(QWidget):
         elif event.key() == Qt.Key_Escape:
             if self.scene.edit_group is not None and self.source_viewport is not None:
                 self.source_viewport.end_one_group_edit()
-                self.source_viewport.notify_scene_changed()
             else:
                 self.scene.clear_selection()
             self.last = None
@@ -1000,7 +1051,7 @@ class WgpuView(QWidget):
         scale = self.devicePixelRatioF()
         x0, x1 = sorted((x0, x1))
         y0, y1 = sorted((y0, y1))
-        self.sync_edit_context()
+        self._prepare_pick_frame()
         return [row for row in self.renderer.pick_rect(*(max(0, int(v*scale)) for v in (x0, y0, x1, y1)))
                 if self.resolve(row) is not None]
 

@@ -319,6 +319,19 @@ class NativeTools(MeshToolAccess):
             if hasattr(self.view, 'setCursor'):
                 self.view.setCursor(source.cursor())
 
+    def begin_group_edit(self, group):
+        # The document controller owns undo, links, locks and edit sharing.
+        self.view.source_viewport.begin_group_edit(group)
+
+    def end_one_group_edit(self):
+        self.view.source_viewport.end_one_group_edit()
+
+    def set_extension_pick(self, hit):
+        self.view.source_viewport.set_extension_pick(hit)
+
+    def clear_extension_pick(self, notify=True):
+        self.view.source_viewport.clear_extension_pick(notify=notify)
+
     def edit_group_box_contains_pixel(self, x, y):
         return self.view.edit_group_box_contains_pixel(x, y)
 

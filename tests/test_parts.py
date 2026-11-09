@@ -357,3 +357,19 @@ def test_the_tray_shows_a_surface_as_an_area():
     assert "×" in panel.tree.topLevelItem(1).text(1)
     assert not panel.tree.topLevelItem(1).text(1).endswith("surface")
     win._saved_version = scene.version
+
+
+def test_clipped_parts_wait_to_measure_the_selected_group(monkeypatch):
+    from PySide6.QtGui import QRegion
+    win, scene = _window_with(_stool())
+    panel = win.tray.parts
+    calls = []
+    monkeypatch.setattr(win, 'isVisible', lambda: True)
+    monkeypatch.setattr(panel, 'visibleRegion', QRegion)
+    monkeypatch.setattr(panel, '_row', lambda part: calls.append(part))
+    panel.on_scene_changed()
+    assert panel._stale and not calls
+    monkeypatch.undo()
+    panel.refresh()
+    assert len(panel._rows) == 3
+    win._saved_version = scene.version

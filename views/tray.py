@@ -22,7 +22,7 @@ import math
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, QRect, QSettings, QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -1261,6 +1261,7 @@ class ComponentsPanel(QWidget):
         # components drew all of them at every refresh (#158).
         self._in_model.verticalScrollBar().valueChanged.connect(
             self._schedule_thumbs)
+        self._in_model.viewport().installEventFilter(self)
         lay.addWidget(self._in_model)
         # The definitions of another document, kept here unplaced: a
         # library drawn from a file of one's own.
@@ -1433,10 +1434,22 @@ class ComponentsPanel(QWidget):
             timer.timeout.connect(self._draw_visible_thumbs)
         timer.start(0)
 
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Paint and obj is self._in_model.viewport():
+            # The outer Properties scroller can uncover more rows without
+            # moving the list's own scrollbar.
+            area = obj.visibleRegion().boundingRect()
+            if area != getattr(self, '_thumb_area', None):
+                self._thumb_area = area
+                self._schedule_thumbs()
+        return super().eventFilter(obj, event)
+
     def _draw_visible_thumbs(self) -> None:
         from views.component_thumbs import thumbnail
         lst = self._in_model
-        area = lst.viewport().rect()
+        area = lst.viewport().visibleRegion().boundingRect()
+        if area.isEmpty():
+            return
         # From the first row on screen down to the last: asking every row
         # of 1 815 for its place took ~0.15 s after each edit (#158).
         first = lst.indexAt(area.topLeft()).row()
@@ -1722,6 +1735,27 @@ class PartsPanel(QWidget):
         self.refresh()
 
     # ---- Model → view --------------------------------------------------------
+    def on_scene_changed(self):
+        # QWidget.isVisible() stays true below a scroll area's viewport.
+        if self._window.isVisible() and self.visibleRegion().isEmpty():
+            if self._container is self.container():
+                self._sync_selection()
+            elif self._container is not None:
+                self._container = None
+                self._items.clear()
+                self._rows.clear()
+                self._cache.clear()
+                self.tree.clear()
+            self._stale = True
+        else:
+            self.refresh()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if getattr(self, "_stale", False):
+            self._stale = False
+            QTimer.singleShot(0, self, self.on_scene_changed)
+
     def _scene(self):
         return self._window.viewport.scene
 
@@ -5024,7 +5058,7 @@ class Tray(QDockWidget):
     def _after_materials(self) -> None:
         self.scenes.refresh()
         self.components.on_scene_changed()
-        self.parts.refresh()
+        self.parts.on_scene_changed()
 
 
 class BimTray(QDockWidget):
