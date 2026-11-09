@@ -1,0 +1,17 @@
+{
+  "pusher_car_rust": {
+    "changed_pixels": 0,
+    "max_channel_delta": 0,
+    "mean_channel_delta": 0.0
+  },
+  "marquee": {
+    "changed_pixels": 0,
+    "max_channel_delta": 0,
+    "mean_channel_delta": 0.0
+  },
+  "track": {
+    "changed_pixels": 0,
+    "max_channel_delta": 0,
+    "mean_channel_delta": 0.0
+  }
+}

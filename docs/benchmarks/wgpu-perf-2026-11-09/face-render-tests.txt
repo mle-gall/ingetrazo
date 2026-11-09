@@ -1,0 +1,50 @@
+   Compiling ingetrazo_render v0.1.0 (/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f2902c19/rust/ingetrazo_render)
+warning: function `multisampled` is never used
+   --> src/lib.rs:155:4
+    |
+155 | fn multisampled(d: &wgpu::Device, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
+    |    ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: `ingetrazo_render` (lib) generated 1 warning
+warning: `ingetrazo_render` (lib test) generated 1 warning (1 duplicate)
+    Finished `release` profile [optimized] target(s) in 3.88s
+     Running unittests src/lib.rs (rust/ingetrazo_render/target/release/deps/ingetrazo_render-a663c21fd55a293f)
+
+running 26 tests
+test color_only_schedule_tests::settled_color_does_not_clear_or_write_an_id_target ... ok
+test edges::classification_tests::boundary_and_opposed_faces_are_profiles ... ok
+test edges::compact_tests::flag_scale_preserves_normal_bits ... ok
+test edges::compact_tests::pixel_width_is_depth_invariant ... ok
+test edges::classification_tests::coplanar_triangulation_does_not_create_a_profile_diagonal ... ok
+test edges::compact_tests::packs_normals_flags_and_hard_only_count ... ok
+test edges::compact_tests::empty_edges_have_a_valid_storage_binding ... ok
+test edges::placement_cache_tests::cached_clip_transform_preserves_mirrors_and_near_plane_crossings ... ok
+test edges::tests::expands_endpoint_pairs_without_changing_face_commands ... ok
+test edges::view_direction_tests::local_eye_classification_matches_projected_area ... ok
+test faces::tests::drops_edge_tails_and_accounts_only_resident_bytes ... ok
+test id_schedule_tests::multisample_color_does_not_replay_geometry_for_idle_picking ... ok
+test pass_plan_tests::disabled_features_encode_no_optional_passes ... ok
+test plain_face_tests::sparse_texture_indices_split_only_textured_prototypes ... ok
+test reference_tests::clip_planes_and_pixel_size ... ok
+test reference_tests::compact_into_disjoint_capacity_ranges ... ok
+test reference_tests::mirrored_and_sheared_boxes_remain_visible ... ok
+test tests::indirect_layout ... ok
+test timing::tests::table_has_unique_pairs_and_millisecond_units ... ok
+test update_tests::growth_doubles_and_never_shrinks ... ok
+test update_tests::row_updates_preserve_selection_and_hover ... ok
+test update_tests::scattered_updates_use_one_enclosing_write ... ok
+test xray::tests::transmittance_and_average_are_order_independent ... ok
+test ao::tests::metal_validates_ao ... ok
+test antialias::tests::metal_validates_background_and_multisample_pipelines ... ok
+test ao::tests::synthetic_depth_plane_and_corner ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+   Doc-tests ingetrazo_render
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
