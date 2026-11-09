@@ -85,7 +85,7 @@ impl Xray {
                 entry_point: Some("vs"),
                 compilation_options: Default::default(),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: 52,
+                    array_stride: 28,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &attrs,
                 }],

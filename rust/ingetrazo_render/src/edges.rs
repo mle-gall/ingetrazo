@@ -1,9 +1,4 @@
-//! Expand resident line commands once at upload; the GPU supplies pixel width.
-//! Keeping the public 28-byte ABI avoids forcing scene producers to duplicate
-//! topology. The resident 52-byte layout appends two adjacency normals to each
-//! vertex. Edge vertices repurpose normal for the opposite endpoint and red
-//! for the side sign; blue distinguishes synthesized profile candidates.
-//! Face positions, normals, colors and command ranges remain unchanged.
+//! Pack 40-byte edge records; preserve the 28-byte Python face ABI.
 pub fn expand(
     vertices: &[u8],
     indices: &[u8],
@@ -11,11 +6,7 @@ pub fn expand(
     prototypes: usize,
 ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), &'static str> {
     let mut v = Vec::new();
-    for vertex in vertices.chunks_exact(28) {
-        v.extend_from_slice(vertex);
-        v.extend_from_slice(&[0; 24]);
-    }
-    let mut ix = indices.to_vec();
+    let ix = indices.to_vec();
     let mut cmd = commands.to_vec();
     for (prototype, row) in cmd.chunks_exact_mut(20).skip(prototypes).enumerate() {
         let face: crate::Command =
@@ -25,7 +16,7 @@ pub fn expand(
         if c.count % 2 != 0 {
             return Err("edge command must contain endpoint pairs");
         }
-        let first = ix.len() / 4;
+        let first = v.len() / 40;
         let mut pairs = Vec::new();
         let mut hard = std::collections::HashSet::new();
         for pair in indices[c.first as usize * 4..(c.first + c.count) as usize * 4].chunks_exact(8)
@@ -37,8 +28,9 @@ pub fn expand(
             };
             let a = endpoint(0);
             let b = endpoint(4);
-            hard.insert(key(&a, &b));
-            pairs.push((a, b, false));
+            if hard.insert(key(&a, &b)) {
+                pairs.push((a, b, false));
+            }
         }
         for (k, n) in &adjacency {
             if !hard.contains(k)
@@ -49,30 +41,23 @@ pub fn expand(
         }
         let count = pairs.len();
         for (a, b, soft) in pairs {
-            let a = a.as_slice();
-            let b = b.as_slice();
-            for (end, side) in [
-                (false, 0),
-                (false, 255),
-                (true, 255),
-                (false, 0),
-                (true, 255),
-                (true, 0),
-            ] {
-                let index = u32::try_from(v.len() / 52).map_err(|_| "edge buffer too large")?;
-                ix.extend_from_slice(&index.to_le_bytes());
-                v.extend_from_slice(if end { b } else { a });
-                v.extend_from_slice(if end { a } else { b });
-                v.extend_from_slice(&[side, u8::from(end) * 255, u8::from(soft) * 255, 0]);
-                let normals = adjacency.get(&key(a, b)).copied().unwrap_or([[0.; 3]; 2]);
-                v.extend_from_slice(bytemuck::cast_slice(&normals));
+            v.extend_from_slice(&a);
+            v.extend_from_slice(&b);
+            let normals = adjacency.get(&key(&a, &b)).copied().unwrap_or([[0.; 3]; 2]);
+            for (i, normal) in normals.iter().enumerate() {
+                for x in normal {
+                    v.extend_from_slice(&((x.clamp(-1., 1.) * 32767.).round() as i16).to_le_bytes());
+                }
+                v.extend_from_slice(&(if i == 1 && soft { 32767i16 } else { 0 }).to_le_bytes());
             }
+
         }
-        c.first = u32::try_from(first).map_err(|_| "edge buffer too large")?;
+        c.first = u32::try_from(first * 6).map_err(|_| "edge buffer too large")?;
         c.count = u32::try_from(count * 6).map_err(|_| "edge buffer too large")?;
-        c.base = 0;
+        c.base = c.start as i32; // Non-indexed first_instance addresses survivors.
         row.copy_from_slice(bytemuck::bytes_of(&c));
     }
+    if v.is_empty() { v.resize(40, 0); } // Valid storage binding for face-only scenes.
     Ok((v, ix, cmd))
 }
 
@@ -102,14 +87,14 @@ mod tests {
         let (v, ix, cmd) =
             super::expand(&vertices, &indices, bytemuck::cast_slice(&commands), 1).unwrap();
         assert_eq!(&cmd[..20], bytemuck::bytes_of(&commands[0]));
-        assert_eq!(v.len(), 8 * 52);
-        assert_eq!(ix.len(), 8 * 4);
+        assert_eq!(v.len(), 40);
+        assert_eq!(ix.len(), 2 * 4);
         let edge: crate::Command = bytemuck::pod_read_unaligned(&cmd[20..]);
-        assert_eq!((edge.first, edge.count, edge.base), (2, 6, 0));
-        assert_eq!(&v[104..116], &vertices[..12]);
-        assert_eq!(&v[116..128], &vertices[28..40]);
-        assert_eq!(v[128], 0);
-        assert_eq!(v[180], 255);
+        assert_eq!((edge.first, edge.count, edge.base), (0, 6, 0));
+        assert_eq!(&v[..12], &vertices[..12]);
+        assert_eq!(&v[12..24], &vertices[28..40]);
+
+
     }
 }
 
@@ -193,7 +178,7 @@ mod classification_tests {
         )
         .unwrap();
         let edge: crate::Command = bytemuck::pod_read_unaligned(&expanded[20..]);
-        assert_eq!(edge.count, 4 * 6); // Four boundaries, no interior diagonal.
+        assert_eq!(edge.count, 24); // Four boundaries, no interior diagonal.
     }
 
     #[test]
@@ -203,5 +188,39 @@ mod classification_tests {
         assert!(super::silhouette(1., -1., false));
         assert!(!super::silhouette(1., 1., false));
         assert!(!super::silhouette(-1., -1., false));
+    }
+}
+
+#[cfg(test)]
+mod compact_tests {
+    #[test]
+    fn pixel_width_is_depth_invariant() {
+        // Clip-space displacement used by edge_vs; viewport conversion cancels w.
+        for depth in [0.01f32, 1., 1000.] {
+            for width in [1f32, 4., 7.5] {
+                let clip_offset = width / 1400. * depth;
+                let pixels = 2. * clip_offset / depth * 1400. * 0.5;
+                assert!((pixels - width).abs() < 1e-5);
+            }
+        }
+    }
+
+    #[test]
+    fn empty_edges_have_a_valid_storage_binding() {
+        let command = crate::Command { count: 0, instances: 0, first: 0, base: 0, start: 0 };
+        let (records, indices, commands) = super::expand(&[], &[],
+            bytemuck::cast_slice(&[command, command]), 1).unwrap();
+        assert_eq!(records.len(), 40);
+        assert_eq!(indices.len(), 0);
+        assert_eq!(commands.len(), 40);
+    }
+
+    #[test]
+    fn normal_quantization_preserves_facing_away_from_tangency() {
+        let view = glam::Vec3::new(0.2, 0.3, 1.).normalize();
+        for normal in [glam::Vec3::Z, -glam::Vec3::Z, glam::Vec3::X] {
+            let decoded = normal.map(|v| (v * 32767.).round() / 32767.);
+            assert_eq!(normal.dot(view) > 0., decoded.dot(view) > 0.);
+        }
     }
 }

@@ -211,3 +211,46 @@ resolve experiment while IDs remain single-sampled; X-ray stays single-sample.
 It costs a second scene raster pass and stays off by default after exceeding
 the ride's 60 Hz GPU budget. `scripts/wgpu_r2a_measure.py MODEL [--msaa]`
 records the comparison; externally bound each run to less than five minutes.
+
+## Compact resident layout (2026-11-09)
+
+The Python upload ABI stays at 28 bytes per vertex. Resident face vertices are
+also 28 bytes in every pass (including MSAA and weighted X-ray). Texture lookup
+continues through the existing sparse material table; no material index or
+adjacency is added to faces. The uploaded index buffer is unchanged.
+
+Edges use one 40-byte storage record per unique hard edge or non-coplanar
+profile candidate, grouped by prototype. Little-endian offsets:
+
+| Offset | Type | Meaning |
+| --- | --- | --- |
+| 0 | float32[3] | endpoint A |
+| 12 | float32[3] | endpoint B |
+| 24 | snorm16[4] | adjacent normal 0, zero padding |
+| 32 | snorm16[4] | adjacent normal 1, soft/profile-only flag (0 or 32767) |
+
+Zero normal 1 marks a boundary. Source hidden/soft flags have already been
+filtered by the unchanged bake ABI; the soft flag here marks synthesized
+profile candidates. Back/hidden-edge dashes remain style/depth decisions.
+Normals have maximum component quantization error 1/65534.
+
+Commands remain 20-byte rows: P indexed face commands followed by P edge rows.
+Edge rows are **non-indexed indirect** arguments in the first 16 bytes:
+`(E * 6, visible_placements, first_edge * 6, S)`; the fifth word retains S.
+Empty ranges use vertex count zero. Cull increments edge instance count by one,
+while face counts and survivor slots are unchanged. Vertex_index/6 selects the
+edge record, and survivors[instance_index] selects its placement. Six procedural
+corners form each pixel-width quad. This instances a contiguous prototype quad
+range across placements, avoiding the measured Metal overhead of one instance
+per edge/placement pair. Edge draws loop at 20-byte offsets because
+multi_draw_indirect assumes 16-byte strides.
+
+Face upload drops edge-only tails and rebases face commands. Each prototype's
+corner order remains unchanged; set_materials applies the same vertex-base
+translation to its sparse header. The public handoff is unchanged.
+
+For in-place replacement, preserve each prototype's edge range and update its
+command template; reset indirect counts before culling. Update material-base
+translations if face ranges move.
+Placement matrix/flags and survivor layouts are unchanged. AO should consume
+28-byte face vertices and the existing face commands, never edge rows.

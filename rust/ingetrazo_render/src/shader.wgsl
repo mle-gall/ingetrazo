@@ -28,7 +28,8 @@ fn cull(@builtin(global_invocation_id) gid: vec3u) {
  }
  if any(outside == vec3u(8)) || any(outside2 == vec3u(8)) { return; }
  if !crosses && all((high-low)*camera.size.xy*0.5 < vec2f(1)) { return; }
- atomicAdd(&commands[i.info.x + arrayLength(&proto)].instances, 1u);
+ let edge_command = i.info.x + arrayLength(&proto);
+ atomicAdd(&commands[edge_command].instances, 1u);
  let slot = atomicAdd(&commands[i.info.x].instances, 1u);
  survivors[commands[i.info.x].start+slot] = id;
 }
