@@ -64,3 +64,33 @@ class TestMacFileOpenEvent:
         QCoreApplication.instance().processEvents()
 
         assert calls == [doc]
+
+
+    def test_a_command_line_path_is_not_opened_twice(self, tmp_path):
+        # Qt's Cocoa plugin also delivers argv paths as FileOpen events; the
+        # argv path is opened by main() once the window is up, so the event
+        # for the same file is swallowed — once. A later event (Open With
+        # on the same file) opens it again as usual.
+        doc = tmp_path / "model.igz"
+        doc.write_text("{}")
+        window = _StubWindow()
+        app_stub = SimpleNamespace(open_window=window, pending_open_path=None,
+                                   argv_paths={doc.resolve()})
+
+        assert _App.event(app_stub, _file_open_event(str(doc))) is True
+        assert window.opened == []
+        assert _App.event(app_stub, _file_open_event(str(doc))) is True
+        assert window.opened == [doc]
+
+    def test_argv_paths_are_collected_from_the_command_line(self, tmp_path):
+        doc = tmp_path / "model.igz"
+        doc.write_text("{}")
+        from PySide6.QtWidgets import QApplication
+        if QApplication.instance() is not None:
+            import pytest
+            pytest.skip("a QApplication already exists in this process")
+        app = _App(["main.py", "--new-window", str(doc)])
+        try:
+            assert doc.resolve() in app.argv_paths
+        finally:
+            app.quit()

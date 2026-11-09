@@ -255,10 +255,32 @@ class _App(QApplication):
         super().__init__(argv)
         self.open_window = None            # set once MainWindow exists
         self.pending_open_path: Path | None = None
+        # Qt's Cocoa plugin ALSO turns every existing path on the command
+        # line into a FileOpen event, so ``ingetrazo model.igz`` opened the
+        # document twice — the second open re-entered the first one's
+        # progress loop and crashed (new-Mac harness, 2026-11-09). Each
+        # argv path is ignored once when it comes back as an event; a
+        # double-click's document never was in argv and still opens.
+        self.argv_paths = set()
+        for a in list(argv[1:]) + list(getattr(sys, "orig_argv", [])[1:]):
+            if a and not a.startswith("-"):
+                try:
+                    self.argv_paths.add(Path(a).resolve())
+                except OSError:
+                    pass
 
     def event(self, e) -> bool:
         if e.type() == QEvent.Type.FileOpen:
             path = Path(e.file())
+            argv_paths = getattr(self, "argv_paths", None)
+            if argv_paths:
+                try:
+                    resolved = path.resolve()
+                except OSError:
+                    resolved = path
+                if resolved in argv_paths:
+                    argv_paths.discard(resolved)   # argv already opens it
+                    return True
             if self.open_window is not None:
                 _open_document_in(self.open_window, path)
             else:
