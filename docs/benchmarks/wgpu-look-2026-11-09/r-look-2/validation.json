@@ -1,0 +1,44 @@
+{
+  "core_rust_passed": 5,
+  "render_rust_passed": 6,
+  "python_passed": 24,
+  "suite_completed_batches": [
+    "batch 1/24: 2 failed, 262 passed, 8 skipped, 14 warnings in 87.71s (0:01:27)",
+    "batch 2/24: 213 passed, 25 skipped in 96.96s (0:01:36)",
+    "batch 3/24: 14 failed, 308 passed, 2 skipped in 198.91s (0:03:18)",
+    "batch 4/24: 2 failed, 484 passed, 13 skipped, 1 deselected, 1 warning in 249.97s (0:04:09)"
+  ],
+  "suite_failure_names": [
+    "tests/test_panel_refresh_deferred.py::test_hidden_panels_let_the_previous_document_go",
+    "tests/test_tooltips_wrap.py::test_an_extensions_toolbar_added_after_start_up_shows_names_in_bold",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ar]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[de]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[id]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[it]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ja]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ko]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[lo]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[pl]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[pt-BR]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[ru]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[th]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[uk]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[vi]",
+    "tests/test_translation_files.py::test_every_language_has_every_message[zh-CN]",
+    "tests/test_dimensions.py::test_world_under_cursor_uses_cached_pick",
+    "tests/test_extension_manager.py::test_long_author_tags_and_license_wrap_within_preview_width"
+  ],
+  "suite_complete": false,
+  "suite_overall_bound_seconds": 720,
+  "capture_results": [
+    "docs/benchmarks/wgpu-look-2026-11-09/r-look-2/pusher_car_rust-default.log 0",
+    "docs/benchmarks/wgpu-look-2026-11-09/r-look-2/pusher_car_rust-edges-off.log 0",
+    "docs/benchmarks/wgpu-look-2026-11-09/r-look-2/pusher_car_rust-edge-width.log 0",
+    "docs/benchmarks/wgpu-look-2026-11-09/r-look-2/marquee-default.log 0",
+    "docs/benchmarks/wgpu-look-2026-11-09/r-look-2/marquee-edges-off.log 0",
+    "docs/benchmarks/wgpu-look-2026-11-09/r-look-2/marquee-edge-width.log 0",
+    "docs/benchmarks/wgpu-look-2026-11-09/r-look-2/space_asbuilt_ride-default.log TIMEOUT",
+    "docs/benchmarks/wgpu-look-2026-11-09/r-look-2/space_asbuilt_ride-edges-off.log TIMEOUT",
+    "docs/benchmarks/wgpu-look-2026-11-09/r-look-2/space_asbuilt_ride-edge-width.log 0"
+  ]
+}

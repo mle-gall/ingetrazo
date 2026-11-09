@@ -34,7 +34,7 @@ impl Antialias {
     ) -> Self {
         let shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("4x MSAA shading"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shading.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(concat!(include_str!("shading.wgsl"), "\n", include_str!("edges.wgsl")).into()),
         });
         let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
         let pipelines = (0..4)
@@ -46,7 +46,7 @@ impl Antialias {
                     layout: None,
                     vertex: wgpu::VertexState {
                         module: &shader,
-                        entry_point: Some("vs"),
+                        entry_point: Some(if edge { "edge_vs" } else { "vs" }),
                         compilation_options: Default::default(),
                         buffers: &[wgpu::VertexBufferLayout {
                             array_stride: 28,
@@ -66,7 +66,7 @@ impl Antialias {
                     }),
                     primitive: wgpu::PrimitiveState {
                         topology: if edge {
-                            wgpu::PrimitiveTopology::LineList
+                            wgpu::PrimitiveTopology::TriangleList
                         } else {
                             wgpu::PrimitiveTopology::TriangleList
                         },

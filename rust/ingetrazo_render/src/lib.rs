@@ -4,6 +4,7 @@ mod overlay;
 mod style;
 mod background;
 mod antialias;
+mod edges;
 use numpy::PyReadonlyArray1;
 use pyo3::{exceptions::PyValueError, prelude::*};
 use raw_window_handle::{
@@ -211,7 +212,7 @@ impl Renderer {
         });
         let vs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("draw"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shading.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(concat!(include_str!("shading.wgsl"), "\n", include_str!("edges.wgsl")).into()),
         });
         let attrs = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Unorm8x4];
         let pipeline = |topology, fragment, compare, write, bias, samples| {
@@ -220,7 +221,7 @@ impl Renderer {
                 layout: None,
                 vertex: wgpu::VertexState {
                     module: &vs,
-                    entry_point: Some("vs"),
+                    entry_point: Some(if fragment == "edge_fs" { "edge_vs" } else { "vs" }),
                     compilation_options: Default::default(),
                     buffers: &[wgpu::VertexBufferLayout {
                         array_stride: 28,
@@ -286,7 +287,7 @@ impl Renderer {
             clamp: 0.,
         };
         let edge = pipeline(
-            wgpu::PrimitiveTopology::LineList,
+            wgpu::PrimitiveTopology::TriangleList,
             "edge_fs",
             wgpu::CompareFunction::LessEqual,
             false,
@@ -294,7 +295,7 @@ impl Renderer {
             1,
         );
         let xray_edge = pipeline(
-            wgpu::PrimitiveTopology::LineList,
+            wgpu::PrimitiveTopology::TriangleList,
             "edge_fs",
             wgpu::CompareFunction::Always,
             false,
@@ -434,6 +435,10 @@ impl Renderer {
                 return Err(PyValueError::new_err("scene exceeds storage binding limit"));
             }
         }
+        // R-look 2: preserve the scene ABI and expand only uploaded edge commands.
+        let (expanded_v, expanded_ix, expanded_cmd) = edges::expand(v, ix, cmd, count)
+            .map_err(PyValueError::new_err)?;
+        let (v, ix, cmd) = (expanded_v.as_slice(), expanded_ix.as_slice(), expanded_cmd.as_slice());
         let vertex = buffer(&self.device, v, wgpu::BufferUsages::VERTEX);
         let index = buffer(&self.device, ix, wgpu::BufferUsages::INDEX);
         let protos = buffer(&self.device, p, wgpu::BufferUsages::STORAGE);

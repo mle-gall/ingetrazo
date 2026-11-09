@@ -16,22 +16,37 @@ struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f, @loc
  o.shade = 0.62+0.38*abs(dot(n,normalize(vec3f(0.35,0.25,1.))));
  let tint = unpack4x8unorm(i.info.y);
  var base = select(color.rgb, tint.rgb, color.a < 0.5);
+ if color.a < 0.5 && tint.a < 0.5 { base = vec3f(0.96,0.95,0.925)*style.front.rgb; }
  o.color = base * o.shade;
  if camera.size.z == 2 || camera.size.z == 3 { o.color = style.front.rgb; }
  if (i.info.w >> 24u) != 0u { o.color = unpack4x8unorm(i.info.w).rgb; }
- if (i.info.z & 2u) != 0u { o.color = mix(o.color, vec3f(0.95,0.45,0.16), 0.65); }
- if (i.info.z & 4u) != 0u { o.color = mix(o.color, vec3f(0.30,0.55,0.95), 0.5); }
- o.decorated = (i.info.z & 6u) | (i.info.w >> 24u);
+
+ o.decorated = (i.info.z & 6u) | select(0u,8u,(i.info.w >> 24u) != 0u);
  o.id = id+1u; return o;
 }
 struct Pixel { @location(0) color: vec4f, @location(1) id: u32 }
 fn face_pixel(i: Out, front: bool) -> Pixel {
  var c = i.color;
- if !front && camera.size.z != 2 && i.decorated == 0u { c = style.back.rgb * select(i.shade,1.,camera.size.z == 3); }
+ if !front && camera.size.z != 2 && (i.decorated & 8u) == 0u { c = style.back.rgb * select(i.shade,1.,camera.size.z == 3); }
+ if (i.decorated & 6u) != 0u && all((i.position.xy % vec2f(6.)) < vec2f(2.)) {
+  let surface = c / max(i.shade, 0.001);
+  let high = max(surface.r,max(surface.g,surface.b));
+  let low = min(surface.r,min(surface.g,surface.b));
+  let delta = high-low;
+  var hue = 0.;
+  if delta > 0.0001 {
+   if high == surface.r { hue = (surface.g-surface.b)/delta/6.; }
+   else if high == surface.g { hue = ((surface.b-surface.r)/delta+2.)/6.; }
+   else { hue = ((surface.r-surface.g)/delta+4.)/6.; }
+   hue = fract(hue+1.);
+  }
+  c = select(vec3f(0.95,0.45,0.16),vec3f(0.10,0.25,0.85),
+             delta/max(high,0.001) >= 0.35 && high >= 0.35 && (hue <= 0.14 || hue >= 0.96));
+ }
  var p: Pixel; p.color=vec4f(linear(c),select(1.,0.4,camera.size.z == 1)); p.id=i.id; return p;
 }
 
-fn edge_pixel(i: Out) -> Pixel { var p: Pixel; p.color=vec4f(linear(style.edge.rgb),1); p.id=i.id; return p; }
+fn edge_pixel(i: Out) -> Pixel { var p: Pixel; var c = style.edge.rgb; if (i.decorated & 2u) != 0u { c = vec3f(0.95,0.45,0.16); } else if (i.decorated & 4u) != 0u { c = vec3f(0.30,0.55,0.95); } p.color=vec4f(linear(c),1); p.id=i.id; return p; }
 
 @fragment fn color_fs(i: Out, @builtin(front_facing) front: bool) -> @location(0) vec4f {
  return face_pixel(i,front).color;

@@ -240,3 +240,24 @@ def test_nested_placements_inherit_hidden_state_and_tag_visibility():
     assert flags[root.uid] == 0 and flags[plain.uid] == 0
     assert flags[hidden_child.uid] == 1 and flags[grandchild.uid] == 1
     assert flags[tagged.uid] == 1
+
+
+def test_unpainted_placement_is_not_explicit_gray():
+    scene = Scene(groups=[Group(triangle())])
+    packed = pack_scene(scene)
+    assert int(packed.instances['info'][0, 1]) >> 24 == 0
+    assert np.all(packed.vertices['color'][:3, 3] == 0)
+    scene.groups[0].material = {'color': (210/255,)*3}
+    painted = pack_scene(scene)
+    assert int(painted.instances['info'][0, 1]) >> 24 == 255
+    assert int(painted.instances['info'][0, 1]) & 0xffffff == 0xd2d2d2
+
+
+def test_front_tint_remains_style_not_material():
+    scene = Scene(groups=[Group(triangle())])
+    scene.display_style.front_color = (0.3, 0.7, 0.9)
+    packed = pack_scene(scene)
+    assert int(packed.instances['info'][0, 1]) >> 24 == 0
+    scene.groups[0].mesh.faces[0].attrs['color'] = (0.3, 0.7, 0.9)
+    painted = pack_scene(scene)
+    assert np.all(painted.vertices['color'][:3, 3] == 255)
