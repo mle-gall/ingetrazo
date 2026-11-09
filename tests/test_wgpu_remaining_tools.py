@@ -102,3 +102,32 @@ def test_offset_numeric_undo_and_cancel():
     assert geometry(scene.mesh) == after
     native.cancel()
     assert not native.view.overlay_primitives
+
+from tools.circle import CircleTool, PolygonTool
+from tools.arc import ArcTool
+
+
+@pytest.mark.parametrize('tool_type,points', [
+    (CircleTool, [(0, 0, 0), (2, 0, 0)]),
+    (PolygonTool, [(0, 0, 0), (2, 0, 0)]),
+    (ArcTool, [(0, 0, 0), (2, 0, 0), (1, 1, 0)]),
+])
+def test_radial_commands_match_direct(tool_type, points):
+    scene, history, native, _ = prepare(tool_type())
+    reference, ref_history, direct, _ = prepare(tool_type())
+    for point in points:
+        click(native, point)
+        ctx = ToolContext(direct, QVector3D(*point), QPointF(), Qt.NoModifier, None)
+        direct.tool.on_hover(ctx)
+        direct.tool.on_click(ctx)
+    assert history.undo_stack
+    assert type(history.undo_stack[-1]) is type(ref_history.undo_stack[-1])
+    assert geometry(scene.mesh) == geometry(reference.mesh)
+    after = geometry(scene.mesh)
+    history.undo()
+    native.update()
+    history.redo()
+    native.update()
+    assert geometry(scene.mesh) == after
+    native.cancel()
+    assert not native.view.overlay_primitives
