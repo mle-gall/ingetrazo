@@ -20,6 +20,7 @@ def main():
     parser.add_argument('model', type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--reference', type=Path, help='baseline quantity JSON to compare')
+    parser.add_argument('--tray-repeats', type=int, default=1)
     args = parser.parse_args()
     from core.scene import Scene
     from core.bim import collect_objects, object_quantities
@@ -63,12 +64,17 @@ def main():
     from PySide6.QtWidgets import QApplication
     from views.tray import BimPanel
     app = QApplication.instance() or QApplication([])
-    panel = BimPanel(SimpleNamespace(viewport=SimpleNamespace(scene=scene)))
-    panel._measure_all = True
-    panel.__dict__.pop('_takeoff_key', None)
     start = perf_counter()
-    panel.refresh()
-    print('tray refresh, warm arrays/fresh memo:', perf_counter() - start, flush=True)
+    panel = BimPanel(SimpleNamespace(viewport=SimpleNamespace(scene=scene)))
+    print('tray construction and initial size check:', perf_counter() - start, flush=True)
+    panel._measure_all = True
+    for repeat in range(args.tray_repeats):
+        panel.__dict__.pop('_takeoff_key', None)
+        panel._takeoff_memo = {}
+        start = perf_counter()
+        panel.refresh()
+        print('tray refresh, warm arrays/fresh memo', repeat + 1,
+              perf_counter() - start, flush=True)
     panel.close()
     app.processEvents()
 
