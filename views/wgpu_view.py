@@ -258,6 +258,8 @@ class WgpuView(QWidget):
                            or (type(self.tools.tool).__name__ == 'TexturePositionTool'
                                and self.tools.tool.active))
         # R3c-2a: section widgets share GL's painter implementation.
+        from views.wgpu_sections import sync
+        sync(self)
         section_widgets = bool(getattr(self.scene, 'section_planes', ())) and getattr(self.scene, 'show_section_planes', True)
         if annotations or self.overlay_primitives or section_widgets or getattr(self, "_had_overlay", False):
             from views.wgpu_overlay import rasterize, pixels
@@ -322,8 +324,17 @@ class WgpuView(QWidget):
                                 horizon=source._horizon_ndc_y(projection * view))
         payload['edge_width'] = float(getattr(source, '_export_edge_px', 1))
         payload['profile_width'] = float(getattr(source, '_export_profile_px', 1))
-        pixels = bytes(self.renderer.render_image(
-            width_px, height_px, tuple(view.data()), tuple(projection.data()), payload))
+        from views.wgpu_sections import capture_rows, geometry
+        rows = capture_rows(self.packed, source.scene, getattr(source, 'view_tint', None))
+        previous = getattr(self, '_section_uploaded', np.empty(0, np.uint8))
+        data = geometry(self, source.scene, source._effective_style(), camera, height_px, rows)
+        try:
+            self.renderer.set_section_geometry(data)
+            pixels = bytes(self.renderer.render_image(
+                width_px, height_px, tuple(view.data()), tuple(projection.data()), payload,
+                rows.view(np.uint8).reshape(-1)))
+        finally:
+            self.renderer.set_section_geometry(previous)
         return QImage(pixels, width_px, height_px, width_px * 4,
                       QImage.Format_RGBA8888).copy()
         # End R3c-2a offscreen entry point.

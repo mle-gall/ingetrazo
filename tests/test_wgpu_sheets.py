@@ -65,7 +65,9 @@ def test_offscreen_size_and_live_camera_unchanged(monkeypatch):
     from core.scene import Scene
     from core.camera import OrbitCamera
     class Renderer:
-        def render_image(self, w, h, view, projection, payload):
+        def set_section_geometry(self, data):
+            pass
+        def render_image(self, w, h, view, projection, payload, rows):
             assert len(view) == len(projection) == 16
             assert 'section_plane' in payload
             return bytes(w*h*4)
@@ -80,6 +82,8 @@ def test_offscreen_size_and_live_camera_unchanged(monkeypatch):
     from core.section import SectionPlane
     from PySide6.QtGui import QVector3D
     source.scene.section_planes = [SectionPlane(QVector3D(), QVector3D(1,0,0), active=True)]
+    from views.wgpu_scene import pack_scene
+    view.packed = pack_scene(source.scene)
     before = dict(source.camera.__dict__)
     image = view.render_image(123, 47)
     assert (image.width(), image.height()) == (123, 47)

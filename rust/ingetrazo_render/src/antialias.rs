@@ -145,6 +145,7 @@ impl Antialias {
     pub fn resolve_depth(&self, d: &wgpu::Device, e: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
         self.depth_resolve.draw(d, e, &self.depth.create_view(&Default::default()), target);
     }
+    pub fn depth_view(&self) -> wgpu::TextureView { self.depth.create_view(&Default::default()) }
     pub fn color_view(&self) -> wgpu::TextureView { self.color.create_view(&Default::default()) }
     pub fn draw(
         &self,
@@ -157,18 +158,19 @@ impl Antialias {
         multi: bool,
         queries: Option<&wgpu::QuerySet>,
         edge_only: Option<bool>,
+        sections: bool,
     ) {
         let color = self.color.create_view(&Default::default());
         let depth = self.depth.create_view(&Default::default());
         if edge_only != Some(true) { self.background.draw(e, &color, None); }
         let mut pass = e.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("4x MSAA color resolve"),
-            color_attachments: &[Some(color_attachment(&color, resolve, edge_only == Some(false)))],
+            color_attachments: &[Some(color_attachment(&color, resolve, sections || edge_only == Some(false)))],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &depth,
                 depth_ops: Some(wgpu::Operations {
                     load: if edge_only == Some(true) { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(1.) },
-                    store: if edge_only == Some(false) { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
+                    store: if sections || edge_only == Some(false) { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
                 }),
                 stencil_ops: None,
             }),
@@ -217,6 +219,10 @@ mod tests {
         };
         let (device, _queue) = pollster::block_on(adapter.request_device(&Default::default(), None)).unwrap();
         let style = crate::style::Style::new(&device);
+        let camera = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 112,
+            usage: wgpu::BufferUsages::UNIFORM, mapped_at_creation: false });
+        let _sections = crate::sections::Sections::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb, &camera);
+
         let _xray = crate::xray::Xray::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb, 64, 64);
         let passes = super::Antialias::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb,
             &style.buffer, 64, 64);
