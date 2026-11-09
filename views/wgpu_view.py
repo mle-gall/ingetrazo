@@ -41,7 +41,36 @@ class WgpuView(QWidget):
     def paintEngine(self):
         return None
 
+    def _observe_tool_source(self):
+        source = self.source_viewport
+        previous = getattr(self, '_tool_source', None)
+        if source is previous:
+            return
+        signal = getattr(previous, 'measurementChanged', None)
+        if hasattr(signal, 'disconnect'):
+            signal.disconnect(self._schedule_tool_sync)
+        self._tool_source = source
+        signal = getattr(source, 'measurementChanged', None)
+        if hasattr(signal, 'connect'):
+            signal.connect(self._schedule_tool_sync)
+
+    def _schedule_tool_sync(self, *_):
+        tool = getattr(self.source_viewport, 'active_tool', None)
+        reset = self.tools.start_point is not None and getattr(tool, 'start_point', None) is None
+        if self.isVisible() and (tool is not self.tools.tool or reset):
+            QTimer.singleShot(0, self._sync_tool_dispatch)
+
+    def _sync_tool_dispatch(self):
+        if self.isVisible():
+            self.tools.sync()
+            self.update()
+
+    def hideEvent(self, event):
+        self.tools.cancel()
+        super().hideEvent(event)
+
     def set_scene(self, scene):
+        self._observe_tool_source()
         self.scene = scene
         allowed = getattr(scene, '_navigator_allowed', None)
         token = (id(scene), scene._bounds_key(),
@@ -62,8 +91,15 @@ class WgpuView(QWidget):
             ids, rows = delta
             tracker.apply(ids, rows, self.renderer)
             if len(ids) or tracker.changed or tracker.removed:
-                if len(self.packed.instances) != getattr(self, '_resident_count', len(self.packed.instances)) or tracker.removed:
-                    self.uid_rows = {uid: [row] for uid, row in tracker.rows.items() if uid in tracker.active}
+                mapping_changed = bool(tracker.removed)
+                for row in ids:
+                    uid = self.packed.uids[row]
+                    if uid not in self.uid_rows:
+                        self.uid_rows[uid] = [int(row)]
+                        mapping_changed = True
+                for row in tracker.removed:
+                    self.uid_rows.pop(self.packed.uids[row], None)
+                if mapping_changed:
                     self._selection_signature = None
                     self._tint_signature = None
                 self._resident_count = len(self.packed.instances)

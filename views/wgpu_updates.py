@@ -29,6 +29,7 @@ class InstanceUpdates:
         self.removed = []
         self.version = scene.content_version
         self.pending = set()
+        self.pending_removed = set()
         self.journal_valid = True
         self.unsubscribe = None
         self.roots = set(scene.groups)
@@ -57,10 +58,22 @@ class InstanceUpdates:
                 self.journal_valid = False
 
         def after(command, phase, ran):
-            from core.history import MoveGroupCommand, CompoundCommand, SetRecordCommand, SetRegistryCommand
+            from core.history import (MoveGroupCommand, CompoundCommand, SetRecordCommand,
+                                      SetRegistryCommand, InsertGroupCommand, DeleteGroupCommand)
             def visit(command):
                 if isinstance(command, CompoundCommand):
                     return all(visit(c) for c in command.commands)
+                if isinstance(command, (InsertGroupCommand, DeleteGroupCommand)) and command._owner is self.scene.groups:
+                    adding = isinstance(command, InsertGroupCommand) != (phase == 'undo')
+                    if adding:
+                        self.roots.add(command.group)
+                        self.pending.add(command.group)
+                        self.pending_removed.discard(command.group)
+                    else:
+                        self.roots.discard(command.group)
+                        self.pending.discard(command.group)
+                        self.pending_removed.add(command.group)
+                    return True
                 if isinstance(command, MoveGroupCommand) and command.group in self.roots:
                     self.pending.add(command.group)
                     return True
@@ -76,6 +89,9 @@ class InstanceUpdates:
         local = self.unsubscribe is not None and self.journal_valid and scene.content_version == self.version
         placements = [] if local else [(None, None, False)]
         state = _placement_state(scene)
+        loose = self.meshes.get(id(scene.loose_mesh))
+        if local and (loose is None or loose[1] != scene.loose_mesh._mut_serial):
+            placements.append((None, None, False))
         for root in (self.pending if local else scene.groups):
             hidden = not state(root)[0]
             placements.extend((g, matrix, hidden) for g, matrix in iter_placements(root))
@@ -102,6 +118,8 @@ class InstanceUpdates:
             if row is None:
                 row = len(self.packed.instances) + len(additions)
                 additions.append((uid, group, row))
+            if row < len(self.packed.groups):
+                self.packed.groups[row] = group
             seen.add(uid)
             value = np.zeros((), INSTANCE)
             value['world'] = (np.eye(4, dtype=np.float32) if matrix is None
@@ -113,12 +131,21 @@ class InstanceUpdates:
             if row >= len(self.packed.instances) or value.tobytes() != self.packed.instances[row].tobytes():
                 ids.append(row)
                 values.append(value)
+        removed = []
+        if local:
+            for root in self.pending_removed:
+                for group, _ in iter_placements(root):
+                    row = self.rows.get(group.uid)
+                    if row is not None:
+                        seen.discard(group.uid)
+                        removed.append(row)
         self.pending.clear()
+        self.pending_removed.clear()
         self.version = scene.content_version
         self.journal_valid = True
         self.roots = set(scene.groups) if not local else self.roots
         self.changed = list(changed.values())
-        self.removed = [] if local else [self.rows[uid] for uid in self.active - seen]
+        self.removed = removed if local else [self.rows[uid] for uid in self.active - seen]
         self.active = seen
         if additions:
             self.packed.instances = np.concatenate((self.packed.instances, np.zeros(len(additions), INSTANCE)))
