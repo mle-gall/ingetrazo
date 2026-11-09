@@ -2645,3 +2645,58 @@ Handover is local only on `renderer/perf-face-pass`: instrumentation commit
 measurement/validation report commit. No push, PR, issue or remote comment.
 This is a partial implementation with explicit remaining gates, not completion
 of the full renderer performance brief.
+
+## R3b — 2026-11-09: composer raster views and scene recall on Metal
+
+Local branch `renderer/r3b-sheets`. No push, PR, issue or remote comment.
+**Partial R3b acceptance:** sectioned Metal sheets remain unsupported.
+
+Composer raster views and composer scene thumbnails dispatch using the active
+document's `_renderer_wgpu` flag, never the current global preference. Vector
+HLR stays on its existing path. Metal capture uses an unshown temporary native
+host and a separate renderer, `request_capture`, `render(False)`, `take_capture`.
+No Rust files or frame-loop/MSAA/edge passes changed. Physical dimensions come
+from the existing frame DPI and exact-scale camera calculation. Technical and
+wireframe sheet styles use the existing effective-style payload, with paper
+edge/profile widths. The camera is copied and interactive GPU state is untouched.
+
+Saved frame transactions now restore hidden objects, hidden-geometry display,
+two-point projection and pre-existing style/pen overrides. Navigator filtering
+and tint are evaluated on a shallow scene facade so selection, editing context,
+view history and epochs stay intact. Scene recall explicitly refreshes the Metal
+display after camera/layer/style/filter application; recalling an unfiltered
+scene clears a previous Navigator filter. The ScenesPanel itself has no image
+thumbnails; composer thumbnails use the same renderer dispatch as sheet views.
+
+Release builds succeeded:
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_*.py tests/test_scene_recall_version.py tests/test_composer_perspective.py tests/test_composer_frame_paper_bg.py tests/test_composer_raster_pens.py
+```
+
+Focused suite: **125 passed**, four existing QImage deprecation warnings.
+After adding a Navigator isolation regression and preserving exact filters,
+`tests/test_wgpu_sheets.py tests/test_scene_recall_version.py`: **9 passed**.
+No broad batch runner used. Both crate target directories contain release and
+maturin outputs only; no debug build outputs were created.
+
+[Comparison artifacts and limitations](benchmarks/wgpu-r3b-2026-11-09/README.md).
+Pusher car: GL 0.0575 s, Metal 2.7748 s. Marquee: GL 0.0312 s,
+Metal 0.2562 s. These include fresh Metal device/packing/upload costs, unlike
+GL's already initialized widget; they are not GPU-only timing comparisons.
+
+Remaining R3b: section clipping/cut fills/edges, resident-scene reuse for sheet
+performance, shaded/shadowed and broader saved-scene visual acceptance. The new
+path explicitly rejects active cuts. R3c still owns the default renderer switch,
+GL fallback, and preference migration; this change does not alter those policies.
+
+Ride A3/300 dpi completed: **4961 × 3508 pixels**, scale 1:750, technical
+style. Paired sheet-operation measurements: **GL 40.1683 s; Metal 32.5727 s**.
+A separate Metal-only run completed in 31.2192 s. Both children exited within
+240 seconds. Runs overlapped briefly and are single samples, not a performance
+acceptance gate. GL initialization is excluded; fresh Metal setup/upload is
+included. PNGs and raw JSON measurements are in the linked artifact directory.
