@@ -950,6 +950,70 @@ impl Renderer {
         self.render(true)?;
         Ok(self.captured.take().unwrap_or_default())
     }
+    /// Render with resident geometry and textures into isolated sheet targets.
+    /// Surface configuration and interactive attachments are never replaced.
+    fn render_image(&mut self, width: u32, height: u32, view: Vec<f32>,
+                    projection: Vec<f32>, style: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+        if width == 0 || height == 0 || width > self.device.limits().max_texture_dimension_2d
+            || height > self.device.limits().max_texture_dimension_2d {
+            return Err(PyValueError::new_err("invalid offscreen dimensions"));
+        }
+        if view.len() != 16 || projection.len() != 16 {
+            return Err(PyValueError::new_err("camera matrices need 16 floats"));
+        }
+        let format = self.config.format;
+        let mut aa = antialias::Antialias::new(&self.device, format, &self.look.buffer, width, height);
+        let mut transparency = xray::Xray::new(&self.device, format, width, height);
+        aa.bind_textures(&self.device, &self.textures);
+        transparency.bind_textures(&self.device, &self.textures);
+        if let Some(s) = &self.scene {
+            aa.bind_scene(&self.device, &self.camera, &s.inst, &s.survivors,
+                          &self.look.buffer, &s.edge_records, &s.viewpoints);
+            transparency.bind_scene(&self.device, &self.camera, &s.inst, &s.survivors, &self.look.buffer);
+        }
+        let old_size = (self.config.width, self.config.height);
+        let old_camera = self.camera_data.clone();
+        let old_style = self.look.data;
+        let old_flags = (self.style, self.edges, self.textures_enabled, self.ids_dirty,
+                         self.stable_frames, self.pick_pending, self.capture_next);
+        let old_capture = self.captured.take();
+        // Keep the original resources alive until the transaction has completed.
+        let old_aa = std::mem::replace(&mut self.aa, aa);
+        let old_transparency = std::mem::replace(&mut self.transparency, transparency);
+        let old_ao = std::mem::replace(&mut self.ao, ao::AmbientOcclusion::new(&self.device, format));
+        let old_overlay = std::mem::replace(&mut self.overlay, overlay::Overlay::new(&self.device, format));
+        let old_color = std::mem::replace(&mut self.offscreen, texture(&self.device, width, height, format));
+        let old_depth = std::mem::replace(&mut self.depth, texture(&self.device, width, height, wgpu::TextureFormat::Depth32Float));
+        let old_ids = std::mem::replace(&mut self.ids, texture(&self.device, width, height, wgpu::TextureFormat::R32Uint));
+        self.config.width = width;
+        self.config.height = height;
+        let result = (|| {
+            self.set_style(style)?;
+            self.set_camera(view, projection)?;
+            self.capture_next = true;
+            self.render(false)?;
+            Ok(self.captured.take().unwrap_or_default())
+        })();
+        self.config.width = old_size.0;
+        self.config.height = old_size.1;
+        self.aa = old_aa;
+        self.transparency = old_transparency;
+        self.ao = old_ao;
+        self.overlay = old_overlay;
+        self.offscreen = old_color;
+        self.depth = old_depth;
+        self.ids = old_ids;
+        self.look.data = old_style;
+        self.queue.write_buffer(&self.look.buffer, 0, bytemuck::cast_slice(&old_style));
+        if !old_camera.is_empty() {
+            self.queue.write_buffer(&self.camera, 0, bytemuck::cast_slice(&old_camera));
+        }
+        self.camera_data = old_camera;
+        (self.style, self.edges, self.textures_enabled, self.ids_dirty,
+         self.stable_frames, self.pick_pending, self.capture_next) = old_flags;
+        self.captured = old_capture;
+        result
+    }
     fn set_edges(&mut self, enabled: bool) {
         self.ids_dirty |= self.edges != enabled;
         self.edges = enabled;
