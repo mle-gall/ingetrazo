@@ -23,12 +23,13 @@ struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f, @loc
  if camera.size.z == 2 || camera.size.z == 3 { o.color = style.front.rgb; }
  if (i.info.w >> 24u) != 0u { o.color = unpack4x8unorm(i.info.w).rgb; }
 
- o.decorated = (i.info.z & 6u) | select(0u,8u,(i.info.w >> 24u) != 0u);
+ o.decorated = select(0u,16u,dot(a,cross(b,c)) < 0.) | (i.info.z & 6u) | select(0u,8u,(i.info.w >> 24u) != 0u);
  o.uv = uv; o.back = back; o.textures = vec2u(front_tex,back_tex);
  o.id = id+1u; return o;
 }
 struct Pixel { @location(0) color: vec4f, @location(1) id: u32 }
-fn face_pixel(i: Out, front: bool) -> Pixel {
+fn face_pixel(i: Out, facing: bool) -> Pixel {
+ let front = facing != ((i.decorated & 16u) != 0u);
  var c = i.color;
  if !front && camera.size.z != 2 && (i.decorated & 8u) == 0u { c = select(style.back.rgb, i.back.rgb, i.back.a > 0.5 && camera.size.z != 3) * select(i.shade,1.,camera.size.z == 3); }
  let tex = select(i.textures.y,i.textures.x,front);
