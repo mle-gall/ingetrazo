@@ -1,0 +1,46 @@
+{
+  "prototypes": 70,
+  "vertices": 665059,
+  "material_bytes": 11043808,
+  "resident_bytes": 110270616,
+  "size": [
+    2000,
+    1400
+  ],
+  "frames": {
+    "edges=False,profiles=False,msaa=False": {
+      "cpu_ms": 0.28889549999999997,
+      "gpu_ms": 3.2653125
+    },
+    "edges=False,profiles=False,msaa=True": {
+      "cpu_ms": 0.308396,
+      "gpu_ms": 3.1247920000000002
+    },
+    "edges=True,profiles=False,msaa=False": {
+      "cpu_ms": 0.320208,
+      "gpu_ms": 3.9379165
+    },
+    "edges=True,profiles=False,msaa=True": {
+      "cpu_ms": 0.2828125,
+      "gpu_ms": 3.650646
+    },
+    "edges=True,profiles=True,msaa=False": {
+      "cpu_ms": 0.272354,
+      "gpu_ms": 3.9515625
+    },
+    "edges=True,profiles=True,msaa=True": {
+      "cpu_ms": 0.305292,
+      "gpu_ms": 3.542938
+    }
+  },
+  "reupload_memory_verified": true,
+  "pick_ms": [
+    1.3264999724924564,
+    1.2051661033183336,
+    3.45258298330009,
+    1.1791250435635448,
+    1.1846249690279365
+  ],
+  "cold_pick_ms": 10.971999960020185,
+  "settled_pick_ms": 1.2875000247731805
+}

@@ -1,0 +1,52 @@
+{
+  "marquee-back-edges-wgpu": {
+    "changed_pixels": 101,
+    "rgb_mae": 0.0038735714285714285,
+    "max_channel_delta": 181
+  },
+  "marquee-profiles-off-wgpu": {
+    "changed_pixels": 261,
+    "rgb_mae": 0.0016554761904761905,
+    "max_channel_delta": 79
+  },
+  "marquee-wgpu": {
+    "changed_pixels": 1088,
+    "rgb_mae": 0.01205142857142857,
+    "max_channel_delta": 181
+  },
+  "marquee-width4.0-wgpu": {
+    "changed_pixels": 1340,
+    "rgb_mae": 0.017539285714285716,
+    "max_channel_delta": 181
+  },
+  "marquee-xray-wgpu": {
+    "changed_pixels": 328,
+    "rgb_mae": 0.01365345238095238,
+    "max_channel_delta": 181
+  },
+  "pusher_car_rust-back-edges-wgpu": {
+    "changed_pixels": 865,
+    "rgb_mae": 0.033733571428571425,
+    "max_channel_delta": 204
+  },
+  "pusher_car_rust-profiles-off-wgpu": {
+    "changed_pixels": 68,
+    "rgb_mae": 0.0008772619047619048,
+    "max_channel_delta": 97
+  },
+  "pusher_car_rust-wgpu": {
+    "changed_pixels": 7808,
+    "rgb_mae": 0.16944761904761904,
+    "max_channel_delta": 204
+  },
+  "pusher_car_rust-width4.0-wgpu": {
+    "changed_pixels": 11127,
+    "rgb_mae": 0.29161309523809525,
+    "max_channel_delta": 204
+  },
+  "pusher_car_rust-xray-wgpu": {
+    "changed_pixels": 1667,
+    "rgb_mae": 0.06305976190476191,
+    "max_channel_delta": 191
+  }
+}

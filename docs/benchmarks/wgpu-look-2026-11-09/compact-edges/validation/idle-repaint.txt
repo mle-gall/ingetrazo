@@ -1,0 +1,1 @@
+PASS: unchanged-camera repaint delivered automatically after navigation: 2

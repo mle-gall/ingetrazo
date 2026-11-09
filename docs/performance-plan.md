@@ -1728,3 +1728,217 @@ Implementation commits (chronological; the handover head also commits this repor
 - `8fc79036`: distinguish cold from cached pick measurements.
 - `e9ddef26`: correct replacement-scene memory accounting.
 - `0630a0ce`: verify stable memory after re-upload.
+
+## Renderer — compact edges — 2026-11-09
+
+The Python geometry handoff stays at **28 bytes per vertex**. All resident face
+passes now use that same layout. Upload removes source edge-only vertex/index
+tails, preserves face-corner order, and translates sparse material header bases
+alongside the face commands. No material or adjacency field is added to faces.
+The GL viewport implementation and defaults are unchanged.
+
+Each source hard edge or synthesized profile candidate occupies **48 bytes**:
+two float32 endpoints and two float32 normals. The first normal's magnitude
+encodes the profile-only flag (unit length for hard edges, twice that for profile
+candidates); multiplying by 0.5 recovers the exact original float32 normal.
+Degenerate candidates with no adjacent normal cannot be silhouettes and are
+omitted. Coincident source edges retain their independent dash directions.
+The complete stable contract, including byte offsets, survivor addressing,
+material rebasing and replacement requirements, is in
+[`rust/ingetrazo_render/README.md`](../rust/ingetrazo_render/README.md#compact-resident-layout-2026-11-09).
+
+The shader generates six screen-space corners per edge; a non-indexed indirect
+draw per prototype instances its contiguous quad range across visible
+placements. Face culling and placement matrices are shared with the edge path.
+Profiles remain view-dependent in the vertex shader; hidden/back-edge dashes
+and X-ray use the same records. The profiles-off command template omits all
+synthesized candidates. Culling computes a 16-byte local camera vector per
+placement; profiles use two normal dot products instead of two extra projected
+matrix transforms per vertex. Singular placements retain the projected-area
+fallback. Perspective, orthographic and mirrored cases have a Rust parity test. Commands retain 20-byte rows, so edge draws explicitly
+loop rather than using the 16-byte-stride non-indexed multi-draw API.
+
+An initial experiment instancing each individual edge/placement pair reduced
+ride memory to 1.36 GB but took 146–173 ms GPU. It was replaced by the prototype
+range approach above. Quantized normals were also rejected after image
+comparison exposed classification differences. These intermediate results are
+not the final benchmark results below.
+
+The opt-in Metal view schedules one repaint 80 ms after its camera last changes.
+This lets the existing second stable-frame ID pass execute before a subsequent
+hover. An immediate pick before that settled refresh still synchronously
+renders IDs; this change does not make the cold path asynchronous.
+
+### Reproduction and measurement scope
+
+Both crates were built in this worktree with Python 3.13 and isolated Cargo
+storage. No push or PR was made. Source documents were read-only. No debug
+build directories existed before capture; builds and Rust tests use release.
+
+```sh
+python3.13 -m venv .venv-work
+.venv-work/bin/pip install -r requirements.txt maturin
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work .venv-work/bin/maturin develop --release --manifest-path rust/ingetrazo_core/Cargo.toml
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work CARGO_PROFILE_RELEASE_STRIP=none .venv-work/bin/maturin develop --release --features extension-module --manifest-path rust/ingetrazo_render/Cargo.toml
+VIRTUAL_ENV=$PWD/.venv-work CARGO_HOME=$PWD/.cargo-work PYO3_PYTHON=$PWD/.venv-work/bin/python cargo test --release --manifest-path rust/ingetrazo_render/Cargo.toml
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_scene.py tests/test_wgpu_interaction.py tests/test_wgpu_materials.py
+QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'not slow' --batches 24
+.venv-work/bin/python scripts/wgpu_idle_smoke.py
+.venv-work/bin/python scripts/wgpu_compact_measure.py MODEL OUTPUT_DIRECTORY
+.venv-work/bin/python scripts/wgpu_look_compare.py MODEL --capture-only --output OUTPUT_DIRECTORY
+```
+
+Every GUI process was wrapped with a 290-second subprocess timeout. The
+benchmark uses 2000×1400 physical pixels, ten warmup frames and twenty measured
+frames, paced by 120 ms, for each of six configurations. It records asynchronous
+GPU timestamps and CPU encode/submit duration using offscreen rendering. The
+same camera and script were used for the original `73d5fed8` renderer, built
+from a local archive under `.r2-tmp` and selected through `PYTHONPATH`, and the
+final installed renderer. Other applications were not stopped. Shared-machine
+load and clock variation limit timing comparisons; some edge-on samples can
+be faster than face-only samples from a different time window.
+
+Owned-byte figures use the existing `gpu_memory` metric: resident geometry,
+indices, command templates, instance/survivor buffers and material textures.
+They exclude render targets, swapchain, driver allocations and transient upload
+staging. Thus the buffer-memory gate is distinct from total GPU allocation.
+Cold pick means an immediate pick after a camera change in MSAA mode. Settled
+pick follows a second unchanged-camera frame and a 120 ms GPU drain; cached
+samples reuse IDs. Capture readbacks are excluded from frame timing.
+
+### Final measurements
+
+Before is the isolated `73d5fed8` build; after is the final compact renderer.
+
+| Model | Revision | Owned bytes | Cold pick ms | Cached pick range ms | Settled pick ms |
+|---|---|---:|---:|---:|---:|
+| space_asbuilt_ride | before | 4,159,176,952 | 133.63 | 1.25–4.73 | 1.37 |
+| space_asbuilt_ride | after | 1,164,010,104 | 79.45 | 1.17–2.38 | 1.31 |
+| track | before | 1,704,334,388 | 59.45 | 1.17–2.33 | 4.69 |
+| track | after | 624,561,444 | 41.17 | 1.17–2.86 | 1.30 |
+| marquee | before | 43,334,088 | 6.72 | 1.21–2.43 | 1.37 |
+| marquee | after | 25,142,240 | 3.37 | 1.18–1.48 | 1.28 |
+| pusher_car_rust | before | 180,588,064 | 18.99 | 1.19–1.34 | 2.50 |
+| pusher_car_rust | after | 110,270,616 | 10.97 | 1.18–3.45 | 1.29 |
+
+#### Faces only
+
+| Model | Revision | GPU ms off / 4× | CPU ms off / 4× |
+|---|---|---:|---:|
+| space_asbuilt_ride | before | 19.46 / 24.65 | 1.61 / 1.23 |
+| space_asbuilt_ride | after | 18.18 / 17.35 | 1.12 / 1.25 |
+| track | before | 8.49 / 8.85 | 0.74 / 0.65 |
+| track | after | 8.10 / 9.97 | 0.56 / 0.53 |
+| marquee | before | 1.09 / 1.33 | 0.28 / 0.30 |
+| marquee | after | 0.78 / 1.19 | 0.29 / 0.28 |
+| pusher_car_rust | before | 3.83 / 3.44 | 0.34 / 0.33 |
+| pusher_car_rust | after | 3.27 / 3.12 | 0.29 / 0.31 |
+
+#### Faces and hard edges
+
+| Model | Revision | GPU ms off / 4× | CPU ms off / 4× |
+|---|---|---:|---:|
+| space_asbuilt_ride | before | 52.94 / 54.36 | 2.28 / 2.38 |
+| space_asbuilt_ride | after | 30.46 / 29.29 | 2.76 / 2.78 |
+| track | before | 21.97 / 25.65 | 0.77 / 0.89 |
+| track | after | 12.52 / 13.02 | 0.94 / 1.02 |
+| marquee | before | 1.17 / 1.28 | 0.32 / 0.29 |
+| marquee | after | 0.66 / 0.74 | 0.27 / 0.34 |
+| pusher_car_rust | before | 6.22 / 5.65 | 0.45 / 0.31 |
+| pusher_car_rust | after | 3.94 / 3.65 | 0.32 / 0.28 |
+
+#### Faces, hard edges and profiles
+
+| Model | Revision | GPU ms off / 4× | CPU ms off / 4× |
+|---|---|---:|---:|
+| space_asbuilt_ride | before | 61.72 / 73.35 | 2.21 / 2.36 |
+| space_asbuilt_ride | after | 35.18 / 36.63 | 2.76 / 2.76 |
+| track | before | 22.96 / 26.38 | 1.07 / 0.91 |
+| track | after | 18.58 / 19.06 | 0.98 / 0.99 |
+| marquee | before | 1.21 / 1.28 | 0.31 / 0.32 |
+| marquee | after | 1.00 / 0.90 | 0.28 / 0.29 |
+| pusher_car_rust | before | 6.58 / 5.99 | 0.27 / 0.33 |
+| pusher_car_rust | after | 3.95 / 3.54 | 0.27 / 0.31 |
+
+### Image comparison
+
+Full-resolution `*-before-after.png` files show original on the left and compact on the right. Each model has default, profiles-off, width 4, back-edge and X-ray captures. These are pixel comparisons, not a claim of bit-identical rendering.
+
+| Capture | Changed RGB pixels / 2,800,000 | RGB MAE (0–255) |
+|---|---:|---:|
+| [marquee-back-edges-wgpu](benchmarks/wgpu-look-2026-11-09/compact-edges/marquee-back-edges-before-after.png) | 101 | 0.003874 |
+| [marquee-profiles-off-wgpu](benchmarks/wgpu-look-2026-11-09/compact-edges/marquee-profiles-off-before-after.png) | 261 | 0.001655 |
+| [marquee-wgpu](benchmarks/wgpu-look-2026-11-09/compact-edges/marquee-before-after.png) | 1,088 | 0.012051 |
+| [marquee-width4.0-wgpu](benchmarks/wgpu-look-2026-11-09/compact-edges/marquee-width4.0-before-after.png) | 1,340 | 0.017539 |
+| [marquee-xray-wgpu](benchmarks/wgpu-look-2026-11-09/compact-edges/marquee-xray-before-after.png) | 328 | 0.013653 |
+| [pusher_car_rust-back-edges-wgpu](benchmarks/wgpu-look-2026-11-09/compact-edges/pusher_car_rust-back-edges-before-after.png) | 865 | 0.033734 |
+| [pusher_car_rust-profiles-off-wgpu](benchmarks/wgpu-look-2026-11-09/compact-edges/pusher_car_rust-profiles-off-before-after.png) | 68 | 0.000877 |
+| [pusher_car_rust-wgpu](benchmarks/wgpu-look-2026-11-09/compact-edges/pusher_car_rust-before-after.png) | 7,808 | 0.169448 |
+| [pusher_car_rust-width4.0-wgpu](benchmarks/wgpu-look-2026-11-09/compact-edges/pusher_car_rust-width4.0-before-after.png) | 11,127 | 0.291613 |
+| [pusher_car_rust-xray-wgpu](benchmarks/wgpu-look-2026-11-09/compact-edges/pusher_car_rust-xray-before-after.png) | 1,667 | 0.063060 |
+
+![Resident memory before and after](benchmarks/wgpu-look-2026-11-09/compact-edges/memory-before-after.png)
+
+### Acceptance gates and remaining work
+
+| Ride gate, 2000×1400 | Measured, MSAA off / 4× | Status |
+|---|---:|---|
+| Owned resident metric < 1.2 GB | 1,164,010,104 bytes | Pass; render targets excluded as above |
+| Hard edges ≤ 15 ms GPU | 30.46 / 29.29 ms | **Not met** |
+| Profiles add < 8 ms GPU | 4.72 / 7.34 ms | Pass |
+| Immediate cold pick < 20 ms | 79.45 ms | **Not met** |
+| Settled pick < 20 ms | 1.31 ms | Pass |
+| Bit-identical comparison images | See exact pixel counts above | **Not met** |
+
+The resident metric falls **72.0%** from the paired baseline. Profile-on GPU
+time falls from 61.72/73.35 ms to 35.18/36.63 ms. This is a substantial memory
+and edge-pass improvement, but it does **not** recover the requested 12–15 ms
+absolute frame floor. Even the final faces-only measurement is 18.18/17.35 ms;
+the hard-edge pass adds another 12.28/11.94 ms in these runs. Immediate cold
+picking still waits for a full ID replay. These outstanding latency and exact
+image-parity gates must remain visible at handover rather than being treated
+as completed acceptance. In the pusher profile captures, the local-camera
+classification removes floating edge marks present in the baseline; this
+visible difference is recorded rather than described as identical output.
+
+The capture script now restores the fitted camera immediately before capture
+and records its scalar/vector state in JSON. This prevents navigation during
+the startup delay from contaminating comparison images. Before/after camera
+records were checked for equality. No production GL viewport code changed.
+
+### Validation and local handover
+
+- Rust release tests: **16 passed**, including edge packing/flags, pixel-width
+  math at several depths, silhouette classification, mirrored and orthographic
+  local-camera equivalence, memory compaction and Metal pipeline validation.
+- Focused offscreen Python tests: **40 passed**, one warning. The 28-byte ABI
+  asserts field offsets 0/12/24 and contains no adjacency fields.
+- Full suite, run once in 24 batches: **7,164 passed, 18 failed, 142 skipped,
+  2 xfailed, 805 deselected**, 57 warnings, **1,351 seconds**. All failures match
+  the supplied 19-failure baseline: 14 translations including Arabic, cursor
+  picking, extension wrapping, hidden panels and toolbar bold. The baseline
+  swatch-tooltip failure did not reproduce; no fix for it is claimed.
+- A watchdog enforced the 30-minute batch bound. No batch reached it; no
+  timeout split was needed. The longest batch took about 125 seconds.
+- Bounded native idle-repaint smoke: **passed**. A camera move followed by Qt
+  event processing delivered an automatic unchanged-camera repaint, with no
+  explicit second draw call from the check.
+- Small-model reuploads keep `gpu_memory` unchanged. Raw JSON, capture pairs,
+  image-difference metrics and validation logs are under
+  `docs/benchmarks/wgpu-look-2026-11-09/compact-edges/`.
+
+Local branch: **`renderer/compact-edges`**. No PR, issue, comment or push was
+created. Source documents were not modified. The main checkout and its review
+processes were not used or stopped. Native artifacts are confined to the
+worktree's isolated environment and build/cache directories.
+
+Implementation commits (oldest first; the final documentation/artifact commit
+is reported separately in the handover):
+- `13bb8ce2` Renderer keeps 28-byte faces and 40-byte procedural edge quads resident
+- `545b20fd` Metal viewport schedules ID refresh after camera settles
+- `daa8cfc3` Profiles-off draws skip synthesized silhouette candidates
+- `4ada4279` Compact edge records preserve full-precision silhouette normals
+- `9cbf89d7` Coincident source edges retain dash directions and compact benchmarks cover all styles
+- `e034bc91` Benchmark faces-only configurations retain their requested edge state
+- `ede478e5` Profile classification reuses one local camera vector per visible placement
+- `d3705514` Renderer comparisons restore and record the same fitted camera
