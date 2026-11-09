@@ -30,6 +30,7 @@ class InstanceUpdates:
         self.version = scene.content_version
         self.pending = set()
         self.pending_meshes = set()
+        self.pending_materials = set()
         self.pending_removed = set()
         self.journal_valid = True
         self.unsubscribe = None
@@ -54,6 +55,9 @@ class InstanceUpdates:
         """Use History's existing journal callbacks to avoid scanning known edits."""
         if self.unsubscribe is not None or history is None:
             return
+        from weakref import WeakKeyDictionary
+        material_targets = WeakKeyDictionary()
+
         def before(command, phase, ran):
             if self.scene.content_version != self.version:
                 self.journal_valid = False
@@ -64,6 +68,20 @@ class InstanceUpdates:
                                       SnapshotMutation, MoveVerticesCommand, AddEdgeCommand,
                                       AddFaceCommand, EraseSelectionCommand)
             def visit(command):
+                from core.history import SetFaceTextureCommand, SetFaceBackCommand
+                if isinstance(command, (SetFaceTextureCommand, SetFaceBackCommand)):
+                    # Attribute commands deliberately leave geometry serials alone.
+                    target = material_targets.get(command)
+                    if target is None:
+                        faces = set(command._faces)
+                        mesh = self.scene.mesh
+                        if not faces.issubset(set(mesh.faces)) or id(mesh) not in self.meshes:
+                            return False
+                        target = material_targets[command] = id(mesh)
+                    # Undo may occur after leaving the group's edit context.
+                    self.pending_materials.add(target)
+                    return True
+
                 if isinstance(command, CompoundCommand):
                     return all(visit(c) for c in command.commands)
                 if isinstance(command, (SnapshotMutation, MoveVerticesCommand,
@@ -110,6 +128,8 @@ class InstanceUpdates:
         if local:
             changed.update((key, self.meshes[key]) for key in self.pending_meshes
                            if self.meshes[key][0]._mut_serial != self.meshes[key][1])
+        changed.update((key, self.meshes[key]) for key in self.pending_materials)
+        self.pending_materials.clear()
         self.pending_meshes.clear()
         additions = []
         for group, matrix, hidden in placements:
