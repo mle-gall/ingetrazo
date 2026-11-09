@@ -22,6 +22,7 @@ TOOL_DISPATCH['CenterArcTool'] = 'mesh'
 TOOL_DISPATCH['PieTool'] = 'mesh'
 TOOL_DISPATCH['FlipTool'] = 'mesh'
 TOOL_DISPATCH['FilletTool'] = 'mesh'
+TOOL_DISPATCH['ProtractorTool'] = 'mesh'
 
 def move_command(groups, delta):
     commands = [MoveGroupCommand(group, delta) for group in groups]
