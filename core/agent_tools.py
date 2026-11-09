@@ -217,6 +217,10 @@ for _name, _props, _required, _mutates in [
     ('query_links', {}, [], False),
     ('link_document', {'path': {'type': 'string'}, 'select': {'type': 'object'}}, ['path'], True),
     ('reload_link', {'path': {'type': 'string'}}, ['path'], True),
+    ('query_worksession', {}, [], False),
+    ('query_recent', {}, [], False),
+    ('open_project', {'path': {'type': 'string'}}, ['path'], True),
+    ('set_active_file', {'path': {'type': 'string'}}, ['path'], True),
     ('query_project', {}, [], False),
     ('set_project', {'path': {'type': 'string'}}, ['path'], True),
 ]:

@@ -261,7 +261,15 @@ class _DockDropZone(QWidget):
         p.end()
 
 
-class MainWindow(QMainWindow):
+def project_path_missing(scene):
+    from core.project import path_for
+    return path_for(scene) is None
+
+
+from views.worksession import WorksessionMixin
+
+
+class MainWindow(WorksessionMixin, QMainWindow):
     """Top-level IngeTrazo window."""
 
     def __init__(self, defer_extensions: bool = False) -> None:
@@ -3195,6 +3203,9 @@ class MainWindow(QMainWindow):
 
     def _file_actions(self) -> list[QAction]:
         actions = []
+        home_action = QAction('Home', self)
+        home_action.triggered.connect(self.show_home)
+        actions.append(home_action)
 
         new_action = QAction(tr("New"), self)
         new_action.setStatusTip(tr(
@@ -6413,6 +6424,10 @@ class MainWindow(QMainWindow):
         self._sync_style_menu()
         self._sync_section_menu()
         self._update_title()
+        if self._session_path:
+            self._active_file = None
+            self._session_unsaved_doc = self._doc
+            self._refresh_worksession()
 
     def _step_document(self, step: int) -> None:
         nxt = self._project_tabs.neighbour(self._doc, step)
@@ -6540,6 +6555,7 @@ class MainWindow(QMainWindow):
         if doc.composer is not None and doc.composer_shown:
             doc.composer.show()
         self.documentChanged.emit()
+        self._refresh_worksession()
         vp.setFocus()
 
     def _update_tab(self, doc=None) -> None:
@@ -6553,7 +6569,8 @@ class MainWindow(QMainWindow):
         else:
             dirty = doc.viewport.scene.content_version != doc.saved_content
         tip = str(doc.path) if doc.path is not None else doc.display_name()
-        bar.set_label(doc, doc.display_name(), dirty, tip)
+        label = doc.display_name() + (' [read-only]' if getattr(doc, 'read_only', False) else '')
+        bar.set_label(doc, label, dirty, tip)
 
     def _doc_is_dirty(self, doc) -> bool:
         if doc is self._doc:
@@ -6587,6 +6604,8 @@ class MainWindow(QMainWindow):
             nxt = docs[i + 1] if i + 1 < len(docs) else docs[i - 1]
             self.activate_document(nxt, closing=True)
         self._retire_document(doc)
+        self.persist_worksession()
+        self._refresh_worksession()
         return True
 
     def _retire_document(self, doc) -> None:
@@ -6893,6 +6912,8 @@ class MainWindow(QMainWindow):
         only: an import is not a document you reopen)."""
         if path is None or Path(path).suffix.lower() != ".igz":
             return
+        from core import recent as home_recent
+        home_recent.remember(path)
         key = str(Path(path).resolve())
         recent = [x for x in self._recent_paths() if x != key]
         recent.insert(0, key)
@@ -6933,7 +6954,7 @@ class MainWindow(QMainWindow):
             self,
             tr("Open IngeTrazo document"),
             "",
-            tr(IGZ_FILE_FILTER),
+            "IngeTrazo projects (*.igzproj);;" + tr(IGZ_FILE_FILTER),
         )
         if not path_str:
             return
@@ -6949,6 +6970,13 @@ class MainWindow(QMainWindow):
         An extension may claim a suffix of its own
         (``ExtensionApp.add_file_opener``); anything else needs the model,
         so a workspace in front of it is left first."""
+        path = Path(path)
+        if path.suffix.lower() == '.igzproj':
+            try:
+                return self.open_project(path)
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, 'Open project', str(exc))
+                return False
         suffix = path.suffix.lower()
         opener = self.file_openers.get(suffix)
         if opener is not None:
@@ -6961,6 +6989,7 @@ class MainWindow(QMainWindow):
         for doc in self._documents:
             if doc.same_file(path):
                 self.activate_document(doc)
+                self._dismiss_home()
                 return True
         previous, created = self._doc, None
         from core import renderer_settings
@@ -6973,6 +7002,10 @@ class MainWindow(QMainWindow):
             # Nothing came in: the tab goes, the user is back where he was.
             self.activate_document(previous, closing=True)
             self._retire_document(created)
+        if ok:
+            self._dismiss_home()
+        if ok and self._session_path and not self._opening_session:
+            self._refresh_worksession()
         return ok
 
     def _open_path_here(self, path: Path, suffix: str) -> bool:
@@ -7158,6 +7191,13 @@ class MainWindow(QMainWindow):
         self._do_save(path)
 
     def _do_save(self, path: Path) -> None:
+        if (getattr(self._doc, 'read_only', False)
+                and not (self._doc_is_dirty(self._doc) and self._doc.same_file(path))):
+            self.statusBar().showMessage('Choose this file in Worksession to edit or save it.', 5000)
+            return
+        if self._session_path and project_path_missing(self.viewport.scene):
+            from core import project
+            project.attach(self.viewport.scene, self._session_path, path)
         # Backup BEFORE writing (Preferences ▸ General): the previous good
         # version survives even a save that dies mid-write — which a syncing
         # drive has actually produced (pCloud truncation).
@@ -7174,6 +7214,16 @@ class MainWindow(QMainWindow):
             # Linked files: their paths relative to where this is saved.
             from core import links as _links
             _links.refresh_paths(self.viewport.scene, path)
+            image = self._tab_thumbnail(self.viewport)
+            if image is None and self._doc.stand_in is not None and self._doc.stand_in.isVisible():
+                image = self._doc.stand_in.grab().toImage().scaledToWidth(self.TAB_PREVIEW_PX)
+            if image is not None:
+                from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+                data = QByteArray()
+                buffer = QBuffer(data)
+                buffer.open(QIODevice.WriteOnly)
+                image.save(buffer, 'PNG')
+                self.viewport.scene._home_thumbnail_png = bytes(data)
             stats = igz_format.save_scene(self.viewport.scene, path) or {}
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, tr("Save failed"), str(exc))
@@ -7199,7 +7249,12 @@ class MainWindow(QMainWindow):
                 tr("Saved — {n} texture(s) packed into the document.",
                    n=embedded), 4000)
         self._current_path = path
+        if self._session_unsaved_doc is self._doc:
+            self._active_file = str(path.resolve())
+            self._session_unsaved_doc = None
         self._remember_recent(path)
+        self.persist_worksession()
+        self._refresh_worksession()
         self._saved_version = self.viewport.scene.version
         self._update_title()
 
@@ -9335,6 +9390,7 @@ class MainWindow(QMainWindow):
         if not self._confirm_quit():
             event.ignore()
             return
+        self.persist_worksession()
         # A clean goodbye: whatever the user decided (save or discard), this
         # session's recovery slots no longer speak for anyone.
         from core import autosave

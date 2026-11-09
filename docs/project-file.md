@@ -93,5 +93,65 @@ uses selected groups from another open document's saved file; save source edits
 before linking. Agents expose query_links, link_document(path, select),
 reload_link(path), query_project and set_project(path).
 
-B2 remains the Home/start window with recent files and projects, plus worksession
-and active-file management.
+B2 adds Home, recent files/projects, worksessions and active-file management,
+described below.
+
+## Home and worksession (B2)
+
+Starting without a path shows Home. File → Home returns there. Home lists recent
+native files and projects, supports pin/unpin, and asks for a replacement path
+when an entry has moved. New document retains the units question and its existing
+preference. New project creates an empty envelope; save a new document to add its
+host entry. The ordinary Open dialog and OS/command-line route accept `.igzproj`.
+
+The optional version-1 project field below is plain JSON. Array order is tab
+order; paths are relative to the project directory. Unknown envelope fields are
+preserved. Session writes reread the latest envelope before atomic replacement.
+
+```json
+"worksession": {
+  "files": [
+    {"path": "host.igz", "camera": {"target": [0, 0, 0], "distance": 12}},
+    {"path": "parts/track.igz", "camera": null}
+  ],
+  "active_file": "parts/track.igz"
+}
+```
+
+Camera objects use the existing document camera fields (target, orbit/projection
+parameters); absent or null cameras retain the document's view. `active_file`
+is null or one of the open paths. Without worksession state, the host-role files
+open in file-list order. References remain listed in the browser but cannot
+become active modeling documents. Linked sources open in place on one click.
+Saving a linked source retains its linked role; the existing watcher refreshes
+unpacked placements in all open hosts.
+
+Browser → Worksession selects the editable file. Ordinary tab selection only
+changes the viewed file. Non-active tabs are labeled read-only; their model
+input, panels, composer and editing menus are disabled and history/agent
+mutations are rejected. These are static views: activate a file to navigate or
+edit it. Previously made unsaved changes are retained when switching; an explicit
+save to that same path can still save those changes. New documents temporarily
+become the editable unsaved tab and join the session when saved. Unsaved document
+contents are not stored in the project JSON; ordinary save/recovery still applies.
+Session state is written on active-file changes, document saves, tab close and
+window close. Tab ordering and cameras therefore persist on a normal close.
+Already open documents stay in the window and participate in the worksession.
+
+Recent data uses QSettings `home/recent_files` and `home/recent_projects`, each a
+JSON array of `{"path": "/absolute/path", "pinned": false}`. Each list is bounded
+to 20 entries, pinned first, then most recently opened. The legacy file-menu list
+is retained for compatibility. Missing paths stay available in Home for locating.
+macOS Dock recent-document registration is not added (no existing one-call bridge).
+
+Visible explicit document saves capture a small PNG as the optional ZIP member
+`thumbnail.png` (280 pixels wide). This is additive to the existing IGZ container;
+plain old files still load. Headless saves preserve an existing thumbnail and do
+not manufacture one. Home bounds thumbnail reads to 1 MiB. Thumbnails are not
+geometry or project schema fields and may be omitted when no rendered frame is
+available.
+
+Agent tools: `query_worksession()` returns project path, ordered files/roles,
+read-only flags and active file; `set_active_file(path)` opens/selects a host or
+linked source; `open_project(path)` restores a session; `query_recent()` returns
+both recent lists with pin flags. Paths in agent results are absolute.

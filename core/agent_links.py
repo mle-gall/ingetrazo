@@ -23,3 +23,18 @@ class LinkTools:
     def _tool_set_project(self, path):
         window = self._viewport.window()
         return project.attach(self._viewport.scene, path, getattr(window, '_current_path', None))
+
+    def _tool_query_worksession(self):
+        return self._viewport.window().query_worksession()
+
+    def _tool_set_active_file(self, path):
+        return self._viewport.window().set_active_file(path)
+
+    def _tool_open_project(self, path):
+        window = self._viewport.window()
+        window.open_project(path)
+        return window.query_worksession()
+
+    def _tool_query_recent(self):
+        from core.recent import query
+        return query()

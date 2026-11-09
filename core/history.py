@@ -240,6 +240,9 @@ class History:
                 "changes": [dict(c) for c in self._changes if c["revision"] > revision]}
 
     def _run(self, cmd, phase, operation):
+        if getattr(self.scene, 'worksession_read_only', False):
+            self.last_rejected = 'Choose this file in Worksession before editing it.'
+            return False
         listeners = tuple(self._listeners)
         self._notify(listeners, 0, cmd, phase, False)
         ran = False

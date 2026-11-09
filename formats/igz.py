@@ -886,6 +886,9 @@ def prepare_scene_steps(scene, mesh_steps=None):
             meta, survey_blobs = pack_mesh(survey)
             payload["photo_mesh"] = meta
 
+    thumbnail = getattr(scene, "_home_thumbnail_png", None)
+    if thumbnail:
+        survey_blobs["thumbnail.png"] = thumbnail
     return payload, geom, large, survey_blobs
 
 
@@ -1249,6 +1252,10 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     geom: dict = {}
     try:
         if archive is not None:
+            if 'thumbnail.png' in archive.namelist():
+                info = archive.getinfo('thumbnail.png')
+                if info.file_size <= 1024 * 1024:
+                    scene._home_thumbnail_png = archive.read(info)
             # Format 3's binary geometry blocks, read while the archive is
             # open (it closes below).
             geom = {n: archive.read(n) for n in archive.namelist()
