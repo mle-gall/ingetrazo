@@ -16,6 +16,7 @@ fn cull(@builtin(global_invocation_id) gid: vec3u) {
  if id >= arrayLength(&inst) { return; }
  let i = inst[id];
  if (i.info.z & 1u) != 0u { return; }
+ atomicAdd(&counters[4], commands[i.info.x + arrayLength(&proto)].count / 6u);
  let p = proto[i.info.x];
  let m = camera.vp * i.world;
  var outside = vec3u(0); var outside2 = vec3u(0);
@@ -42,6 +43,7 @@ fn cull(@builtin(global_invocation_id) gid: vec3u) {
   viewpoints[id].eye = vec4f(vec3f(dot(cross(b,c),r),dot(cross(c,a),r),dot(cross(a,b),r))/determinant,camera.eye.w);
  }
  let edge_command = i.info.x + arrayLength(&proto);
+ atomicAdd(&counters[5], commands[edge_command].count / 6u);
  atomicAdd(&commands[edge_command].instances, 1u);
  let slot = atomicAdd(&commands[i.info.x].instances, 1u);
  survivors[commands[i.info.x].start+slot] = id;

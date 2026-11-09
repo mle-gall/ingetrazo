@@ -292,3 +292,15 @@ mod placement_cache_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod screen_cull_tests {
+    #[test]
+    fn screen_size_cull_retains_nonzero_subpixel_coverage() {
+        // WGSL direction is NDC delta times viewport, twice physical pixels.
+        for (pixels, culled) in [(0.,true),(0.01,false),(0.49,false),(0.5,false),(1.,false)] {
+            let direction = glam::Vec2::new(pixels*2., 0.);
+            assert_eq!(direction.length() == 0., culled);
+        }
+    }
+}

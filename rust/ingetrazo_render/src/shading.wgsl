@@ -82,7 +82,19 @@ fn edge_pixel(i: Out) -> Pixel { var p: Pixel; var c = style.edge.rgb; if (i.dec
 @fragment fn fs(i: Out, @builtin(front_facing) front: bool) -> Pixel { return face_pixel(i,front); }
 @fragment fn edge_fs(i: Out) -> Pixel { return edge_pixel(i); }
 
-@fragment fn depth_fs(i: Out, @builtin(front_facing) front: bool) -> Pixel { return face_pixel(i,front); }
+// IDs require alpha rejection, never lighting, color conversion or selection dots.
+@fragment fn depth_fs(i: Out, @builtin(front_facing) facing: bool) -> Pixel {
+ let front = facing != ((i.decorated & 16u) != 0u);
+ let tex = select(i.textures.y,i.textures.x,front);
+ let uv = select(i.uv.zw,i.uv.xy,front);
+ let dx = dpdx(uv); let dy = dpdy(uv);
+ if TEXTURED && tex != 0u && camera.size.z < 2 && (i.decorated & 8u) == 0u {
+  var alpha = textureSampleGrad(material_images,material_sampler,uv,i32(tex),dx,dy).a;
+  if camera.size.w > 0.5 { alpha = textureSampleLevel(material_images,material_sampler,vec2f(0.5),i32(tex),f32(textureNumLevels(material_images)-1u)).a; }
+  if alpha < 0.5 { discard; }
+ }
+ var p: Pixel; p.id = i.id; return p;
+}
 @fragment fn hidden_edge_fs(i: Out) -> Pixel {
  var p = edge_pixel(i);
  if camera.size.z == 1. { p.color = vec4f(linear(mix(style.edge.rgb,style.background.rgb,0.6)),1.); }

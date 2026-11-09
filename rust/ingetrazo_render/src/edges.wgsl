@@ -1,3 +1,4 @@
+override PROFILES: bool = true;
 // Classify in projected space so perspective, orthographic and mirrored placements
 // use the same face-side test without a camera-dependent CPU topology upload.
 fn facing(p: vec4f, q: vec4f, r: vec4f) -> f32 {
@@ -32,7 +33,7 @@ struct EdgePlacement { eye: vec4f, transform: mat4x4f }
  var b = transform * vec4f(other, 1.);
  var profile = false;
  // Hard edges need classification only when it can change their width.
- if style.profiles.x > 0. && (corner.b > 0.5 || style.profiles.y > style.edge.w) {
+ if PROFILES && style.profiles.x > 0. && (corner.b > 0.5 || style.profiles.y > style.edge.w) {
   let boundary = dot(n0,n0) > 0. && dot(n1,n1) == 0.;
   let eye = viewpoints[id].eye;
   if eye.w <= 1. {
@@ -55,6 +56,11 @@ struct EdgePlacement { eye: vec4f, transform: mat4x4f }
  if a.z < 0. && b.z >= 0. { a = mix(a,b,-a.z/(b.z-a.z)); }
  if b.z < 0. && a.z >= 0. { b = mix(b,a,-b.z/(a.z-b.z)); }
  let direction = (b.xy/max(b.w,1e-6)-a.xy/max(a.w,1e-6))*camera.size.xy;
+ // Reject zero-area edges after clipping. A nonzero subpixel threshold
+ // changes coverage, including at the default width; retain those edges.
+ if length(direction) == 0. {
+  var hidden: Out; hidden.position = vec4f(0.,0.,2.,1.); return hidden;
+ }
  let normal = vec2f(-direction.y,direction.x)/max(length(direction),1e-6);
  let width = select(style.edge.w,max(style.edge.w,style.profiles.y),profile && style.profiles.x > 0.);
  let side = (corner.r*2.-1.)*(1.-2.*corner.g);
