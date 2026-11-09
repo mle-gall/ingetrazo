@@ -1356,17 +1356,26 @@ impl Renderer {
                 self.aa.draw(&mut e, &color, s, self.style, self.edges, self.look.data[6][0] > 0., self.multi, self.queries.as_ref(), Some(edge_only), self.sections.count > 0);
             }
             if !edge_only && ao_active {
+                // Caps must contribute depth before AO reconstructs its normals.
+                // Submit once here; the non-AO path keeps the final color pass.
+                if self.sections.count > 0 {
+                    if msaa {
+                        self.sections.draw(&mut e, &self.aa.color_view(), &self.aa.depth_view(), Some(&color), tq, &self.camera_data);
+                    } else {
+                        self.sections.draw(&mut e, &color, &depth, None, tq, &self.camera_data);
+                    }
+                }
                 if msaa { self.aa.resolve_depth(&self.device, &mut e, &depth, tq); }
                 let output = if msaa && !self.pick_pending { self.aa.color_view() } else { target.create_view(&Default::default()) };
                 self.ao.draw(&self.device, &self.queue, &mut e, target, &depth, &output, msaa && !self.pick_pending, tq);
             }
         }
         if (!msaa || self.pick_pending) && (draw_ids || ao_active) { self.ids_dirty = false; }
-        if self.sections.count > 0 {
+        if self.sections.count > 0 && !ao_active {
             if msaa && !self.pick_pending {
-                self.sections.draw(&mut e, &self.aa.color_view(), &self.aa.depth_view(), Some(&color), tq);
+                self.sections.draw(&mut e, &self.aa.color_view(), &self.aa.depth_view(), Some(&color), tq, &self.camera_data);
             } else {
-                self.sections.draw(&mut e, &color, &depth, None, tq);
+                self.sections.draw(&mut e, &color, &depth, None, tq, &self.camera_data);
             }
         }
         self.overlay
