@@ -652,6 +652,17 @@ def main() -> int:
             pass
         _native.start_ok()
     window.viewport.frameSwapped.connect(_first_frame_drawn)
+    # Under the Metal renderer the GL viewport never swaps a frame, so the
+    # guard stayed armed and turned the Rust engine off at the next start
+    # (the first review sessions of the wgpu view did exactly that). That
+    # renderer has a guard of its own (core.renderer_settings): the engine
+    # guard is satisfied as soon as the window is up.
+    try:
+        from core import renderer_settings
+        if renderer_settings.wanted():
+            QTimer.singleShot(0, _first_frame_drawn)
+    except Exception:  # noqa: BLE001 — never stop a start over this
+        pass
     if engine_fell_back:
         from PySide6.QtWidgets import QMessageBox
         from core.i18n import tr

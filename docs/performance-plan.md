@@ -1116,3 +1116,130 @@ offscreen scene/style Python tests 21 passed. The one bounded full-suite run
 completed five batches with 6,136 passed and the 19 known baseline failures;
 batch six reached the extended approximately 30-minute bound. Full-suite
 regression status is therefore **unverified**, not a clean-suite claim.
+## R2c — 2026-11-09: real-window startup and renderer preference
+
+Native document opens no longer call `Viewport.prepare_drawing`. GL builds
+its required chunks on demand, and Metal never warms the hidden GL viewport's
+geometry, smooth streams or serialized cache. Panel notifications, linked-file
+watcher refresh, georeference tray synchronization and full heap collection
+wait for `frameSwapped` (GL) or `frameReady` (Metal). Optional callbacks run one
+per 16 ms timer slice and pause while their document is in a background tab.
+This bounds the number of callbacks per slice, **not each callback's duration**;
+individual panel implementations can still perform a long traversal. The
+existing GC allocation threshold is set before resident packing without doing
+a full collection. No renderer/crate files were changed.
+
+General now offers OpenGL (default) / Metal via wgpu (experimental), persisted
+as `General/viewport_renderer`. Changes apply to subsequently opened documents;
+an existing document retains its renderer. `INGETRAZO_WGPU=0/1` wins without
+writing guard state. The status bar identifies the active document's renderer.
+A persisted `viewport_renderer_starting` flag is armed immediately before
+resident packing/device creation, after document loading, and cleared once on
+successful presentation. A pending flag at the next process start resets the
+preference to OpenGL and explains the fallback. There is no elapsed-time
+failure threshold. Empty scenes clear the flag after successful device setup.
+
+### Real-window measurements
+
+Python 3.13.12, PySide6 6.11.3, both local release crates; read-only ride input.
+Each GUI child was externally bounded to 240 s. `INGETRAZO_PERF=1`, ten-second
+`faulthandler.dump_traceback_later` samples, explicit `PYTHONPATH`; QSettings,
+Qt writable paths, texture/drawing caches and logs redirected into this worktree.
+The initial module snapshot is from `b24de023`. No full suite from this worktree ran concurrently with these measurements.
+Other worktrees had full suites running (observed in the process list), so
+these timings are contention-affected. Short focused tests also overlapped
+parts of the baseline.
+Runs share a drawing cache and are individual observations, not a controlled
+cold-cache distribution. The final harness observes newly created tabs, marks resident uploads of the
+loaded document, and checks GL drawing-cache versions before accepting a swap.
+It raises the window after loading to reduce occlusion stalls. Earlier logs
+contain intermediate linked-load markers; their final marker is root-load
+completion. The final harness emits only the root-load marker.
+
+| Renderer | Baseline after load | Changed after load | Qualification |
+|---|---:|---:|---|
+| Metal via wgpu | 106.357 s | 14.619 s | Final code, 76,029 placements; four-second gate **not met** |
+| OpenGL | 110.453 s | No verified frame | Final strict run crashed with exit -11 |
+
+The first changed Metal run was 5.510 s. An intermediate 4.648 s run, after
+restoring the GC threshold before
+packing, reported 3.380 s packing (0.995 s handoff, 2.219 s native,
+0.061 s finishing), 0.926 s upload, and approximately 0.34 s other work.
+Camera restoration, recent-file update and menu/title synchronization together
+took under 0.01 s. Packing plus upload alone exceeds four seconds on this run;
+the 2.126 s bare-window R1b result has not been reproduced here. Further work
+on the owned window code alone cannot claim the requested gate as passed.
+The final guarded-frame run was 14.619 s, with 12.055 s packing (2.267 s
+handoff, 9.494 s native, 0.116 s finishing), 1.617 s upload, exit 0. Native-call
+variation alone is several seconds under the observed machine contention.
+
+A later 0.250 s GL swap was rejected: it did not prove that the loaded model's
+chunks had drawn. The implementation now rejects stale GL swaps using the
+current scene/cache version, and rejects Metal frames until the newly loaded
+resident scene is ready. It also ignores frames while loading and frames from
+retired document widgets. The final GL run with that check exited with signal
+11 before a verified model frame; no final-code successful GL timing is claimed.
+The earlier 63.520/90.772 s observations predate this stricter check and are
+retained as provisional, not proof of complete model presentation. The final
+baseline rerun with the scene-version check completed successfully at
+110.453 s after load (exit 0); see `baseline-gl-verified.log`.
+
+Baseline main-thread samples show `prepare_drawing → restore_cached →
+drawing_cache.key_for → json.dumps`, `prepare_drawing → prefetch`, and
+`prepare_drawing → _proto_base_chunk → _smooth_stream`. Changed Metal samples
+show `rebuild → set_scene → pack_scene`; changed GL samples show
+`paintGL → _sync_edges → _static_draw_groups → _group_chunk`. GL's unchanged
+on-demand bake still performs cache-key work inside chunk construction; this
+change removes its separate eager pre-paint pass, not those renderer internals.
+
+Evidence and harness: `docs/benchmarks/r2c-2026-11-08/`. Reproduce by copying
+`measure.py` and `run.py` into `.r2-tmp`, storing
+`git show b24de023:views/main_window.py` as `.r2-tmp/baseline_main_window.py`, then
+running `R2C_BASELINE=1 .venv-work/bin/python .r2-tmp/run.py before` and
+`.venv-work/bin/python .r2-tmp/run.py after` (set `TMPDIR=$PWD/.r2-tmp`).
+The input path is intentionally fixed to the supplied read-only ride file.
+
+### Validation
+
+Focused settings/dialog checks: 19 passed; frame-gating/open-repaint checks:
+2 passed; final guard/startup subset: 5 passed; added dialog round-trip:
+1 passed, 8 deselected. Full-suite result is recorded below after completion.
+
+The single full suite found two R2c regressions in its first batch: dirty title
+updates had been deferred with panel work, and the loading progress bar never
+finished. Cheap title/tool/status callbacks now remain immediate; the bar
+finishes at document-load completion. The old progress test was updated to
+require no eager preparation and no synchronous repaint. A targeted follow-up
+(`tests/test_project_tabs.py tests/test_startup_first_picture.py
+ tests/test_renderer_settings.py`) passed **37 tests** in 18.14 s. No second
+full-suite run was started. The isolated suite also fails the existing
+crash-log-location assertion because that test demands a location outside the
+application tree, whereas this run explicitly keeps logs inside the worktree.
+
+The bounded full-suite command was
+`QT_QPA_PLATFORM=offscreen .venv-work/bin/python scripts/pytest_batches.py -m 'not slow'`
+with a 1,800-second process-group deadline and worktree-local `TMPDIR`, Qt data,
+settings and crash logs. It **timed out in batch 6**, which was terminated with
+its own process group. Five completed batches report **6,095 passed, 21 failed,
+112 skipped, 2 xfailed, 804 deselected**. Of those 21 failures, 18 match the
+supplied baseline (14 translations, hidden panels, toolbar bold, cursor pick,
+extension wrapping), two are the subsequently fixed R2c failures above, and
+one is the isolation-only crash-log assertion. The supplied swatch-tooltip
+failure was not reported in the completed batches. Therefore this is **not a complete
+19-failure-baseline comparison**; no complete-suite pass is claimed. See
+`suite.log` and `regression-fixes.log` alongside the timing evidence.
+
+Final frame-order follow-up: `tests/test_startup_first_picture.py
+ tests/test_renderer_settings.py` passed **6 tests** in 6.80 s, including stale
+GL swaps, stale Metal frames, loading-phase suppression, preference overrides,
+persistence and guard recovery. These targeted checks followed the single
+bounded full suite; it was not restarted.
+
+Code commits are listed in `docs/benchmarks/r2c-2026-11-08/commits.txt`; the
+subsequent documentation commit records this evidence. Both release crate
+builds completed with the worktree-local venv and `CARGO_HOME`. No PR, issue,
+comment, push, renderer-view edit, overlay edit or tracked Rust change was made.
+The branch is `renderer/r2c-startup-prefs`. Remaining acceptance work is the
+under-four-second Metal gate, a successful strict final-code GL presentation,
+and the uncompleted final full-suite batch. Individual panel callback duration
+is also not bounded by the timer spacing.

@@ -447,8 +447,11 @@ class MainWindow(QMainWindow):
         # native window.
         from views import mac_glass
         mac_glass.install(self)
-        if os.environ.get("INGETRAZO_WGPU") == "1":
-            self._install_wgpu_display(self._doc)
+        from core import renderer_settings
+        if renderer_settings.start_guard():
+            self.statusBar().showMessage(tr(
+                "The last Metal renderer start never presented a frame; using OpenGL."), 15000)
+        self._choose_document_renderer(self._doc)
 
     def showEvent(self, event) -> None:  # noqa: N802 — Qt override
         super().showEvent(event)
@@ -3616,7 +3619,7 @@ class MainWindow(QMainWindow):
 
     # ---- Tool routing -------------------------------------------------------
     def _activate_tool(self, key: str) -> None:
-        if os.environ.get("INGETRAZO_WGPU") == "1":
+        if getattr(self._doc, "_renderer_wgpu", False):
             self.viewport.set_active_tool(None)
             return
         if self._tool_filter is not None and key not in self._tool_filter:
@@ -6163,6 +6166,76 @@ class MainWindow(QMainWindow):
     def all_viewports(self) -> list:
         return [d.viewport for d in self._documents if d.viewport is not None]
 
+    def _choose_document_renderer(self, doc):
+        """Choose once per new document; an existing document never swaps."""
+        from core import renderer_settings
+        doc._renderer_wgpu = renderer_settings.wanted()
+        if doc._renderer_wgpu:
+            self._install_wgpu_display(doc)
+        if doc is self._doc:
+            self._show_renderer_note(doc)
+
+    def _show_renderer_note(self, doc):
+        if not hasattr(self, "_renderer_label"):
+            self._renderer_label = QLabel(self)
+            self.statusBar().addPermanentWidget(self._renderer_label)
+        self._renderer_label.setText(
+            "Metal via wgpu (experimental)" if getattr(doc, "_renderer_wgpu", False)
+            else "OpenGL")
+
+    def _document_first_frame(self, doc):
+        """Release optional work only after the renderer reports presentation.
+
+        GL builds the data it needs on demand; the old eager preparation also
+        baked unused smooth streams and serialized caches for the hidden GL
+        viewport under Metal. Do not run that duplicate whole-scene pass.
+        """
+        from core import renderer_settings
+        if doc is None:
+            return
+        if getattr(self, "_opening_document", False):
+            return
+        # Progress callbacks can pump a presentation of the previous scene.
+        # Only a frame after this document's resident upload releases work.
+        if (getattr(doc, "_renderer_wgpu", False)
+                and not getattr(doc, "_resident_scene_ready", True)):
+            return
+        # A presented frame from either renderer satisfies the Rust engine's
+        # start guard (main.py arms it; the GL viewport's frameSwapped never
+        # fires under the Metal view).
+        from core import _native
+        _native.start_ok()
+        if getattr(doc, "_renderer_starting", False):
+            doc._renderer_starting = False
+            renderer_settings.first_frame()
+        if not getattr(doc, "_awaiting_picture", False):
+            return
+        if (not getattr(doc, "_renderer_wgpu", False)
+                and doc.viewport._edges_version != doc.viewport.scene.version):
+            return  # a queued swap of the old GL image is not this model
+        doc._awaiting_picture = False
+        self._drain_document_startup(doc)
+
+    def _drain_document_startup(self, doc):
+        """One optional callback per event-loop slice, paused in background tabs."""
+        from PySide6.QtCore import QTimer
+        if getattr(doc, "_startup_draining", False):
+            return
+        doc._startup_draining = True
+
+        def step():
+            doc._startup_draining = False
+            if doc not in self._documents or doc is not self._doc:
+                return
+            jobs = getattr(doc, "_after_picture", [])
+            if jobs:
+                doc._startup_draining = True
+                try:
+                    jobs.pop(0)()
+                finally:
+                    QTimer.singleShot(16, self, step)
+        QTimer.singleShot(0, self, step)
+
     def _install_wgpu_display(self, doc):
         """Use a document stand-in for the opt-in, display-only Metal spike.
 
@@ -6172,6 +6245,7 @@ class MainWindow(QMainWindow):
         from views.wgpu_view import WgpuView
         from PySide6.QtCore import QTimer
         display = WgpuView(self._doc_stack)
+        display.frameReady.connect(lambda *_: self._document_first_frame(doc))
         display.source_viewport = doc.viewport
         display.camera = doc.viewport.camera
         display.frameReady.connect(lambda cpu, gpu, wall:
@@ -6187,7 +6261,17 @@ class MainWindow(QMainWindow):
         self._doc_stack.addWidget(display)
         refresh = QTimer(display)
         refresh.setSingleShot(True)
-        refresh.timeout.connect(lambda: display.set_scene(doc.viewport.scene))
+        def rebuild():
+            if getattr(self, "_opening_document", False):
+                return
+            from core import renderer_settings
+            renderer_settings.arm()
+            doc._renderer_starting = True
+            display.set_scene(doc.viewport.scene)
+            doc._resident_scene_ready = True
+            if not len(display.packed.instances):
+                self._document_first_frame(doc)
+        refresh.timeout.connect(rebuild)
         doc.viewport.sceneVersionChanged.connect(lambda *_: refresh.start(0))
         display._refresh_timer = refresh
         doc.viewport.set_active_tool(None)
@@ -6223,17 +6307,29 @@ class MainWindow(QMainWindow):
         """Connect a project's viewport to the window's panels and status
         bar. Every viewport gets the same connections; each answers only
         while its project is the one in front."""
-        def live(fn):
-            return lambda *a: fn(*a) if vp is self.viewport else None
+        def live(fn, *, after_picture=False):
+            def dispatch(*args):
+                if vp is not self.viewport:
+                    return
+                doc = self._doc
+                if after_picture and getattr(doc, "_awaiting_picture", False):
+                    doc._after_picture.append(lambda: fn(*args))
+                else:
+                    fn(*args)
+            return dispatch
+        vp.frameSwapped.connect(lambda: self._document_first_frame(
+            next((d for d in self._documents if d.viewport is vp), None)))
         vp.projectionChanged.connect(live(self._sync_projection_buttons))
         for name in ("tray", "bim_tray", "georef_tray", "project_browser",
                      "layers_dock", "layers_toolbar", "profile_dock"):
             panel = getattr(self, name, None)
             if panel is not None:
                 vp.sceneVersionChanged.connect(
-                    live(lambda _v, p=panel: p.on_scene_changed()))
+                    live(lambda _v, p=panel: p.on_scene_changed(),
+                         after_picture=True))
         vp.sceneVersionChanged.connect(
-            live(lambda _v: self._on_surfaces_scene_changed()))
+            live(lambda _v: self._on_surfaces_scene_changed(),
+                 after_picture=True))
         vp.tilesChanged.connect(live(lambda: self._build_terrain()))
         vp.valueBufferChanged.connect(live(self._on_value_buffer))
         vp.measurementChanged.connect(
@@ -6284,8 +6380,7 @@ class MainWindow(QMainWindow):
         self._wire_viewport(doc.viewport)
         self._doc_stack.addWidget(doc.viewport)
         self._documents.append(doc)
-        if os.environ.get("INGETRAZO_WGPU") == "1":
-            self._install_wgpu_display(doc)
+        self._choose_document_renderer(doc)
         bar = self._project_tabs
         bar.add(doc, bar.index_of(self._doc) + 1)
         doc.saved_content = doc.viewport.scene.content_version
@@ -6409,6 +6504,9 @@ class MainWindow(QMainWindow):
                     d[name] = None
 
     def _enter_document(self, doc) -> None:
+        self._show_renderer_note(doc)
+        if not getattr(doc, "_awaiting_picture", False):
+            self._drain_document_startup(doc)
         vp = doc.viewport
         from core import axes as _axes
         from core import units as _units
@@ -6857,7 +6955,9 @@ class MainWindow(QMainWindow):
                 self.activate_document(doc)
                 return True
         previous, created = self._doc, None
-        if not self._doc_is_blank():
+        from core import renderer_settings
+        if (not self._doc_is_blank() or renderer_settings.wanted() !=
+                getattr(self._doc, "_renderer_wgpu", False)):
             created = self._new_document()
         ok = self._open_path_here(path, suffix)
         if not ok and created is not None and created in self._documents \
@@ -6905,6 +7005,7 @@ class MainWindow(QMainWindow):
         # answering the desktop on the model of #158.
         self.viewport.setUpdatesEnabled(False)
         self._opening_document = True
+        self._doc._resident_scene_ready = False
         try:
             try:
                 igz_format.load_into(self.viewport.scene,
@@ -6914,24 +7015,20 @@ class MainWindow(QMainWindow):
                 dlg.close()
                 QMessageBox.critical(self, tr("Open failed"), str(exc))
                 return False
+            # Keep the existing steady-state allocation threshold before the
+            # resident pack allocates. Only the full heap walk is deferred.
+            import gc
+            gc.set_threshold(self.GC_THRESHOLD0, 10, 10)
             self.viewport.history.clear()
             self.viewport.reset_texture_cache()
             self._forget_coordinate()
-            # The first paint of a huge model built its drawing data in one
-            # go, long enough for the desktop to call the app «not
-            # responding»: it is built here, under the same dialog (#158).
-            try:
-                cb(0.25, "Preparing the drawing…")
-                self.viewport.prepare_drawing(
-                    lambda f, t: cb(0.25 + 0.60 * f, t))
-            except Exception:  # noqa: BLE001 - the first paint builds it anyway
-                pass
-            cb(0.85, "Finishing…")
+            self._doc._awaiting_picture = True
+            self._doc._after_picture = []
             self.viewport.inference.reset()
             self._apply_camera_home()
             self._current_path = path
             self._remember_recent(path)
-            self._after_links_loaded()
+            self._doc._after_picture.append(self._after_links_loaded)
             self._import_name = None
             self._autosaved_version = None
             # A recovered drawing is NOT the file on disk yet: keep it dirty so
@@ -6959,8 +7056,9 @@ class MainWindow(QMainWindow):
             # Mirror the document's base map and survey into the tray, and refetch
             # the tiles for the capture the document carries — otherwise the panel
             # shows stale defaults over a scene that has its own.
-            self.georef_tray.base_map.sync_from_document()
-            self.georef_tray.base_map.sync_photo_mesh()
+            self._doc._after_picture.extend([
+                self.georef_tray.base_map.sync_from_document,
+                self.georef_tray.base_map.sync_photo_mesh])
             repaired = getattr(self.viewport.scene, "load_repairs", 0)
             if repaired:
                 # Pieces with a coordinate that is not a number (NaN / inf) were
@@ -6977,11 +7075,14 @@ class MainWindow(QMainWindow):
                 box.open()                       # not modal to the event loop
             self.viewport.notify_scene_changed()
             self._update_title()
-            self.settle_heap()
-            cb(0.95, "Drawing the model…")
-            self.viewport.setUpdatesEnabled(True)
-            self.viewport.repaint()
-            cb(1.0, "Ready")
+            self._doc._after_picture.append(self.settle_heap)
+            cb(1.0, "Document loaded")
+            # Returning to Qt lets the selected renderer present before any
+            # optional panel/cache work. A timer alone is not a frame barrier.
+            self._opening_document = False
+            display = self._doc.stand_in
+            if getattr(self._doc, "_renderer_wgpu", False):
+                display._refresh_timer.start(0)
             return True
         finally:
             self._opening_document = False

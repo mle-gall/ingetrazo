@@ -1,0 +1,343 @@
+Timeout (0:00:10)!
+Thread 0x00000001f0ffd300 (most recent call first):
+  <invalid frame>
+DOCUMENT_LOADED 529375.626707625
+DOCUMENT_LOADED 529379.724093291
+Timeout (0:00:10)!
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 753 in _paint_of
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 4216 in prepare_drawing
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6925 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6862 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 48 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 49 in <module>
+Timeout (0:00:10)!
+Thread 0x0000000172aaf000 (most recent call first):
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 359 in wait
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/queue.py", line 199 in get
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 288 in _write
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/json/encoder.py", line 263 in iterencode
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/json/encoder.py", line 205 in encode
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/json/__init__.py", line 232 in dumps
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 118 in key_for
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 334 in restore
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 277 in restore_cached
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 4217 in prepare_drawing
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6925 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6862 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 48 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 49 in <module>
+Timeout (0:00:10)!
+Thread 0x000000017ab0f000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 60 in _geometry
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000179b03000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 60 in _geometry
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000178af7000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.venv-work/lib/python3.13/site-packages/numpy/_core/fromnumeric.py", line 54 in _wrapfunc
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.venv-work/lib/python3.13/site-packages/numpy/_core/fromnumeric.py", line 1246 in argsort
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 267 in plan
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 285 in plan_of
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000177aeb000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 65 in _weld
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 46 in weld
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 181 in plan
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 285 in plan_of
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000176adf000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.venv-work/lib/python3.13/site-packages/numpy/lib/_arraysetops_impl.py", line 382 in _unique1d
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.venv-work/lib/python3.13/site-packages/numpy/lib/_arraysetops_impl.py", line 296 in unique
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 234 in plan
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 285 in plan_of
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000175ad3000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 51 in weld
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 181 in plan
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 285 in plan_of
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000174ac7000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 51 in weld
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 181 in plan
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 285 in plan_of
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000173abb000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 233 in plan
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/lazy_mesh.py", line 285 in plan_of
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000172aaf000 (most recent call first):
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 359 in wait
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/queue.py", line 199 in get
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 288 in _write
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 359 in wait
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/_base.py", line 451 in result
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/_base.py", line 317 in _result_or_cancel
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/_base.py", line 619 in result_iterator
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 84 in prefetch
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 4223 in prepare_drawing
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6925 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6862 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 48 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 49 in <module>
+Timeout (0:00:10)!
+Thread 0x000000017ab0f000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 60 in _geometry
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000179b03000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 60 in _geometry
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000178af7000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 60 in _geometry
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000177aeb000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 60 in _geometry
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000176adf000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 60 in _geometry
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000175ad3000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 60 in _geometry
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000174ac7000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 60 in _geometry
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000173abb000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 60 in _geometry
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 80 in work
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 59 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/thread.py", line 93 in _worker
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000172aaf000 (most recent call first):
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 359 in wait
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/queue.py", line 199 in get
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 288 in _write
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 359 in wait
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/_base.py", line 451 in result
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/_base.py", line 317 in _result_or_cancel
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/concurrent/futures/_base.py", line 619 in result_iterator
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 84 in prefetch
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 4223 in prepare_drawing
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6925 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6862 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 48 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 49 in <module>
+Timeout (0:00:10)!
+Thread 0x0000000172aaf000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 156 in pack
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 294 in _write
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 249 in _smooth_stream
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 527 in _bake_uncached
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 289 in bake
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 12818 in _group_chunk
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 3787 in _proto_base_chunk
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 4237 in prepare_drawing
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6925 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6862 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 48 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 49 in <module>
+Timeout (0:00:10)!
+Thread 0x0000000172aaf000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 156 in pack
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 294 in _write
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/json/encoder.py", line 263 in iterencode
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/json/encoder.py", line 202 in encode
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/json/__init__.py", line 242 in dumps
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 100 in key_for
+  <invalid frame>
+Timeout (0:00:10)!
+Thread 0x0000000172aaf000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 156 in pack
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 294 in _write
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 159 in shade_factors
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 360 in _bake_uncached
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 289 in bake
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 12818 in _group_chunk
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 3787 in _proto_base_chunk
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 4237 in prepare_drawing
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6925 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6862 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 48 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 49 in <module>
+Timeout (0:00:10)!
+Thread 0x0000000172aaf000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 295 in _write
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/core/materials.py", line 168 in effective_attrs
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 334 in _bake_uncached
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/array_bake.py", line 289 in bake
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 12818 in _group_chunk
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 3787 in _proto_base_chunk
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/viewport.py", line 4237 in prepare_drawing
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6925 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6862 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 48 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 49 in <module>
+Timeout (0:00:10)!
+Thread 0x0000000172aaf000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 156 in pack
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 294 in _write
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 7016 in settle_heap
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6980 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6862 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 48 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 49 in <module>
+Timeout (0:00:10)!
+Thread 0x0000000172aaf000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 156 in pack
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 294 in _write
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "shibokensupport/signature/loader.py", line ??? in feature_import
+  <invalid frame>
+Timeout (0:00:10)!
+Thread 0x0000000172aaf000 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 156 in pack
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/drawing_cache.py", line 294 in _write
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 995 in run
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/legallmaxence/.pyenv/versions/3.13.12/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001f0ffd300 (most recent call first):
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/tray.py", line 1388 in refresh_in_model
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 7540 in cb
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6981 in _open_path_here
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/views/main_window.py", line 6862 in open_path
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 48 in <lambda>
+  File "/Users/legallmaxence/.t3/worktrees/ingetrazo/t3-f68b7eb8/.r2-tmp/measure.py", line 49 in <module>
+FIRST_MODEL_FRAME 106.35692079202272

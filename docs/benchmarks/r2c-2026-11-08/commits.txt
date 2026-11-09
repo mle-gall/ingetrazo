@@ -1,0 +1,9 @@
+21f89dcc Queued GL swaps cannot release work before loaded geometry is drawn
+ca13fa0f Only the newly uploaded model frame releases Metal startup work
+e619ee11 Renderer preference modules carry the repository license notice
+fa103b07 Background document creation preserves the active renderer status note
+07ed56e4 Dirty titles stay immediate while panel refresh waits for presentation
+77061069 Resident packing retains the existing GC allocation threshold
+4f90dea9 General dialog persists the selected viewport renderer
+6c192136 Renderer guard clears once per presentation and startup work resumes across tabs
+f5324e00 Document startup presents before optional work and honors renderer preference
