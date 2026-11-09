@@ -3274,5 +3274,10 @@
  "Front color — paints faces in Hidden line and Monochrome": "表面の色 — 隠線と単色モードで面を塗ります",
  "Restore defaults": "既定値に戻す",
  "Puts the settings of this window back to how IngeTrazo comes. Nothing is saved until you press OK. The language, the AI Assistant, the keyboard shortcuts and the units of the open document stay as they are.": "このウィンドウの設定を IngeTrazo の初期状態に戻します。OK を押すまで何も保存されません。言語、AI アシスタント、キーボードショートカット、開いている文書の単位はそのままです。",
- "Distance ({unit}):": "距離（{unit}）："
+ "Distance ({unit}):": "距離（{unit}）：",
+ "Two-finger slide on the trackpad:": "トラックパッドの2本指スライド：",
+ "Orbits the view": "ビューを回転",
+ "Pans the view": "ビューを移動",
+ "Zooms the view": "ビューをズーム",
+ "Keep moving after the fingers lift (inertia)": "指を離した後も動き続ける（慣性）"
 }

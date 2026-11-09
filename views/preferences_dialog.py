@@ -224,6 +224,23 @@ class PreferencesDialog(QDialog):
                                       != "0")
         form.addRow("", self._invert_orbit)
 
+        # A two-finger slide on a trackpad (one finger on a touch screen)
+        # orbits by default; Shift pans and Cmd/Ctrl zooms whatever is
+        # chosen here. "Zooms" is how it behaved before 0.6.1 (#248).
+        from views import trackpad_nav
+        self._trackpad_slide = QComboBox()
+        for key, label in (("orbit", "Orbits the view"),
+                           ("pan", "Pans the view"),
+                           ("zoom", "Zooms the view")):
+            self._trackpad_slide.addItem(tr(label), key)
+        self._trackpad_slide.setCurrentIndex(max(0, self._trackpad_slide.findData(
+            trackpad_nav.load_slide_mode())))
+        form.addRow(tr("Two-finger slide on the trackpad:"), self._trackpad_slide)
+        self._trackpad_inertia = QCheckBox(tr(
+            "Keep moving after the fingers lift (inertia)"))
+        self._trackpad_inertia.setChecked(trackpad_nav.load_inertia())
+        form.addRow("", self._trackpad_inertia)
+
         from tools.walkthrough import look_sensitivity
         self._look_sens = QSpinBox()
         self._look_sens.setRange(1, 100)
@@ -932,6 +949,8 @@ class PreferencesDialog(QDialog):
         pick(self._figure, sf.DEFAULT_PICK)
         self._invert.setChecked(False)
         self._invert_orbit.setChecked(False)
+        pick(self._trackpad_slide, "orbit")
+        self._trackpad_inertia.setChecked(True)
         self._look_sens.setValue(DEFAULT_LOOK_SENSITIVITY)
         pick(self._cursor_style, "tool")
         pick(self._msaa, 4)
@@ -1111,6 +1130,14 @@ class PreferencesDialog(QDialog):
                     "1" if self._invert_orbit.isChecked() else "0")
         for v in viewports:
             v._invert_orbit_y = self._invert_orbit.isChecked()
+
+        slide = self._trackpad_slide.currentData()
+        st.setValue("nav/trackpad_slide", slide)
+        st.setValue("nav/trackpad_inertia",
+                    "1" if self._trackpad_inertia.isChecked() else "0")
+        for v in viewports:
+            v._trackpad_slide = slide
+            v._trackpad_inertia = self._trackpad_inertia.isChecked()
 
         # First Person reads it on every look move: nothing to push.
         st.setValue("walk/look_sensitivity", int(self._look_sens.value()))

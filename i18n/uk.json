@@ -3289,5 +3289,10 @@
  "Ukrainian translation of the interface.": "Переклад інтерфейсу українською.",
  "Distance ({unit}):": "Відстань ({unit}):",
  "Restore defaults": "Відновити типові",
- "Puts the settings of this window back to how IngeTrazo comes. Nothing is saved until you press OK. The language, the AI Assistant, the keyboard shortcuts and the units of the open document stay as they are.": "Повертає налаштування цього вікна до стандартних налаштувань IngeTrazo. Нічого не зберігається, доки ви не натиснете «Гаразд». Мова, Асистент ШІ, сполучення клавіш і одиниці відкритого документа залишаються без змін."
+ "Puts the settings of this window back to how IngeTrazo comes. Nothing is saved until you press OK. The language, the AI Assistant, the keyboard shortcuts and the units of the open document stay as they are.": "Повертає налаштування цього вікна до стандартних налаштувань IngeTrazo. Нічого не зберігається, доки ви не натиснете «Гаразд». Мова, Асистент ШІ, сполучення клавіш і одиниці відкритого документа залишаються без змін.",
+ "Two-finger slide on the trackpad:": "Ковзання двома пальцями по трекпаду:",
+ "Orbits the view": "Обертає вигляд",
+ "Pans the view": "Зсуває вигляд",
+ "Zooms the view": "Масштабує вигляд",
+ "Keep moving after the fingers lift (inertia)": "Продовжувати рух після відриву пальців (інерція)"
 }

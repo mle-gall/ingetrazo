@@ -954,6 +954,11 @@ class WgpuView(QWidget):
         self.update()
 
     def event(self, event):
+        if event.type() == QEvent.NativeGesture:
+            # Pinch, smart zoom: a trackpad's, or the touch screen's (#248).
+            from views import trackpad_nav
+            if trackpad_nav.native_gesture(self, event):
+                return True
         if event.type() == QEvent.ShortcutOverride and hasattr(self, 'tools'):
             self.tools.sync()
             claims = getattr(self.tools.tool, 'claims_key', None)
@@ -1031,6 +1036,11 @@ class WgpuView(QWidget):
     def _zoom_out_step(self):
         from views.viewport import Viewport
         return Viewport._zoom_out_step(self)
+
+    def _zoom_at(self, steps, pos):
+        from views.viewport import Viewport
+        self._invert_wheel = getattr(self.source_viewport, '_invert_wheel', False)
+        return Viewport._zoom_at(self, steps, pos)
 
     def wheelEvent(self, event):
         from views.viewport import Viewport

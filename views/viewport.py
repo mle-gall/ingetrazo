@@ -1794,6 +1794,9 @@ class Viewport(QOpenGLWidget):
     # "two_point"), whoever changed it — the View toolbar's quick buttons
     # follow it.
     projectionChanged = Signal(str)
+    # A trackpad's smart zoom (two-finger double tap on macOS): the window
+    # frames the model, and a second one goes back (#248).
+    smartZoomRequested = Signal()
 
     # Soft warm white painted on faces with no material colour — like the matte
     # cardstock of an architecture model (a near-white default).
@@ -1986,6 +1989,9 @@ class Viewport(QOpenGLWidget):
         self.scene.hide_similar_components = _load_hide_similar()
         self._invert_wheel = _load_invert_wheel()
         self._invert_orbit_y = _load_invert_orbit_y()
+        from views import trackpad_nav
+        self._trackpad_slide = trackpad_nav.load_slide_mode()
+        self._trackpad_inertia = trackpad_nav.load_inertia()
         self._msaa = _load_msaa()
 
         # Hover highlight (Select tool). Not version-tracked — it changes with
@@ -18730,20 +18736,34 @@ class Viewport(QOpenGLWidget):
             return
         self._input_t = _time_mod.monotonic()   # P0: input→paint latency
         self._input_serial = getattr(self, "_input_serial", 0) + 1
-        # Zoom toward the cursor: keep the point under the
-        # pointer fixed on screen, not the origin. During a wheel burst the
-        # focus is CACHED: zoom_to pins that world point, so re-picking every
-        # tick both wasted ~25 ms/tick against a big model (the zoom felt
-        # heavy) and let float error drift the pinned point.
+        # A finger slide (trackpad, or the touch screen) orbits or pans
+        # instead, by preference; it says so by taking the event.
+        from views import trackpad_nav
+        if trackpad_nav.slide(self, ev):
+            self.update()
+            return
         import time as _time
         from views.wheel_zoom import zoom_steps
         steps = zoom_steps(ev, self._invert_wheel)
         if steps == 0.0:
             ev.accept()            # trackpad begin/end events do not zoom or pick
             return
-        pos = ev.position()
         now = _time.monotonic()
+        reproj, reused = self._zoom_at(steps, ev.position())
+        if _PERF:
+            _plog("wheel", (_time_mod.monotonic() - now) * 1000.0,
+                  extra=f"reused={'proj' if reproj else reused}", floor=10.0)
+        self.update()
 
+    def _zoom_at(self, steps: float, pos):
+        """Zoom ``steps`` notches toward the point under ``pos`` -- the
+        wheel's zoom, shared with the trackpad pinch (#248). Returns
+        ``(reprojected, reused)`` for the perf log."""
+        # Zoom toward the cursor: keep the point under the
+        # pointer fixed on screen, not the origin. During a wheel burst the
+        # focus is CACHED: zoom_to pins that world point, so re-picking every
+        # tick both wasted ~25 ms/tick against a big model (the zoom felt
+        # heavy) and let float error drift the pinned point.
         def pose():
             c = self.camera
             t = c.target
@@ -18793,10 +18813,7 @@ class Viewport(QOpenGLWidget):
             self.camera.zoom(steps)
         self._zoom_focus = (pose(), pos.x(), pos.y(),
                             self.scene.version, focus)
-        if _PERF:
-            _plog("wheel", (_time_mod.monotonic() - now) * 1000.0,
-                  extra=f"reused={'proj' if reproj else reused}", floor=10.0)
-        self.update()
+        return reproj, reused
 
     #: The least a notch of the wheel backs out, from a close-up, once the
     #: camera stands 2 cm or more from what it looks at — and always in an
@@ -18844,6 +18861,11 @@ class Viewport(QOpenGLWidget):
         return getattr(self, "_ctrl_alone", False)
 
     def event(self, ev) -> bool:
+        if ev.type() == QEvent.NativeGesture:
+            # Pinch, smart zoom: a trackpad's, or the touch screen's (#248).
+            from views import trackpad_nav
+            if trackpad_nav.native_gesture(self, ev):
+                return True
         if (ev.type() in (QEvent.ShortcutOverride, QEvent.KeyPress)
                 and ev.key() not in self._MODIFIER_KEYS):
             self._ctrl_alone = False

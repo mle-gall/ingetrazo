@@ -37,10 +37,16 @@ def viewport():
     camera = OrbitCamera()
     camera.target = V(0, 0, 0)
     camera.distance = .02
-    return SimpleNamespace(camera=camera, scene=SimpleNamespace(version=0),
-                           _invert_wheel=False, update=lambda: None,
-                           _zoom_out_step=lambda: 1.0,
-                           _world_under_cursor=lambda *a: V(0, 0, 0))
+    # The ticks carry a scroll phase, like a finger slide; the preference
+    # keeps them zooming (views.trackpad_nav) so the fractions reach the
+    # wheel's zoom.
+    vp = SimpleNamespace(camera=camera, scene=SimpleNamespace(version=0),
+                         _invert_wheel=False, _trackpad_slide="zoom",
+                         update=lambda: None,
+                         _zoom_out_step=lambda: 1.0,
+                         _world_under_cursor=lambda *a: V(0, 0, 0))
+    vp._zoom_at = lambda steps, pos: Viewport._zoom_at(vp, steps, pos)
+    return vp
 
 
 def test_many_fractional_ticks_do_not_each_receive_a_full_notch_floor():

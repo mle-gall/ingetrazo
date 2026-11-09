@@ -3301,5 +3301,10 @@
  "Front color — paints faces in Hidden line and Monochrome": "Màu mặt trước - vẽ các mặt trong Đường ẩn và Đơn sắc",
  "Restore defaults": "Khôi phục mặc định",
  "Puts the settings of this window back to how IngeTrazo comes. Nothing is saved until you press OK. The language, the AI Assistant, the keyboard shortcuts and the units of the open document stay as they are.": "Đưa các thiết lập của cửa sổ này về như khi cài IngeTrazo. Không có gì được lưu cho đến khi bạn nhấn OK. Ngôn ngữ, Trợ lý AI, phím tắt và đơn vị của tài liệu đang mở được giữ nguyên.",
- "Distance ({unit}):": "Khoảng cách ({unit}):"
+ "Distance ({unit}):": "Khoảng cách ({unit}):",
+ "Two-finger slide on the trackpad:": "Vuốt hai ngón trên bàn di chuột:",
+ "Orbits the view": "Xoay khung nhìn",
+ "Pans the view": "Dịch chuyển khung nhìn",
+ "Zooms the view": "Thu phóng khung nhìn",
+ "Keep moving after the fingers lift (inertia)": "Tiếp tục chuyển động sau khi nhấc ngón tay (quán tính)"
 }

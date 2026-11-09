@@ -3277,5 +3277,10 @@
  "Front color — paints faces in Hidden line and Monochrome": "ສີດ້ານໜ້າ — ທາສີໜ້າພຽງໃນໂໝດເຊື່ອງເສັ້ນ ແລະ ຂາວດຳ",
  "Restore defaults": "ຄືນຄ່າເລີ່ມຕົ້ນ",
  "Puts the settings of this window back to how IngeTrazo comes. Nothing is saved until you press OK. The language, the AI Assistant, the keyboard shortcuts and the units of the open document stay as they are.": "ຄືນການຕັ້ງຄ່າໃນໜ້າຕ່າງນີ້ເປັນຄ່າທີ່ມາກັບ IngeTrazo. ຈະບໍ່ມີການບັນທຶກຈົນກວ່າທ່ານຈະກົດ ຕົກລົງ. ພາສາ, ຜູ້ຊ່ວຍ AI, ປຸ່ມລັດ ແລະ ຫົວໜ່ວຍຂອງເອກະສານທີ່ເປີດຢູ່ຈະຄືເກົ່າ.",
- "Distance ({unit}):": "ໄລຍະຫ່າງ ({unit}):"
+ "Distance ({unit}):": "ໄລຍະຫ່າງ ({unit}):",
+ "Two-finger slide on the trackpad:": "ເລື່ອນສອງນິ້ວເທິງແທຣັກແພດ:",
+ "Orbits the view": "ໝຸນມຸມມອງ",
+ "Pans the view": "ເລື່ອນມຸມມອງ",
+ "Zooms the view": "ຊູມມຸມມອງ",
+ "Keep moving after the fingers lift (inertia)": "ເຄື່ອນທີ່ຕໍ່ຫຼັງຍົກນິ້ວ (ຄວາມເສື່ອຍ)"
 }

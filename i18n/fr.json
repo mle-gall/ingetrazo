@@ -3275,5 +3275,10 @@
  "Distance ({unit}):": "Distance ({unit}) :",
  "Restore defaults": "Rétablir les valeurs par défaut",
  "Puts the settings of this window back to how IngeTrazo comes. Nothing is saved until you press OK. The language, the AI Assistant, the keyboard shortcuts and the units of the open document stay as they are.": "Remet les réglages de cette fenêtre tels qu'IngeTrazo les fournit. Rien n'est enregistré tant que vous n'appuyez pas sur OK. La langue, l'Assistant IA, les raccourcis clavier et les unités du document ouvert restent tels quels.",
-  "Edge Style": "Style d’arêtes"
+  "Edge Style": "Style d’arêtes",
+ "Two-finger slide on the trackpad:": "Glisser à deux doigts sur le trackpad :",
+ "Orbits the view": "Fait orbiter la vue",
+ "Pans the view": "Fait défiler la vue",
+ "Zooms the view": "Zoome la vue",
+ "Keep moving after the fingers lift (inertia)": "Continuer le mouvement après avoir levé les doigts (inertie)"
 }
