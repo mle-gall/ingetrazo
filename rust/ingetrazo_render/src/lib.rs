@@ -570,7 +570,8 @@ impl Renderer {
         }
         Ok(())
     }
-    fn set_overrides(&self, colors: Vec<u32>) -> PyResult<()> {
+    fn set_overrides(&mut self, colors: Vec<u32>) -> PyResult<()> {
+        self.ids_dirty = true;
         if let Some(s) = &self.scene {
             if colors.len() != s.n as usize {
                 return Err(PyValueError::new_err("one override per instance required"));
@@ -584,6 +585,7 @@ impl Renderer {
     }
     // R-look: retain string compatibility for existing diagnostic scripts.
     fn set_style(&mut self, style: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.ids_dirty = true;
         let (mode, edges) = self.look.update(style, &self.queue)?;
         self.style = mode;
         let name = if let Ok(d) = style.cast::<pyo3::types::PyDict>() {
@@ -632,6 +634,7 @@ impl Renderer {
     /// Kept for the R2a measurement script: anti-aliasing now lives in the
     /// antialias module, so this is the same switch as ``set_antialias``.
     fn set_materials(&mut self, data: PyReadonlyArray1<'_, u8>) -> PyResult<()> {
+        self.ids_dirty = true;
         let data = data.as_slice()?;
         let scene = self.scene.as_ref().ok_or_else(|| PyValueError::new_err("no scene"))?;
         if data.len() % 16 != 0 || data.len() < scene.p as usize * 16
@@ -647,6 +650,7 @@ impl Renderer {
         Ok(())
     }
     fn set_textures(&mut self, width: u32, height: u32, layers: u32, levels: Vec<Vec<u8>>) -> PyResult<()> {
+        self.ids_dirty = true;
         let limits = self.device.limits();
         if width == 0 || height == 0 || layers == 0 || width > limits.max_texture_dimension_2d
             || height > limits.max_texture_dimension_2d || layers > limits.max_texture_array_layers
