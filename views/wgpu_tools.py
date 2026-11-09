@@ -45,6 +45,10 @@ class NativeTools(MeshToolAccess):
         self.cancel()
         self.tool = tool
         self.mode = TOOL_DISPATCH.get(type(tool).__name__, 'select' if tool is None else 'inert')
+        if self.mode == 'move':
+            selection = self.view.scene.selection
+            if not selection or not all(isinstance(g, Group) for g in selection):
+                self.mode = 'mesh'
         if self.mode == 'tape':
             self.tool.on_cancel(self)
         if self.mode == 'inert':

@@ -44,7 +44,7 @@ def event():
 
 
 def click(native, point):
-    native.view.last_snap = SimpleNamespace(point=QVector3D(*point), kind='endpoint')
+    native.view.last_snap = SimpleNamespace(point=QVector3D(*point), kind='endpoint', context=None)
     native.click(event())
 
 
@@ -61,7 +61,7 @@ def test_draw_commands_match_direct_tool_and_restore(tool_type, inside):
     for p in [(0, 0, 0), (2, 3, 0)]:
         click(native, p)
         ctx = ToolContext(direct, QVector3D(*p), QPointF(), Qt.NoModifier,
-                          SimpleNamespace(kind='endpoint'))
+                          SimpleNamespace(kind='endpoint', context=None))
         direct.tool.on_hover(ctx)
         direct.tool.on_click(ctx)
     assert type(history.undo_stack[-1]) is type(gl_history.undo_stack[-1])
@@ -132,3 +132,34 @@ def test_erase_stroke_commits_on_release(inside):
     native.tool.on_release(native)
     assert edge in scene.mesh.edges
     assert not native.view.overlay_primitives
+
+from tools.move import MoveTool
+
+
+@pytest.mark.parametrize('inside', [False, True])
+@pytest.mark.parametrize('target', ['face', 'edge', 'vertex'])
+def test_move_loose_preview_cancel_commit(inside, target):
+    scene, history, native, updates = harness(MoveTool(), inside)
+    face = scene.mesh.add_face([QVector3D(), QVector3D(2, 0, 0), QVector3D(0, 2, 0)])
+    if target != 'vertex':
+        scene.select([face if target == 'face' else scene.mesh.edges[0]])
+    else:
+        native.pick_group = lambda *a: None
+        native.pick_edge = lambda *a: None
+        native.pick_face = lambda *a: None
+    native.update()
+    before = geometry(scene.mesh)
+    click(native, (0, 0, 0))
+    native.view.last_snap = SimpleNamespace(point=QVector3D(0, 0, 1), kind='endpoint', context=None)
+    native.hover(event())
+    assert geometry(scene.mesh) != before
+    native.cancel()
+    assert geometry(scene.mesh) == before
+    assert not native.view.overlay_primitives
+    click(native, (0, 0, 0))
+    click(native, (0, 0, 1))
+    assert history.undo_stack
+    assert len(updates.changed) <= 1
+    history.undo()
+    native.update()
+    assert geometry(scene.mesh) == before

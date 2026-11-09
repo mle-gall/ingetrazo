@@ -2,6 +2,7 @@
 import numpy as np
 from PySide6.QtGui import QVector3D, QMatrix4x4
 from views.wgpu_overlay import Primitive
+from core.group import iter_placements
 
 
 class MeshToolAccess:
@@ -101,7 +102,7 @@ class MeshToolAccess:
         # Resolve nested placements to the selectable context owner.
         while group is not None and not self.scene.entity_selectable(group):
             group = next((g for root in self.scene.groups
-                          for g, _ in __import__('core.group', fromlist=['iter_placements']).iter_placements(root)
+                          for g, _ in iter_placements(root)
                           if group in (g.children or ())), None)
         return group
 
@@ -145,7 +146,8 @@ class MeshToolAccess:
         for a, b in lines:
             pa, pb = self._world_to_pixel(a), self._world_to_pixel(b)
             if pa is not None and pb is not None:
-                self.view.overlay_primitives.append(Primitive('polyline', (pa, pb)))
+                self.view.overlay_primitives.append(Primitive(
+                    'polyline', (pa, pb), '#ff5555' if type(self.tool).__name__ == 'EraserTool' else '#00dfff'))
         label = self.tool.value_label() if hasattr(self.tool, 'value_label') else None
         if label is not None:
             text, point = label
@@ -162,6 +164,9 @@ class MeshToolAccess:
     pick_text_label = pick_dimension
     pick_section_plane = pick_dimension
     pick_image = pick_dimension
+    pick_image_plane = pick_dimension
+    _group_obb = pick_dimension
+    end_groups_preview = pick_dimension
     image_plane_at = pick_dimension
 
     def _nearby_loose_edges(self, *args, **kwargs):

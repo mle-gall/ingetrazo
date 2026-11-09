@@ -126,9 +126,11 @@ def snap(index, row, view, x, y, **options):
     _, _, a, b, _ = index.edges_near(np.array([row], np.int64), mvp.data(),
                                     float(view.width()), float(view.height()),
                                     float(x), float(y), 12., 256)
-    edges = [SimpleNamespace(a=QVector3D(*aa), b=QVector3D(*bb), in_group=True,
-                             context='group') for aa, bb in zip(a, b)]
     group, _ = view.resolve(row)
+    loose = ((group is None and view.scene.edit_group is None)
+             or group is view.scene.edit_group)
+    edges = [SimpleNamespace(a=QVector3D(*aa), b=QVector3D(*bb), in_group=not loose,
+                             context=None if loose else 'group') for aa, bb in zip(a, b)]
     if group is not None and group.is_instance():
         origin = QVector3D(*view.packed.instances['world'][row, 3, :3])
         edges.insert(0, SimpleNamespace(a=origin, b=origin, component_origin=True))

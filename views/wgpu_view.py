@@ -289,6 +289,8 @@ class WgpuView(QWidget):
         self.last_snap = None
         self.overlay_primitives = []
         source = self.source_viewport
+        if self.tools.sync() == 'mesh':
+            self.tools.work_point(x, y)
         tool = getattr(source, 'active_tool', None)
         inference = getattr(source, 'inference', None)
         options = dict(start_point=self.tools.start_point,
@@ -420,6 +422,17 @@ class WgpuView(QWidget):
             if (event.position()-self.press).manhattanLength() < 3:
                 row = self.pick_row(event.position().x(), event.position().y())
                 rows = [] if row is None else [row]
+                resolved = self.resolve(row)
+                if resolved is not None and (resolved[0] is self.scene.edit_group or
+                        (resolved[0] is None and self.scene.edit_group is None)):
+                    entity = (self.tools.pick_visible_edge(event.position().x(), event.position().y())
+                              or self.tools.pick_face(event.position().x(), event.position().y()))
+                    mode = ('toggle' if event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)
+                            else 'add' if event.modifiers() & Qt.ShiftModifier else 'replace')
+                    self.scene.select([] if entity is None else [entity], mode=mode)
+                    self.last = None
+                    self.update()
+                    return
             else:
                 rows = self.rect_rows(self.press.x(), self.press.y(), event.position().x(), event.position().y())
             self.select_rows(rows, event.modifiers())
@@ -436,7 +449,13 @@ class WgpuView(QWidget):
         mode = self.tools.sync()
         if mode in ('tape', 'move', 'mesh'):
             self.hover(event.position().x(), event.position().y(), event.modifiers())
-            self.tools.click(event)
+            if mode == 'mesh':
+                ctx = self.tools.context(event)
+                if ctx is not None:
+                    self.tools.tool.on_double_click(ctx)
+                    self.tools.update()
+            else:
+                self.tools.click(event)
             return
         if mode != 'select':
             return
