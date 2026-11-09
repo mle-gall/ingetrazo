@@ -701,6 +701,7 @@ impl Renderer {
                     timestamp_writes: self
                         .queries
                         .as_ref()
+                        .filter(|_| !edge_only || !self.antialias)
                         .map(|q| wgpu::RenderPassTimestampWrites {
                             query_set: q,
                             beginning_of_pass_write_index: if edge_only { None } else { Some(2) },
