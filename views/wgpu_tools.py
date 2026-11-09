@@ -25,6 +25,7 @@ TOOL_DISPATCH['FilletTool'] = 'mesh'
 TOOL_DISPATCH['ProtractorTool'] = 'mesh'
 TOOL_DISPATCH['GeoPathTool'] = 'mesh'
 TOOL_DISPATCH['ChangeAxesTool'] = 'mesh'
+TOOL_DISPATCH['ScaleManagerTool'] = 'mesh'
 
 def move_command(groups, delta):
     commands = [MoveGroupCommand(group, delta) for group in groups]
