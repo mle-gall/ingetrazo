@@ -77,7 +77,9 @@ lives with the vocabulary it references and is shared through a project file:
   ancestors. `tag`/`folder` in a recipe override only when an existing layer
   must be kept (the ride's `Track Sections`).
 - `class: null` means "no IFC record" (reference planes, construction lines):
-  the element is still filed, tagged and counted, and never exported.
+  the element is still filed, tagged and counted. Filing or resync under this node
+  leaves any existing record untouched. Recorded exceptions appear in Unsorted
+  for review and retain their existing export behavior.
 - **Membership** is stored once, on the group: `group.ext["structure"] =
   {"node": "<key>"}` (`Group.ext` already carries `link`). Not in the record,
   because filed elements may have no record. Component instances are filed
@@ -101,12 +103,23 @@ action is one undo step:
 | `members(scene, key, recursive=True)`, `node_of(group)` | reads. |
 | `unsorted(scene)` | top-level own groups without membership, plus filed groups whose record contradicts the node (class outside the allowed list). |
 | `completeness(scene, registry)` | per node: members, members without record, missing Status, IDS requirement hits when a profile names an IDS; the "problems" view of the tree. |
-| `bootstrap(scene, registry)` | proposes a structure from what exists: one node per layer folder and layer (the ride files organised on 2026-11-09), recipe inferred from the members' records (majority class, the classifications and systems shared by all members), files every tagged group; returns the proposal and a conflict list without applying. |
+| `bootstrap(scene, registry)` | proposes a structure from what exists: one node per layer folder and layer (the ride files organised on 2026-11-09), exactly one node per tag. At least half its members must have records to infer the majority recorded class (ties use first outliner occurrence). Below half, infer null. Keep classifications and systems shared by all members. Report the count of unrecorded members a non-null recipe would classify and the UID and class of each recorded exception under a null-class node. File every locally tagged group; returns the proposal and a conflict list without applying. |
 
 Record ownership rule: the node owns `class`, `predefined_type`,
 `object_type`, `type`, `systems` and the classifications whose `system` the
 node names; the element owns everything else. `resync` only touches
 node-owned fields, so per-element Status edits survive.
+
+Phase 1 returns `(command, changed_fields_by_uid)` from `resync`.
+`apply_bootstrap(scene, proposal)` builds the registry-and-filings command.
+`tree` groups ordered child keys by parent (roots under Python `None`), and
+`path` returns the ordered names. A folder override is a name or an array of
+folder names. Layer and folder identities supply stable bootstrap keys. A mount
+uses the source's authored tree when available and its mirrored tags otherwise.
+
+The Phase 1 completeness view checks literal IDS entity applicability and
+record-backed property/classification requirements. Unsupported facets and read
+errors are reported explicitly. Full schema-aware IDS validation runs on export.
 
 ## Agent tools (`core/agent_structure.py`, registered in `agent_tools`)
 
