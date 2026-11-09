@@ -115,6 +115,12 @@ def test_upload_borrows_contiguous_arrays():
             assert np.shares_memory(arrays[0], packed.vertices)
             assert np.shares_memory(instances, packed.instances)
             assert len(arrays[3]) == 40
+        def set_materials(self, materials):
+            assert materials.dtype == np.uint8 and materials.flags.c_contiguous
+            assert len(materials) == len(packed.vertices)*32
+        def set_textures(self, width, height, layers, levels):
+            assert (width, height, layers) == (1,1,1)
+            assert levels == [bytes([255])*4]
     packed.upload(Receiver())
 
 
