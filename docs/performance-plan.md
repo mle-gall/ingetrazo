@@ -1369,3 +1369,14 @@ For textured documents the array uses **72,701,252 bytes** on pusher and
 are recorded separately from the launch-section comparison. Lighting/edge and
 background differences remain outside this material change; GL's reference also
 shows its axis overlay. No claim of pixel-identical final frames is made.
+
+Full offscreen suite completed in **2051 seconds**, all six batches:
+**7,150 passed, 18 failed, 142 skipped, 2 xfailed, 805 deselected**.
+All 18 failures match the supplied 19-failure baseline: 14 translation cases
+(including `[ar]`), cached cursor pick, extension-preview wrapping, hidden-panel
+retention and extension-toolbar bold text. The baseline swatch-tooltip failure
+did not reproduce. No new failures were observed. The longest batch was 534.51
+seconds; no batch reached 30 minutes and no split was needed.
+The final focused material/handoff run passed **23 tests** after the nested
+container-paint correction. The complete local suite log is
+`.look-tmp/full-suite.log` (not committed).
