@@ -1,6 +1,7 @@
+override PICK: bool = false;
 struct Prototype { lo: vec4f, hi: vec4f }
 struct Instance { world: mat4x4f, info: vec4u }
-struct Camera { vp: mat4x4f, size: vec4f, eye: vec4f }
+struct Camera { vp: mat4x4f, size: vec4f, eye: vec4f, pick_rect: vec4f }
 struct Command { count: u32, instances: atomic<u32>, first: u32, base: i32, start: u32 }
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var<storage, read> inst: array<Instance>;
@@ -16,6 +17,7 @@ fn cull(@builtin(global_invocation_id) gid: vec3u) {
  if id >= arrayLength(&inst) { return; }
  let i = inst[id];
  if (i.info.z & 1u) != 0u { return; }
+ atomicAdd(&counters[4], commands[i.info.x + arrayLength(&proto)].count / 6u);
  let p = proto[i.info.x];
  let m = camera.vp * i.world;
  var outside = vec3u(0); var outside2 = vec3u(0);
@@ -31,6 +33,7 @@ fn cull(@builtin(global_invocation_id) gid: vec3u) {
  }
  if any(outside == vec3u(8)) || any(outside2 == vec3u(8)) { atomicAdd(&counters[1], 1u); return; }
  if !crosses && all((high-low)*camera.size.xy*0.5 < vec2f(1)) { atomicAdd(&counters[2], 1u); return; }
+ if PICK && !crosses && (any(high < camera.pick_rect.xy) || any(low > camera.pick_rect.zw)) { return; }
  atomicAdd(&counters[0], 1u);
  atomicAdd(&counters[3], commands[i.info.x].count / 3u);
  viewpoints[id].transform = m;
@@ -42,6 +45,7 @@ fn cull(@builtin(global_invocation_id) gid: vec3u) {
   viewpoints[id].eye = vec4f(vec3f(dot(cross(b,c),r),dot(cross(c,a),r),dot(cross(a,b),r))/determinant,camera.eye.w);
  }
  let edge_command = i.info.x + arrayLength(&proto);
+ atomicAdd(&counters[5], commands[edge_command].count / 6u);
  atomicAdd(&commands[edge_command].instances, 1u);
  let slot = atomicAdd(&commands[i.info.x].instances, 1u);
  survivors[commands[i.info.x].start+slot] = id;

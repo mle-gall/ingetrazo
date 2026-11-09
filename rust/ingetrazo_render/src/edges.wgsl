@@ -1,3 +1,4 @@
+override PROFILES: bool = true;
 // Classify in projected space so perspective, orthographic and mirrored placements
 // use the same face-side test without a camera-dependent CPU topology upload.
 fn facing(p: vec4f, q: vec4f, r: vec4f) -> f32 {
@@ -23,7 +24,9 @@ struct EdgePlacement { eye: vec4f, transform: mat4x4f }
  let pos = select(a0,b0,end);
  let other = select(b0,a0,end);
  let packed_normal = vec3f(edge.normals[0],edge.normals[1],edge.normals[2]);
- let soft = dot(packed_normal,packed_normal) > 2.;
+ // The hard-only indirect template never includes soft records. Specializing
+ // this flag removes normal fetches as well as profile arithmetic.
+ let soft = PROFILES && dot(packed_normal,packed_normal) > 2.;
  let n0 = packed_normal * select(1.,0.5,soft);
  let n1 = vec3f(edge.normals[3],edge.normals[4],edge.normals[5]);
  let corner = vec4f(select(0.,1.,side_bit),select(0.,1.,end),select(0.,1.,soft),0.);
@@ -32,7 +35,7 @@ struct EdgePlacement { eye: vec4f, transform: mat4x4f }
  var b = transform * vec4f(other, 1.);
  var profile = false;
  // Hard edges need classification only when it can change their width.
- if style.profiles.x > 0. && (corner.b > 0.5 || style.profiles.y > style.edge.w) {
+ if PROFILES && style.profiles.x > 0. && (corner.b > 0.5 || style.profiles.y > style.edge.w) {
   let boundary = dot(n0,n0) > 0. && dot(n1,n1) == 0.;
   let eye = viewpoints[id].eye;
   if eye.w <= 1. {
@@ -55,6 +58,11 @@ struct EdgePlacement { eye: vec4f, transform: mat4x4f }
  if a.z < 0. && b.z >= 0. { a = mix(a,b,-a.z/(b.z-a.z)); }
  if b.z < 0. && a.z >= 0. { b = mix(b,a,-b.z/(a.z-b.z)); }
  let direction = (b.xy/max(b.w,1e-6)-a.xy/max(a.w,1e-6))*camera.size.xy;
+ // Reject zero-area edges after clipping. A nonzero subpixel threshold
+ // changes coverage, including at the default width; retain those edges.
+ if length(direction) == 0. {
+  var hidden: Out; hidden.position = vec4f(0.,0.,2.,1.); return hidden;
+ }
  let normal = vec2f(-direction.y,direction.x)/max(length(direction),1e-6);
  let width = select(style.edge.w,max(style.edge.w,style.profiles.y),profile && style.profiles.x > 0.);
  let side = (corner.r*2.-1.)*(1.-2.*corner.g);

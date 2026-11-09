@@ -1,0 +1,17 @@
+{
+  "marquee": {
+    "changed_rgb_pixels": 0,
+    "max_error": 0,
+    "rgb_mae": 0.0
+  },
+  "pusher_car_rust": {
+    "changed_rgb_pixels": 0,
+    "max_error": 0,
+    "rgb_mae": 0.0
+  },
+  "space_asbuilt_ride": {
+    "changed_rgb_pixels": 9694,
+    "max_error": 213,
+    "rgb_mae": 0.12363166666666667
+  }
+}
