@@ -13,6 +13,12 @@ import os
 import sys
 from pathlib import Path
 
+# Frozen subprocess entry: no settings, logs, engine guard or application window.
+if __name__ == '__main__' and '--probe-metal' in sys.argv:
+    from core.renderer_settings import probe_main
+    probe_main()
+    sys.exit(0)
+
 # Before any thread allocates (see core.malloc_arenas).
 from core import malloc_arenas
 malloc_arenas.limit()
@@ -554,6 +560,8 @@ def main() -> int:
     # drew its first frame, this one goes back to the normal engine (and
     # says so below); --python-engine does it for one run.
     from core import _native
+    from core import renderer_settings
+    renderer_settings.capability()
     engine_fell_back = _native.start_guard(sys.argv[1:])
     # The extensions' setup waits until the window is on screen (#440).
     window = MainWindow(defer_extensions=True)

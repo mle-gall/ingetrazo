@@ -312,12 +312,18 @@ class PreferencesDialog(QDialog):
         form.addRow("", self._rust)
         from core import renderer_settings
         self._renderer = QComboBox()
-        self._renderer.addItem(tr("OpenGL (default)"), "opengl")
+        self._renderer.addItem(tr("OpenGL"), "opengl")
         self._renderer.addItem(tr("Metal via wgpu (experimental)"), "wgpu")
         self._renderer.setCurrentIndex(max(0, self._renderer.findData(
-            _gs.value(renderer_settings.SETTING, renderer_settings.DEFAULT, st))))
+            _gs.value(renderer_settings.SETTING, renderer_settings.DEFAULT_RENDERER, st))))
         self._renderer.setToolTip(tr("Applies to documents opened after this change."))
         form.addRow(tr("Viewport renderer:"), self._renderer)
+        cap = renderer_settings.capability()
+        self._renderer_status = QLabel(renderer_settings.status_text(st=st))
+        self._renderer_status.setWordWrap(True)
+        form.addRow(tr("Available renderer:"), self._renderer_status)
+        form.addRow(tr("Runtime:"), QLabel(
+            f"Python {cap.python_version} / Qt {cap.qt_version}"))
         tabs.addTab(general, tr("General"))
 
         # ---- 3D mouse (issue #108) -------------------------------------------
@@ -932,7 +938,8 @@ class PreferencesDialog(QDialog):
         pick(self._icon_px, default_toolbar_icon_px())
         pick(self._ext_menus, "auto")
         pick(self._platform, AUTO)
-        self._renderer.setCurrentIndex(0)
+        from core import renderer_settings
+        pick(self._renderer, renderer_settings.DEFAULT_RENDERER)
         if self._rust.isEnabled():
             self._rust.setChecked(_native.DEFAULT == "1")
 

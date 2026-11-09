@@ -32,3 +32,26 @@ CI runner (no GPU) fails it.
 ## Submitting changes
 
 See [../CONTRIBUTING.md](../CONTRIBUTING.md).
+
+### Viewport renderer preference
+
+Preferences → General → Viewport renderer applies to newly opened documents.
+Existing Metal choices are preserved; profiles without a choice use
+`DEFAULT_RENDERER = 'opengl'` in `core/renderer_settings.py`.
+`INGETRAZO_WGPU=0/1` overrides the choice for one process without changing
+saved preferences, but cannot bypass capability checks. Before window creation,
+a bounded subprocess imports the render crate and creates a tiny hidden Qt
+native widget to request the actual Metal device and required features. Its
+result is cached for the session; Preferences shows the reason and Python/Qt
+versions, and the status bar identifies the effective renderer. Missing crates,
+unsupported devices and failed probes use OpenGL. A normal Metal start that
+never presents a frame recovers to OpenGL on the next launch with a notice;
+environment-selected runs leave the persistent start guard untouched.
+
+macOS builds use `scripts/build_native.sh` (or the release workflow) to build
+both crates before PyInstaller. The render wheel requires
+`--features extension-module` and `CARGO_PROFILE_RELEASE_STRIP=none`
+(rust-lang/rust#157750); the spec requires and bundles it on macOS.
+wgpu supports Vulkan on Linux and DX12 on Windows, but this application's
+native view is validated only on Metal. The probe reports “not validated” on
+those platforms and keeps OpenGL, including when Metal is explicitly requested.
