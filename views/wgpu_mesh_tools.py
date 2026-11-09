@@ -180,10 +180,15 @@ class MeshToolAccess:
 
     def mesh_feedback(self):
         lines = list(self.tool.rubber_band_lines())
+        lines.extend(self.tool.guide_preview_lines())
         # Sweep faces also need a visible envelope, beyond the path itself.
         for face in getattr(self.tool, 'preview_faces', lambda: [])():
             points = list(getattr(face, 'vertices', face))
             lines.extend(zip(points, points[1:] + points[:1]))
+            pixels = tuple(self._world_to_pixel(p) for p in points)
+            if len(pixels) >= 3 and all(p is not None for p in pixels):
+                self.view.overlay_primitives.append(Primitive(
+                    'polygon', pixels, '#d8cbb0', fill='#a0d8cbb0'))
 
         state = getattr(self.tool, 'scale_box_state', lambda: None)()
         if state:
@@ -215,7 +220,7 @@ class MeshToolAccess:
         label = self.tool.value_label() if hasattr(self.tool, 'value_label') else None
         if label is not None:
             text, point = label
-            pixel = self._world_to_pixel(point)
+            pixel = self._world_to_pixel(point) if point is not None else (16, 24)
             if pixel is not None:
                 self.view.overlay_primitives.append(Primitive('text', (pixel,), text=text))
             self.measurementChanged.emit(text)
@@ -225,6 +230,22 @@ class MeshToolAccess:
         self._hover_entity = getattr(self, '_mesh_hover', None)
         Viewport._draw_dimensions(self, painter)
         Viewport._draw_text_labels(self, painter)
+        Viewport._draw_geo_paths(self, painter)
+        Viewport._draw_guides(self, painter)
+        from views.viewport import shown_guides
+        from PySide6.QtCore import Qt, QPointF
+        from PySide6.QtGui import QPen
+        painter.setPen(QPen(QColor('#465a78'), 1, Qt.DashLine))
+        for guide in shown_guides(self.scene):
+            if guide.is_line:
+                segment = Viewport._guide_snap_segment(self, guide)
+                if segment is not None:
+                    pixels = self._segment_to_pixels(*segment)
+                    if pixels is not None:
+                        painter.drawLine(QPointF(*pixels[0]), QPointF(*pixels[1]))
+        hook = getattr(self.tool, 'draw_overlay', None)
+        if hook is not None:
+            hook(self, painter)
 
     def _draw_occluded_segment(self, painter, a, b):
         from views.viewport import Viewport
@@ -247,7 +268,14 @@ class MeshToolAccess:
     def _unsupported_pick(self, *args, **kwargs):
         return None
 
-    pick_geopath = _unsupported_pick
+    def pick_geopath(self, *args):
+        from views.viewport import Viewport
+        return Viewport.pick_geopath(self, *args)
+
+    def _draw_geo_path_label(self, *args):
+        from views.viewport import Viewport
+        return Viewport._draw_geo_path_label(self, *args)
+
     pick_section_plane = _unsupported_pick
     pick_image = _unsupported_pick
     pick_image_plane = _unsupported_pick

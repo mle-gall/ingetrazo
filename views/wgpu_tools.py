@@ -12,7 +12,44 @@ from tools.base import ToolContext
 from tools.tape import TapeMeasureTool
 from views.wgpu_overlay import Primitive
 
-TOOL_DISPATCH = {'SelectTool': 'select', 'TapeMeasureTool': 'tape', 'MoveTool': 'move', 'LineTool': 'mesh', 'RectangleTool': 'mesh', 'PushPullTool': 'mesh', 'EraserTool': 'mesh', 'RotateTool': 'mesh', 'ScaleTool': 'mesh', 'OffsetTool': 'mesh', 'CircleTool': 'mesh', 'PolygonTool': 'mesh', 'ArcTool': 'mesh', 'PaintTool': 'mesh', 'DimensionTool': 'mesh', 'TextTool': 'mesh', 'FollowMeTool': 'mesh'}
+TOOL_DISPATCH = {'SelectTool': 'select',
+ 'TapeMeasureTool': 'tape',
+ 'MoveTool': 'move',
+ 'LineTool': 'mesh',
+ 'RectangleTool': 'mesh',
+ 'PushPullTool': 'mesh',
+ 'EraserTool': 'mesh',
+ 'RotateTool': 'mesh',
+ 'ScaleTool': 'mesh',
+ 'OffsetTool': 'mesh',
+ 'CircleTool': 'mesh',
+ 'PolygonTool': 'mesh',
+ 'ArcTool': 'mesh',
+ 'PaintTool': 'mesh',
+ 'DimensionTool': 'mesh',
+ 'TextTool': 'mesh',
+ 'FollowMeTool': 'mesh',
+ 'FreehandTool': 'mesh',
+ 'RotatedRectangleTool': 'mesh',
+ 'ThreePointArcTool': 'mesh',
+ 'CenterArcTool': 'mesh',
+ 'PieTool': 'mesh',
+ 'FlipTool': 'mesh',
+ 'FilletTool': 'mesh',
+ 'ProtractorTool': 'mesh',
+ 'GeoPathTool': 'mesh',
+ 'ChangeAxesTool': 'mesh',
+ 'ScaleManagerTool': 'mesh',
+ 'PositionCameraTool': 'mesh',
+ 'WalkTool': 'mesh',
+ 'LookAroundTool': 'mesh',
+ 'FirstPersonTool': 'mesh',
+ 'OuterShellTool': 'mesh',
+ 'UnionTool': 'mesh',
+ 'SubtractTool': 'mesh',
+ 'TrimTool': 'mesh',
+ 'IntersectTool': 'mesh',
+ 'SplitTool': 'mesh'}
 
 
 def move_command(groups, delta):
@@ -51,6 +88,11 @@ class NativeTools(MeshToolAccess):
                 self.mode = 'mesh'
         if self.mode == 'tape':
             self.tool.on_cancel(self)
+        if hasattr(tool, '_viewport'):
+            tool._viewport = self
+        self._notified_revision = getattr(getattr(source, 'history', None), 'revision', 0)
+        if hasattr(self.view, 'setCursor'):
+            self._apply_tool_cursor()
         if self.mode == 'inert':
             source.flash_status('not yet available on the Metal renderer')
         return self.mode
@@ -61,6 +103,8 @@ class NativeTools(MeshToolAccess):
                  else view._world_under_cursor(event.position().x(), event.position().y()))
         if point is None:
             return None
+        if type(self.tool).__name__ == 'FilletTool':
+            self._hover_edge = self.pick_visible_edge(event.position().x(), event.position().y())
         if self.tool is not None:
             self.tool.snap_kind = getattr(view.last_snap, "kind", None)
         return ToolContext(self, point, event.position(), event.modifiers(), view.last_snap)
@@ -263,6 +307,20 @@ class NativeTools(MeshToolAccess):
 
     def pick_axis(self, x, y):
         return None
+
+    def width(self):
+        return self.view.width()
+
+    def height(self):
+        return self.view.height()
+
+    def _apply_tool_cursor(self):
+        source = self.view.source_viewport
+        apply = getattr(source, '_apply_tool_cursor', None)
+        if apply is not None:
+            apply()
+            if hasattr(self.view, 'setCursor'):
+                self.view.setCursor(source.cursor())
 
     def __getattr__(self, name):
         return getattr(self.view.source_viewport, name)

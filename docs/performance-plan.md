@@ -2918,44 +2918,44 @@ Native denotes routed, not exhaustive parity acceptance.
 | --- | --- | --- | --- |
 | select | SelectTool | native | _world_to_pixel, pick_dimension, pick_edge, pick_face, pick_geopath, pick_group |
 | line | LineTool | native | rubber_band_lines |
-| freehand | FreehandTool | inert with note | rubber_band_lines |
+| freehand | FreehandTool | native | rubber_band_lines |
 | rectangle | RectangleTool | native | rubber_band_lines |
-| rotated_rect | RotatedRectangleTool | inert with note | rubber_band_lines |
+| rotated_rect | RotatedRectangleTool | native | rubber_band_lines |
 | circle | CircleTool | native | rubber_band_lines |
 | polygon | PolygonTool | native | rubber_band_lines |
 | arc | ArcTool | native | rubber_band_lines |
-| arc3 | ThreePointArcTool | inert with note | rubber_band_lines |
-| center_arc | CenterArcTool | inert with note | rubber_band_lines |
-| pie | PieTool | inert with note | rubber_band_lines |
+| arc3 | ThreePointArcTool | native | rubber_band_lines |
+| center_arc | CenterArcTool | native | rubber_band_lines |
+| pie | PieTool | native | rubber_band_lines |
 | pushpull | PushPullTool | native | _pixel_to_ray, _world_to_pixel, pick_face_any, rubber_band_lines |
 | offset | OffsetTool | native | _pixel_to_ray, _world_to_pixel, pick_face, rubber_band_lines |
 | move | MoveTool | native | _world_to_pixel, pick_edge, pick_face, pick_group, rubber_band_lines, set_groups_preview_offset |
 | rotate | RotateTool | native | pick_edge, pick_face, rubber_band_lines, set_groups_preview_matrix |
 | scale | ScaleTool | native | _pixel_to_ray, _world_to_pixel, pick_edge, pick_face, scale_box_state (screen handles) |
-| flip | FlipTool | inert with note | _world_to_pixel |
+| flip | FlipTool | native | _world_to_pixel |
 | followme | FollowMeTool | native | pick_edge, pick_face, rubber_band_lines |
-| fillet | FilletTool | inert with note | rubber_band_lines |
+| fillet | FilletTool | native | rubber_band_lines |
 | texture_position | TexturePositionTool | inert with note — after the crate work | shared viewport / tool base |
 | paint | PaintTool | native | pick_face_any |
 | dimension | DimensionTool | native | rubber_band_lines |
 | eraser | EraserTool | native | pick_dimension, pick_edge, pick_geopath, pick_guide, rubber_band_lines |
 | tape | TapeMeasureTool | native | _world_to_pixel, pick_axis, pick_edge, pick_edge_any, pick_guide, rubber_band_lines |
-| protractor | ProtractorTool | inert with note | rubber_band_lines |
+| protractor | ProtractorTool | native | rubber_band_lines |
 | text | TextTool | native | pick_edge, pick_face_any, rubber_band_lines |
-| geopath | GeoPathTool | inert with note | _world_to_pixel, rubber_band_lines |
+| geopath | GeoPathTool | native | _world_to_pixel, rubber_band_lines |
 | section | SectionPlaneTool | inert with note — after the crate work | rubber_band_lines |
-| position_camera | PositionCameraTool | inert with note | rubber_band_lines |
-| walk | WalkTool | inert with note | rubber_band_lines |
-| look_around | LookAroundTool | inert with note | rubber_band_lines |
-| first_person | FirstPersonTool | inert with note | rubber_band_lines |
-| change_axes | ChangeAxesTool | inert with note | rubber_band_lines |
-| scale_manager | ScaleManagerTool | inert with note | shared viewport / tool base |
-| outer_shell | OuterShellTool | inert with note | pick_group |
-| solid_union | UnionTool | inert with note | pick_group |
-| solid_subtract | SubtractTool | inert with note | pick_group |
-| solid_trim | TrimTool | inert with note | pick_group |
-| solid_intersect | IntersectTool | inert with note | pick_group |
-| solid_split | SplitTool | inert with note | pick_group |
+| position_camera | PositionCameraTool | native | rubber_band_lines |
+| walk | WalkTool | native | rubber_band_lines |
+| look_around | LookAroundTool | native | rubber_band_lines |
+| first_person | FirstPersonTool | native | rubber_band_lines |
+| change_axes | ChangeAxesTool | native | rubber_band_lines |
+| scale_manager | ScaleManagerTool | native | shared viewport / tool base |
+| outer_shell | OuterShellTool | native | pick_group |
+| solid_union | UnionTool | native | pick_group |
+| solid_subtract | SubtractTool | native | pick_group |
+| solid_trim | TrimTool | native | pick_group |
+| solid_intersect | IntersectTool | native | pick_group |
+| solid_split | SplitTool | native | pick_group |
 <!-- /R3c-1 coverage -->
 
 ### Validation and remaining acceptance work
@@ -3076,3 +3076,69 @@ Final 4961×3508 resident capture: **0.318 s**. Interactive
 pixels and resident byte count were unchanged after capture on all three models.
 The original R3b 33 s includes a rebuild and uses a different camera/style;
 these figures must not be treated as a matched speedup.
+
+### 2026-11-09 — R3c-1b: last-tier Python routing and camera input
+
+Branch: `renderer/r3c-tools-last-tier`, based on `de8fd851`.
+The generated R3c-1 table above now reports **38 native routes and two inert
+routes** (section and texture_position, reserved for the crate work).
+Here “native” means routed through the Metal document-tool facade; it is
+not a claim of complete visual or inference parity.
+
+The additional routes reuse the shared tool implementations and History
+commands: Freehand, Rotated Rectangle, Three Point Arc, Center Arc, Pie,
+Flip, Fillet, Protractor, GeoPath, Change Axes, Scale Manager, Position
+Camera, Walk, Look Around, First Person, and the six solid operations.
+Each route has a separate local commit.
+
+Camera tools retain the shared camera, movement constants and collision
+queries. Their timers have the native QWidget as QObject parent and the
+facade as event/update target. First Person claims shortcut overrides,
+ignores autorepeat releases, uses the shared pointer-warp look gesture,
+and stops held movement on focus loss. Tool cursor changes propagate to
+the displayed widget. QPainter tool hooks provide the Walk crosshair and
+Flip planes through the offscreen overlay; eye height has overlay/VCB feedback.
+Camera motion has no model History entry, matching GL.
+
+The facade supplies native dimensions/projection, Fillet edge hover,
+filled preview polygons, guide previews, committed guide lines and GeoPath
+annotation drawing. Activation refreshes the Metal scene, including commands
+that execute on selection during activation. Solid result tests spy on the
+prototype bake input and exclude an untouched third solid.
+
+Validation (Python 3.13.12, PySide6 6.11.3):
+- Both crates built with the worktree's `.venv-work`, `CARGO_HOME=$PWD/.cargo-work`,
+  `maturin develop --release`; render adds `--features extension-module`
+  and `CARGO_PROFILE_RELEASE_STRIP=none`. Rust sources were not edited.
+  No debug target directories were produced.
+- `QT_QPA_PLATFORM=offscreen .venv-work/bin/python -m pytest -q tests/test_wgpu_*.py`:
+  **146 passed**, four pre-existing QImage deprecation warnings.
+- `QT_QPA_PLATFORM=cocoa INGETRAZO_R3_GUI=1 INGETRAZO_WGPU=1 .venv-work/bin/python -m pytest -q tests/test_wgpu_last_tier_menus.py`:
+  **1 passed**, two Qt deprecation warnings. Run in a bounded subprocess
+  (120-second limit) with isolated INI settings. Actual Metal window and
+  final draw exercised. The initial attempt inherited the suite's offscreen
+  platform and faulted on surface creation; explicitly selecting Cocoa fixed
+  the test launch.
+- The menu test exercises Make Group, Make Component, edit enter/exit,
+  Hide/Unhide All, Lock/Unlock, Explode/undo, Outliner selection both ways,
+  Navigator selection into the document, and scale-dialog edit/undo/redo.
+- New synthetic checks compare drawing and editing output with direct shared
+  tool calls, exercise History undo/redo and Esc, compare camera steps under
+  four modifier combinations, check native timer ownership and shortcut capture,
+  and render a committed protractor guide. These are command-level comparisons,
+  not pixel comparisons against a running GL viewport.
+
+Remaining acceptance gaps:
+- Filled previews are translucent projected polygons, not GL depth-tested,
+  textured/shaded preview meshes. Committed guide lines use an overlay and
+  therefore do not yet have GL guide occlusion. This needs further renderer
+  integration; the reserved section/offscreen entry points were not changed.
+- The complete cross-tool modifier/inference, live-preview undo, and VCB
+  acceptance matrix is not covered. Existing R3c-1 inference limitations
+  (including reference-edge/tangent lookup) remain; this phase adds routing,
+  not a replacement inference engine.
+- The bounded GUI test is automated menu acceptance, not exhaustive visual
+  dogfooding on the two benchmark documents. Navigator-to-document selection
+  is checked; a reverse Navigator result-selection contract is not established.
+- Section and texture_position remain explicitly inert. No network write,
+  push, issue, comment or pull request was performed.
