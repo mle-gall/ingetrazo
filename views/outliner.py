@@ -1785,9 +1785,23 @@ class OutlinerPanel(QWidget):
         try:
             wanted = set(chosen) | {k for k in self._tree_only
                                     if k in self._items}
+            # One selection for the whole tree, not one setSelected() per
+            # row: every call re-diffed and re-emitted the growing
+            # selection, quadratic, and a Structure node of 13k members
+            # froze the window for an hour (Maxence, 2026-11-10).
+            from PySide6.QtCore import QItemSelection
+            selection, changed = QItemSelection(), False
             for key, item in self._items.items():
-                if item.isSelected() != (key in wanted):
-                    item.setSelected(key in wanted)
+                want = key in wanted
+                if item.isSelected() != want:
+                    changed = True
+                if want:
+                    index = self.tree.indexFromItem(item, COL_NAME)
+                    selection.select(index, index)
+            if changed:
+                self.tree.selectionModel().select(
+                    selection, QItemSelectionModel.ClearAndSelect
+                    | QItemSelectionModel.Rows)
             if chosen and set(chosen) != set(self._shown_selection):
                 first = self._items[chosen[0]]
                 self._reveal(first)
